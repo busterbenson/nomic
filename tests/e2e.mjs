@@ -218,7 +218,8 @@ try {
     const [top, prev] = noComments.split(/^\[\[previews\.d1_databases\]\]/m);
     const id = (t) => /database_id\s*=\s*"([^"]+)"/.exec(t)?.[1], dbName = (t) => /database_name\s*=\s*"([^"]+)"/.exec(t)?.[1];
     check("the preview D1 is a different database from production", id(top) && id(prev) && id(top) !== id(prev) && dbName(top) === "promptocracy" && dbName(prev) !== "promptocracy", `${id(top)} / ${id(prev)}`);
-    check("previews get no email binding and no vars of their own", !/previews\.send_email|\[previews\.vars\]|previews\.kv|previews\.r2/.test(noComments) && !/send_email/.test(prev));
+    check("previews get nothing but the preview D1: no other previews.* section, no email binding, no vars",
+      [...noComments.matchAll(/^\s*\[+\s*previews[^\]]*\]+/gm)].every((m) => /^\s*\[\[previews\.d1_databases\]\]/.test(m[0])) && !/^\s*previews\s*=/m.test(noComments) && !/send_email|vars/.test(prev));
     check("the preview migrations config targets the preview database", id(mig) === id(prev) && dbName(mig) === dbName(prev));
   }
   check("a 404 carries the security headers too", (await fetch(A + "/src/index.ts")).headers.get("x-content-type-options") === "nosniff");
