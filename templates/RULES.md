@@ -1,6 +1,13 @@
+<!--
+This is the STARTER ruleset. It is a template, not the rules of any live game.
+A new game copies it to RULES.md in that game's own repo, and from then on only
+that repo's RULES.md counts. This site renders each game's rules from its repo
+(see DESIGN.md), never from this file.
+-->
+
 # Rules
 
-These are the rules in effect. This file on the `main` branch is the only place
+These are the rules in effect. This file on the `main` branch of the game's repo is the only place
 the rules live: nothing a player or the referee remembers counts unless it is
 written here. Every change to this file is a passed proposal, so `git log` on it
 is the history of the game.

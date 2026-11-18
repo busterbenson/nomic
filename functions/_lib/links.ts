@@ -1,37 +1,47 @@
-// Shared by /api/join and /api/login: rate limit, create a token, mail it.
+// Shared by /<slug>/api/join and /<slug>/api/login: rate limit, create a token, mail it.
 import { emailMode, sendEmail } from "./email";
-import { Ctx, MAX_LINKS_PER_WINDOW, TOKEN_TTL_MS, nowIso, randomToken, sha256Hex, siteUrl } from "./util";
+import { Ctx, MAX_LINKS_PER_EMAIL_HOUR, MAX_LINKS_PER_WINDOW, TOKEN_TTL_MS, nowIso, randomToken, sha256Hex, siteUrl } from "./util";
 
-// Counts every token for the address in the window, including decoys for
-// unknown log-in emails, so the limit behaves the same for everyone.
-export async function tooManyLinks(env: Ctx["env"], email: string): Promise<boolean> {
-  const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM login_tokens WHERE email = ? AND created_at > ?")
-    .bind(email, nowIso(Date.now() - TOKEN_TTL_MS))
-    .first();
-  return (row?.n ?? 0) >= MAX_LINKS_PER_WINDOW;
+const HOUR_MS = 3600 * 1000;
+
+// Two limits, both counting every token including decoys for unknown log-in
+// emails, so they behave the same for everyone:
+//   3 per (game, email) per 15 minutes, and 10 per email across all games per hour.
+// This read is only for a friendlier early answer; the INSERT below enforces
+// both atomically.
+export async function tooManyLinks(env: Ctx["env"], gameId: string, email: string): Promise<boolean> {
+  const now = Date.now();
+  const row = await env.DB.prepare(
+    `SELECT (SELECT COUNT(*) FROM login_tokens WHERE game_id = ? AND email = ? AND created_at > ?) AS per_game,
+            (SELECT COUNT(*) FROM login_tokens WHERE email = ? AND created_at > ?) AS per_email`,
+  ).bind(gameId, email, nowIso(now - TOKEN_TTL_MS), email, nowIso(now - HOUR_MS)).first();
+  return (row?.per_game ?? 0) >= MAX_LINKS_PER_WINDOW || (row?.per_email ?? 0) >= MAX_LINKS_PER_EMAIL_HOUR;
 }
 
 export async function issueLink(
   ctx: Ctx,
-  t: { email: string; purpose: "join" | "login"; gameId?: string; name?: string; marker?: string; send: boolean; subject: string; intro: string },
+  game: { id: string; slug: string; name: string },
+  t: { email: string; purpose: "join" | "login"; name?: string; marker?: string; send: boolean; subject: string; intro: string },
 ): Promise<string | null> {
   const { env, request } = ctx;
   const token = randomToken(32);
   const now = Date.now();
-  // The limit check and the insert are ONE statement, so concurrent requests
+  // The limit checks and the insert are ONE statement, so concurrent requests
   // cannot all read "under the limit" and each insert a token.
   const ins = await env.DB.prepare(
-    `INSERT INTO login_tokens (token_hash, email, purpose, game_id, display_name, marker, created_at, expires_at)
+    `INSERT INTO login_tokens (token_hash, game_id, email, purpose, display_name, marker, created_at, expires_at)
      SELECT ?, ?, ?, ?, ?, ?, ?, ?
-     WHERE (SELECT COUNT(*) FROM login_tokens WHERE email = ? AND created_at > ?) < ?`,
+     WHERE (SELECT COUNT(*) FROM login_tokens WHERE game_id = ? AND email = ? AND created_at > ?) < ?
+       AND (SELECT COUNT(*) FROM login_tokens WHERE email = ? AND created_at > ?) < ?`,
   )
-    .bind(await sha256Hex(token), t.email, t.purpose, t.gameId ?? null, t.name ?? null, t.marker ?? null, nowIso(now), nowIso(now + TOKEN_TTL_MS),
-      t.email, nowIso(now - TOKEN_TTL_MS), MAX_LINKS_PER_WINDOW)
+    .bind(await sha256Hex(token), game.id, t.email, t.purpose, t.name ?? null, t.marker ?? null, nowIso(now), nowIso(now + TOKEN_TTL_MS),
+      game.id, t.email, nowIso(now - TOKEN_TTL_MS), MAX_LINKS_PER_WINDOW,
+      t.email, nowIso(now - HOUR_MS), MAX_LINKS_PER_EMAIL_HOUR)
     .run();
-  if (!(ins.meta?.changes > 0)) return null; // over the limit: nothing stored, nothing sent
+  if (!(ins.meta?.changes > 0)) return null; // over a limit: nothing stored, nothing sent
   // Decoy rows for unknown addresses would otherwise pile up: sweep old ones.
   ctx.waitUntil(env.DB.prepare("DELETE FROM login_tokens WHERE expires_at < ?").bind(nowIso(now - 24 * 3600 * 1000)).run());
-  const link = `${siteUrl(env, request)}/auth/verify?token=${token}`;
+  const link = `${siteUrl(env, request)}/${game.slug}/auth/verify?token=${token}`;
   if (t.send && emailMode(env)) {
     ctx.waitUntil(
       sendEmail(env, {

@@ -7,17 +7,18 @@ turn you write a prompt in plain language, and the referee turns it into an exac
 rule change, or carries it out as an action the rules allow. Rule changes can
 also change this website.
 
-First game: public, played by friends.
+First game: public, played by friends. The site is built to host several games
+(only one to start), each with its own repo.
 
 ## The pieces
 
 | Piece | What it is | Where it lives |
 |---|---|---|
-| Rules | The rules in effect, and nothing else | `RULES.md` |
-| Accounts | Who is playing: email, display name, session | D1 (`users`, `sessions`, `login_tokens`) |
-| Board state | Players, markers, scores, whose turn, the log | D1 (`games`, `players`, `events`), read through `/api/game` |
+| Rules | The rules in effect, and nothing else | `RULES.md` in **the game's own repo** (the starter is `templates/RULES.md` here) |
+| Accounts | Who is playing, per game: email, display name, session. No global users | D1 (`players`, `sessions`, `login_tokens`) |
+| Board state | Players, markers, scores, whose turn, the log | D1 (`games`, `players`, `events`), read through `/<slug>/api/game` |
 | Notifications | In-game and email notices to every player | D1 (`notifications`), sent by `functions/_lib/notify.ts` |
-| Board | The public page that draws the state above and `RULES.md` | `index.html`, `site.css`, served by Cloudflare Pages |
+| Board | The public page that draws the state above and the game's rules | `board.html`, `site.css`, served by Cloudflare Pages |
 | Rulings | Every ruling the referee makes, with the rules it cited | `rulings/` (created by the first ruling) |
 | Referee | An AI model that drafts proposals and rules on what the rules mean | GitHub Actions + the Claude API (not built yet) |
 
@@ -28,23 +29,40 @@ The site is hosted on **Cloudflare Pages**: static files plus Pages Functions
 grow server-side features without a second host.
 
 Anyone who wants to play signs up on the site: a **join code** (shared as a link,
-`/join/<CODE>`) lets them ask for a seat, and an emailed **magic link** completes
+`/<slug>/join/<CODE>`) lets them ask for a seat, and an emailed **magic link** completes
 it and logs them in. There are no passwords. Every player then gets
 **notifications**: an in-game list under a bell on the board, and an email. Only
 "player joined" exists today; turn started, proposal open, vote result and ruling
 call the same `notify()` once the referee exists.
 
+## Many games, one repo each
+
+Everything for a game lives under its slug (`/<slug>/`, `/<slug>/api/...`). The
+database has no global users: a player row belongs to one game, and sessions,
+notifications, turns, log events and login tokens all carry that game's id (the
+database itself refuses a notification, session or turn that points at a player
+of another game). The same email in two games is two accounts. A session cookie
+is scoped to `Path=/<slug>` and is also checked against the game on the server.
+
+**Platform vs game.** The platform code (functions, schema, board page) lives in
+`busterbenson/promptocracy` and changes only through Buster's PRs. Each game's
+rules live in that game's own public repo (`games.repo`, `rules_path`,
+`rules_ref`), and later its rulings and any game-specific board extensions do
+too. So one game's rule changes (a passed proposal is a commit to its own repo)
+can never touch another game, and the referee for a game only ever gets write
+access to that game's repo, never the platform's.
+
 What lives where:
 
-- **In git:** the rules (`RULES.md`), the site's code, the schema (`migrations/`),
-  and later `rulings/`. Changes here are proposals, votes and commits.
+- **In git:** each game's rules (`RULES.md` in its own repo), the platform's code and schema (`migrations/`) in this repo,
+  and later each game's `rulings/`. Changes here are proposals, votes and commits.
 - **In D1:** everything players create by using the site: accounts, sessions,
   scores, whose turn, notifications and the public game log. These change on every
   action and hold private data (emails), so they do not belong in a public repo.
 - **Never in the repo:** emails, session ids, the join code. The code is generated
   when the game is created (`scripts/create-game.sh`).
 
-The repo still holds the rules: every passed proposal is a commit, so `git log` is
+The game's repo holds the rules: every passed proposal is a commit, so `git log` is
 the history of the rules, and the referee rereads `RULES.md` and the game state
 on every turn instead of remembering anything. (Earlier attempts to have a chatbot run Nomic
 broke down because the model lost track of which rules were in effect.)
@@ -91,6 +109,13 @@ code, not in the referee's instructions:
   PR as the rule text, so players vote on both together.
 
 ## Not decided yet
+
+- **How game-specific site changes load.** Rule 204 lets a passed rule change the
+  website, but the platform is shared. One option is a `board/` folder in the game
+  repo that the platform loads for that game's board; nothing is decided, and
+  until it is, a rule that changes the site means a platform PR from Buster.
+- **Accounts across games.** Per game for now (a deliberate choice). A global
+  account may come later; the schema has no global users table to migrate from.
 
 - **Players.** Who. Up to 5 can join with the code; the seat count and the
   marker set are constants today.

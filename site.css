@@ -80,3 +80,9 @@ textarea { font: inherit; padding: 8px 10px; color: var(--ink); background: var(
   border: 1px solid var(--line); border-radius: 6px; width: 100%; resize: vertical; }
 blockquote.prompt { margin: 10px 0 0; padding: 8px 12px; border-left: 3px solid var(--line);
   white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* landing page: the list of games */
+.games { list-style: none; margin: 0; padding: 0; }
+.games li { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.games li:last-child { border-bottom: 0; }
+.games .sub { display: block; margin: 2px 0 0; }

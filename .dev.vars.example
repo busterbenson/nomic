@@ -2,3 +2,6 @@
 # DEV_MODE=1 writes email to the outbox table and returns magic links in the
 # API response. It exists for local testing only: never set it in production.
 DEV_MODE=1
+# Optional: read rules from a local stub instead of GitHub (tests do this).
+# Never set in production.
+# RULES_BASE_URL=http://127.0.0.1:8890

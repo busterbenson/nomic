@@ -2,9 +2,11 @@
 # cannot catch what a browser actually sends in the Origin header on a form post.
 # Prints "OK <name>" on success; exits 1 otherwise.
 import sys
+from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
 
 link, base = sys.argv[1:3]
+slug = urlparse(link).path.split("/")[1]
 with sync_playwright() as p:
     b = p.chromium.launch()
     page = b.new_context().new_page()
@@ -17,7 +19,7 @@ with sync_playwright() as p:
     except Exception:
         print("FAIL: still on /auth/verify; requests (method, status, Origin sent):", seen)
         sys.exit(1)
-    me = page.evaluate("fetch('/api/me').then(r => r.status === 200 ? r.json() : null)")
+    me = page.evaluate("fetch('/" + slug + "/api/me').then(r => r.status === 200 ? r.json() : null)")
     b.close()
 if not me:
     print("FAIL: Continue did not log in; page text:", page.inner_text("body")[:200] if not page.is_closed() else "")

@@ -13,13 +13,13 @@ database_id = "00000000-0000-0000-0000-000000000000"
 
 [vars]
 # (Nothing is set by default; see below.)
-# The From address for every email, e.g. MAIL_FROM = "Nomic <play@your-domain.com>".
+# The From address for every email, e.g. MAIL_FROM = "Promptocracy <play@your-domain.com>".
 # Must be on a domain set up for sending (Cloudflare Email Sending, or the domain
 # you verified with Resend). Deliberately unset: until you set it, join and
 # log-in answer 503 "email is not configured" instead of failing silently.
-# MAIL_FROM = "Nomic <play@example.com>"
+# MAIL_FROM = "Promptocracy <play@example.com>"
 # Public address of the site, used in email links. Set it once the site has one.
-# SITE_URL = "https://nomic.pages.dev"
+# SITE_URL = "https://promptocracy.us"   # placeholder: the domain is not registered yet
 
 # Cloudflare Email Sending. Uncomment to send through it (see README, Deploy).
 # When this binding exists it is used first; otherwise RESEND_API_KEY, then
