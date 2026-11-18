@@ -1,7 +1,7 @@
 // End-to-end checks against a real `wrangler pages dev` with a LOCAL D1.
 // Run: npm test
 import { rmSync } from "node:fs";
-import { client, createGame, d1, join, migrate, newState, startServer, MARKERS } from "./lib.mjs";
+import { client, createGame, d1, finish, join, migrate, newState, startServer, MARKERS } from "./lib.mjs";
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = "") => {
@@ -37,8 +37,21 @@ try {
   check("POST /api/join accepts the right code (lowercase) and returns a dev link", r1.status === 200 && r1.data.dev_link?.includes("/auth/verify?token="), r1.text);
   const pre = await ada.get("/api/game");
   check("nobody is a player until the link is clicked", pre.data.players.length === 0);
-  const v1 = await ada.get(verifyPath(r1.data.dev_link));
-  check("verify redirects to the board and sets a session cookie", v1.status === 303 && v1.headers.get("location") === "/?notice=joined");
+  // A mail scanner GETs the link first. That must not spend it.
+  const peek = await client(A).get(verifyPath(r1.data.dev_link));
+  check("GET /auth/verify shows a Continue page and does not use the token",
+    peek.status === 200 && peek.text.includes("Finish joining Nomic") && peek.text.includes("Nomic, game 1") && peek.text.includes(">Continue<") &&
+    !peek.headers.getSetCookie().length && d1(state, "SELECT COUNT(*) AS n FROM login_tokens WHERE used_at IS NOT NULL")[0].n === 0);
+  await client(A).get(verifyPath(r1.data.dev_link));
+  const foreign = await finish(client(A), r1.data.dev_link, { origin: "http://evil.example" });
+  check("POST with a foreign Origin is refused (403) and the token survives", foreign.status === 403 && !foreign.headers.getSetCookie().length &&
+    d1(state, "SELECT COUNT(*) AS n FROM login_tokens WHERE used_at IS NOT NULL")[0].n === 0);
+  const noOrigin = await client(A).req("POST", "/auth/verify", undefined, { "content-type": "application/x-www-form-urlencoded" }, "token=" + new URL(r1.data.dev_link).searchParams.get("token"));
+  check("POST with no Origin is refused (403)", noOrigin.status === 403);
+  const inQuery = await client(A).req("POST", verifyPath(r1.data.dev_link), undefined, { "content-type": "application/x-www-form-urlencoded", origin: new URL(r1.data.dev_link).origin }, "");
+  check("a token in the query string does not work on POST (it must be in the body)", inQuery.status === 400 && !inQuery.headers.getSetCookie().length);
+  const v1 = await finish(ada, r1.data.dev_link);
+  check("POST completes the join: redirects to the board and sets a session cookie", v1.status === 303 && v1.headers.get("location") === "/?notice=joined");
   const sc = v1.headers.getSetCookie().join("\n");
   check("cookie is HttpOnly, Secure, SameSite=Lax, 30 days", /HttpOnly/i.test(sc) && /Secure/i.test(sc) && /SameSite=Lax/i.test(sc) && /Max-Age=2592000/i.test(sc), sc);
   const me = await ada.get("/api/me");
@@ -71,6 +84,9 @@ try {
   check("you cannot mark someone else's notification read", (await bo.get("/api/notifications")).data.unread === boNotes.data.unread);
   check("emailed_at is recorded", d1(state, "SELECT COUNT(*) AS n FROM notifications WHERE emailed_at IS NOT NULL")[0].n >= 1);
 
+  check("the email tells people to click the link, then Continue",
+    d1(state, "SELECT body FROM outbox WHERE subject LIKE 'Finish joining%' LIMIT 1")[0].body.includes("Click the link, then press Continue"));
+
   console.log("rejections");
   const w = await client(A).post("/api/join", { code: "ZZZZZZZZ", email: "x@example.com", name: "X", marker: MARKERS[2] });
   check("wrong code rejected", w.status === 404);
@@ -93,31 +109,34 @@ try {
   // a link requested while there was room cannot overfill the game when clicked late
   const late = await client(A).post("/api/join", { code: game.code, email: "late@example.com", name: "Late", marker: MARKERS[4] });
   const lateOk = await client(A).post("/api/join", { code: game.code, email: "late2@example.com", name: "Late2", marker: MARKERS[4] });
-  const lateFirst = await client(A).get(verifyPath(late.data.dev_link));
-  const lateSecond = await client(A).get(verifyPath(lateOk.data.dev_link));
+  const lateFirst = await finish(client(A), late.data.dev_link);
+  const lateSecond = await finish(client(A), lateOk.data.dev_link);
   check("two people holding links for one marker: first wins, second is told the join failed",
     lateFirst.headers.get("location") === "/?notice=joined" && lateSecond.headers.get("location") === "/?notice=join-failed" && !lateSecond.headers.getSetCookie().length);
 
   const ex = await client(A).post("/api/join", { code: game.code, email: "dup@example.com", name: "Dup", marker: MARKERS[2] });
-  const tok = verifyPath(ex.data.dev_link);
-  const first = await client(A).get(tok);
-  const again = await client(A).get(tok);
+  const first = await finish(client(A), ex.data.dev_link);
+  const again = await finish(client(A), ex.data.dev_link);
   check("token works once", first.headers.get("location") === "/?notice=joined");
-  check("token reuse rejected", again.headers.get("location") === "/?notice=link-invalid" && !again.headers.getSetCookie().length);
+  check("a second POST of the same token is refused with the friendly page", again.status === 400 && again.text.includes("expired or was already used") && again.text.includes("log-in link") && !again.headers.getSetCookie().length);
+  check("GET of a used token shows the same friendly page", (await client(A).get(verifyPath(ex.data.dev_link))).text.includes("expired or was already used"));
   const ex2 = await client(A).post("/api/login", { email: "bo@example.com" });
   d1(state, `UPDATE login_tokens SET expires_at = '2000-01-01T00:00:00.000Z' WHERE token_hash = '${[...d1(state, "SELECT token_hash FROM login_tokens ORDER BY created_at DESC LIMIT 1")].map((r) => r.token_hash)[0]}'`);
-  const expired = await client(A).get(verifyPath(ex2.data.dev_link));
-  check("expired token rejected", expired.headers.get("location") === "/?notice=link-invalid");
-  check("garbage token rejected", (await client(A).get("/auth/verify?token=nope")).headers.get("location") === "/?notice=link-invalid");
+  const expired = await finish(client(A), ex2.data.dev_link);
+  check("expired token rejected on POST", expired.status === 400 && expired.text.includes("expired or was already used"));
+  check("expired token also shows the friendly page on GET", (await client(A).get(verifyPath(ex2.data.dev_link))).text.includes("expired or was already used"));
+  check("garbage token rejected", (await finish(client(A), "http://example.test/auth/verify?token=nope")).status === 400 && (await client(A).get("/auth/verify?token=nope")).status === 400);
 
   console.log("log-in");
   const known = client(A), unknown = client(A);
   const lk = await known.post("/api/login", { email: "ada@example.com" });
   const lu = await unknown.post("/api/login", { email: "ghost@example.com" });
   check("log-in answers identically for known and unknown emails", lk.status === lu.status && stripLinks(lk.data) === stripLinks(lu.data), `${lk.text} vs ${lu.text}`);
-  const lv = await known.get(verifyPath(lk.data.dev_link));
-  check("a log-in link creates a session", lv.status === 303 && (await known.get("/api/me")).data.user.name === "Ada");
-  check("a decoy link for an unknown email logs nobody in", (await unknown.get(verifyPath(lu.data.dev_link))).headers.get("location") === "/?notice=link-invalid");
+  const lpeek = await client(A).get(verifyPath(lk.data.dev_link));
+  check("a log-in link's Continue page says Log in to Nomic", lpeek.text.includes("Log in to Nomic"));
+  const lv = await finish(known, lk.data.dev_link);
+  check("a log-in link creates a session only on POST", lv.status === 303 && (await known.get("/api/me")).data.user.name === "Ada");
+  check("a decoy link for an unknown email logs nobody in", (await finish(unknown, lu.data.dev_link)).status === 400 && (await unknown.get("/api/me")).status === 401);
   check("only the known address was emailed", d1(state, "SELECT to_addr FROM outbox WHERE subject = 'Your Nomic log-in link'").every((r) => r.to_addr !== "ghost@example.com"));
   const l2 = await client(A).post("/api/login", { email: "ada@example.com" });
   const l3 = await client(A).post("/api/login", { email: "ada@example.com" });
@@ -170,7 +189,7 @@ try {
   check("a turn in a game that has not started is refused (409)", early.status === 409, early.text);
   d1(state, "UPDATE games SET status = 'playing', round = 1, turn = 1 WHERE name = 'Nomic, game 1'");
   const outsider = client(A);
-  await outsider.post("/api/login", { email: "s1@example.com" }).then(async (r) => outsider.get(new URL(r.data.dev_link).pathname + new URL(r.data.dev_link).search));
+  await outsider.post("/api/login", { email: "s1@example.com" }).then(async (r) => finish(outsider, r.data.dev_link));
   check("a logged-in user who is not a player in this game is refused (403)", (await outsider.post("/api/turn", { prompt: "Hi" })).status === 403);
   check("logged-out submit is 401", (await client(A).post("/api/turn", { prompt: "Hi" })).status === 401);
   const notYours = await ada.post("/api/turn", { prompt: "Out of turn." });

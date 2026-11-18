@@ -64,11 +64,11 @@ export function client(base) {
   const c = {
     get cookie() { return cookie; },
     set cookie(v) { cookie = v; },
-    async req(method, path, body, headers = {}) {
+    async req(method, path, body, headers = {}, raw = null) {
       const res = await fetch(base + path, {
         method, redirect: "manual", signal: AbortSignal.timeout(20000),
         headers: { ...(body !== undefined ? { "content-type": "application/json" } : {}), ...(cookie ? { cookie } : {}), ...headers },
-        body: body !== undefined ? JSON.stringify(body) : undefined,
+        body: raw !== null ? raw : body !== undefined ? JSON.stringify(body) : undefined,
       });
       for (const sc of res.headers.getSetCookie?.() ?? []) {
         const [pair] = sc.split(";");
@@ -81,6 +81,9 @@ export function client(base) {
       return { status: res.status, headers: res.headers, text, data };
     },
     get: (p) => c.req("GET", p),
+    // A browser form post (the "Continue" button on /auth/verify).
+    form: (p, fields, headers = {}) => c.req("POST", p, undefined,
+      { "content-type": "application/x-www-form-urlencoded", ...headers }, new URLSearchParams(fields).toString()),
     post: (p, b = {}) => c.req("POST", p, b),
   };
   return c;
@@ -93,7 +96,11 @@ export async function join(base, code, { email, name, marker }) {
   const c = client(base);
   const r = await c.post("/api/join", { code, email, name, marker });
   if (r.status !== 200) throw new Error(`join ${email}: ${r.status} ${r.text}`);
-  const v = await c.get(new URL(r.data.dev_link).pathname + new URL(r.data.dev_link).search);
+  const v = await finish(c, r.data.dev_link);
   if (v.status !== 303) throw new Error(`verify ${email}: ${v.status}`);
   return c;
 }
+
+// Click "Continue" on the page a magic link opens: POST the token with the site's own Origin.
+export const finish = (c, link, headers = {}) =>
+  c.form("/auth/verify", { token: new URL(link).searchParams.get("token") }, { origin: new URL(link).origin, ...headers });

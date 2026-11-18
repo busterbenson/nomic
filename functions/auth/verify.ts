@@ -1,8 +1,16 @@
-// The magic link lands here. The token is hashed, single use, and expires after
-// 15 minutes. A join is only completed now, by whoever controls the inbox.
+// The magic link lands here.
+//  GET  /auth/verify?token=  shows a "Continue" page and consumes NOTHING. Mail
+//       scanners and link previews GET links; if GET spent the token the real
+//       person would find it expired.
+//  POST /auth/verify (form field "token", in the body, not the query) is what
+//       hashes, checks and uses the token, creates the session and completes a
+//       join. Single use, 15 minutes. Because it is a plain browser form post
+//       (not JSON), it is guarded by an Origin check: the Origin header must match
+//       SITE_URL (or the request's own origin when SITE_URL is unset).
 import { createSession } from "../_lib/auth";
 import { notify } from "../_lib/notify";
-import { Ctx, MARKERS, nowIso, sha256Hex, siteUrl } from "../_lib/util";
+import { expiredPage, page } from "../_lib/pages";
+import { Ctx, MARKERS, esc, nowIso, sha256Hex, siteUrl } from "../_lib/util";
 
 const back = (notice: string, cookie?: string) => {
   const h = new Headers({ location: `/?notice=${notice}`, "cache-control": "no-store" });
@@ -10,17 +18,55 @@ const back = (notice: string, cookie?: string) => {
   return new Response(null, { status: 303, headers: h });
 };
 
-export const onRequestGet = async (ctx: Ctx) => {
-  const { env, request } = ctx;
+// A look at the token that does not use it.
+export const onRequestGet = async ({ env, request }: Ctx) => {
   const token = new URL(request.url).searchParams.get("token") || "";
+  const now = nowIso();
+  const t: any = token
+    ? await env.DB.prepare(
+        "SELECT purpose, game_id FROM login_tokens WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?",
+      ).bind(await sha256Hex(token), now).first()
+    : null;
+  if (!t) return expiredPage();
+  let heading = "Log in to Nomic", sub = "";
+  if (t.purpose === "join") {
+    const g: any = await env.DB.prepare("SELECT name FROM games WHERE id = ?").bind(t.game_id).first();
+    heading = "Finish joining Nomic";
+    sub = g ? `<p class="sub">${esc(g.name)}</p>` : "";
+  }
+  return page(
+    heading,
+    `<h1>Nomic</h1>${sub}<div class="now">${esc(heading)}. Press Continue to finish.</div>
+<form method="POST" action="/auth/verify" class="stack" style="margin-top:16px">
+  <input type="hidden" name="token" value="${esc(token)}">
+  <button class="primary" type="submit">Continue</button>
+</form>`,
+  );
+};
+
+export const onRequestPost = async (ctx: Ctx) => {
+  const { env, request } = ctx;
+  // CSRF: a cross-site page can make a browser POST here, but cannot make it send our Origin.
+  const expected = new URL(siteUrl(env, request)).origin;
+  if (request.headers.get("origin") !== expected) {
+    return new Response("Forbidden: this form must be submitted from the site itself.", { status: 403, headers: { "content-type": "text/plain; charset=utf-8" } });
+  }
+  let token = "";
+  try {
+    const form = await request.formData();
+    token = String(form.get("token") ?? "");
+  } catch {
+    return expiredPage();
+  }
+  if (!token) return expiredPage();
   const hash = await sha256Hex(token);
   const now = nowIso();
 
-  // Claim the token atomically: two clicks cannot both succeed.
+  // Claim the token atomically: two submits cannot both succeed.
   const t: any = await env.DB.prepare(
     "UPDATE login_tokens SET used_at = ? WHERE token_hash = ? AND used_at IS NULL AND expires_at > ? RETURNING *",
   ).bind(now, hash, now).first();
-  if (!t) return back("link-invalid");
+  if (!t) return expiredPage();
 
   // Housekeeping: old tokens and sessions do not need to live forever.
   ctx.waitUntil(
@@ -32,7 +78,7 @@ export const onRequestGet = async (ctx: Ctx) => {
 
   if (t.purpose === "login") {
     const user: any = await env.DB.prepare("SELECT id FROM users WHERE email = ?").bind(t.email).first();
-    if (!user) return back("link-invalid");
+    if (!user) return expiredPage(); // decoy token for an address with no account
     return back("welcome-back", await createSession(env, user.id));
   }
 

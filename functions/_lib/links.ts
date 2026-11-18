@@ -37,7 +37,7 @@ export async function issueLink(
       sendEmail(env, {
         to: t.email,
         subject: t.subject,
-        text: `${t.intro}\n\n${link}\n\nThe link works once and expires in 15 minutes. If you did not ask for it, ignore this email.`,
+        text: `${t.intro}\n\nClick the link, then press Continue:\n${link}\n\nThe link works once and expires in 15 minutes. If you did not ask for it, ignore this email.`,
       }).catch((e) => console.error("magic link email failed:", e?.message || e)),
     );
   }

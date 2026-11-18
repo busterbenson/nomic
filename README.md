@@ -56,7 +56,12 @@ node tests/seed-demo.mjs /some/dir   # seeds two players and takes screenshots (
 - Joining asks for an email, a display name and a marker. Nothing is created
   until the person clicks the link we email them, so nobody can sign up someone else.
 - Log-in is a **magic link** by email: single use, expires in 15 minutes, at most
-  3 per address per 15 minutes. There are no passwords.
+  3 per address per 15 minutes. There are no passwords. Opening the link only
+  shows a page with a **Continue** button; pressing it (a same-origin form POST)
+  is what uses the token and logs you in. That way mail scanners and link
+  previews that open links cannot burn it. The POST checks that its `Origin`
+  matches `SITE_URL` (or the request host when `SITE_URL` is unset), so set
+  `SITE_URL` to the address people actually browse.
 - A session is a 30-day cookie (HttpOnly, Secure, SameSite=Lax). Only a hash of it is stored.
 - Seats can be taken only while the game's status is `setup` (rule 102: adding a
   player takes a proposal once play begins).

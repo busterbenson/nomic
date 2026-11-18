@@ -1,7 +1,8 @@
 // Runs for every request, static files included.
 //  1. Static allowlist. pages_build_output_dir is the repo root, so without this
 //     wrangler.toml, migrations/ and the rest of the repo would be public URLs.
-//  2. POSTs must be application/json (the CSRF guard that goes with SameSite=Lax).
+//  2. POSTs must be application/json (the CSRF guard that goes with SameSite=Lax),
+//     except the /auth/verify form post, which checks Origin instead.
 //  3. Security headers.
 import { Ctx, json } from "./_lib/util";
 
@@ -15,7 +16,9 @@ export const onRequest = async (ctx: Ctx) => {
   if (!allowed) return new Response("Not found", { status: 404 });
 
   const method = ctx.request.method;
-  if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS") {
+  // /auth/verify is the one POST that is a browser form post (the "Continue"
+  // button); it is guarded by an Origin check inside the handler instead.
+  if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS" && path !== "/auth/verify") {
     const type = (ctx.request.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
     if (type !== "application/json") return json({ error: "Send application/json." }, 415);
   }

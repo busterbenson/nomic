@@ -1,13 +1,7 @@
 // GET /join/:code serves the join page with the game's name and open seats.
 // The form posts to /api/join; the emailed link finishes the join.
+import { page } from "../_lib/pages";
 import { Ctx, MARKERS, esc, gameByCode, normCode, seatsTaken } from "../_lib/util";
-
-const page = (title: string, inner: string, status = 200) =>
-  new Response(
-    `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(title)}</title><link rel="stylesheet" href="/site.css"></head><body><main>${inner}</main></body></html>`,
-    { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } },
-  );
 
 export const onRequestGet = async ({ env, params }: Ctx) => {
   const code = normCode(Array.isArray(params.code) ? params.code[0] : params.code);
