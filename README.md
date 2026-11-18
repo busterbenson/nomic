@@ -183,7 +183,9 @@ npx wrangler d1 migrations apply DB --remote --config wrangler.preview-migration
 # 3. Email for promptocracy.us. Onboard the sending domain in the dashboard
 #    (Compute > Email Service / Email Sending), then set MAIL_FROM in wrangler.toml [vars]
 #    to an address on it. The [[send_email]] EMAIL binding is already declared.
-#    Or use Resend instead: verify a domain there, set MAIL_FROM, and
+#    Or use Resend instead: verify a domain there, set MAIL_FROM, DELETE the
+#    [[send_email]] block from wrangler.toml (the EMAIL binding wins over Resend
+#    whenever it exists), and
 npx wrangler secret put RESEND_API_KEY
 # Set SITE_URL in [vars] to the public address once it is known (the Origin check uses it).
 
