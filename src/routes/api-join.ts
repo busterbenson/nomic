@@ -1,8 +1,8 @@
-import { emailMode } from "../../_lib/email";
-import { issueLink, tooManyLinks } from "../../_lib/links";
-import { Ctx, MARKERS, cleanName, json, normCode, normEmail, readJson, seatsTaken, validEmail } from "../../_lib/util";
+import { emailMode } from "../lib/email";
+import { issueLink, tooManyLinks } from "../lib/links";
+import { Ctx, MARKERS, cleanName, json, normCode, normEmail, readJson, seatsTaken, validEmail } from "../lib/util";
 
-export const onRequestPost = async (ctx: Ctx) => {
+export const post = async (ctx: Ctx) => {
   const { env } = ctx;
   const game = ctx.data.game!;
   if (!emailMode(env)) return json({ error: "Email is not configured, so nobody can join yet." }, 503);

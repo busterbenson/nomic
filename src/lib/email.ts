@@ -16,7 +16,7 @@ export function emailMode(env: Env): Mode | null {
   return null;
 }
 
-// "Nomic <a@b.com>" -> {email, name}; a bare address stays a string.
+// "Promptocracy <a@b.com>" -> {email, name}; a bare address stays a string.
 function parseFrom(from: string): string | { email: string; name: string } {
   const m = from.match(/^\s*(.*?)\s*<([^>]+)>\s*$/);
   return m && m[1] ? { email: m[2], name: m[1].replace(/^"|"$/g, "") } : from.replace(/[<>]/g, "").trim();

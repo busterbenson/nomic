@@ -1,8 +1,8 @@
-import { getPlayer } from "../../../_lib/auth";
-import { Ctx, json, nowIso, readJson } from "../../../_lib/util";
+import { getPlayer } from "../lib/auth";
+import { Ctx, json, nowIso, readJson } from "../lib/util";
 
 // Body: {"all": true} or {"ids": ["..."]}. Only the caller's own rows in this game change.
-export const onRequestPost = async ({ env, request, data }: Ctx) => {
+export const post = async ({ env, request, data }: Ctx) => {
   const game = data.game!;
   const p = await getPlayer(env, request, game);
   if (!p) return json({ error: "Not logged in." }, 401);

@@ -1,11 +1,11 @@
 // POST /<slug>/api/turn {prompt}: the player whose turn it is submits their prompt.
 // This only RECORDS the turn. It does not advance games.turn: that happens when
 // the referee and the vote are built.
-import { getPlayer } from "../../_lib/auth";
-import { notify } from "../../_lib/notify";
-import { Ctx, json, nowIso, readJson, siteUrl } from "../../_lib/util";
+import { getPlayer } from "../lib/auth";
+import { notify } from "../lib/notify";
+import { Ctx, json, nowIso, readJson, siteUrl } from "../lib/util";
 
-export const onRequestPost = async (ctx: Ctx) => {
+export const post = async (ctx: Ctx) => {
   const { env, request } = ctx;
   const game = ctx.data.game!;
   const player = await getPlayer(env, request, game);

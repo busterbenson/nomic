@@ -1,4 +1,4 @@
-// Test harness: a real `wrangler pages dev` on a throwaway LOCAL D1 (never a
+// Test harness: a real `wrangler dev` (the Worker with static assets) on a throwaway LOCAL D1 (never a
 // remote one), plus helpers. Nothing here touches Cloudflare.
 import { spawn, execFile, execFileSync } from "node:child_process";
 import { createServer } from "node:http";
@@ -14,7 +14,7 @@ const WRANGLER = pjoin(ROOT, "node_modules", ".bin", "wrangler");
 const env = { ...process.env, WRANGLER_SEND_METRICS: "false", NO_COLOR: "1", CI: "1" };
 
 export function newState() {
-  return mkdtempSync(pjoin(tmpdir(), "nomic-test-"));
+  return mkdtempSync(pjoin(tmpdir(), "promptocracy-test-"));
 }
 
 export function d1(state, sql) {
@@ -52,15 +52,15 @@ export async function createGame(state, o) {
   if (o.max) args.push("--max-players", String(o.max));
   const { stdout: out } = await execFileP(pjoin(ROOT, "scripts", "create-game.sh"), args, {
     cwd: ROOT, encoding: "utf8", timeout: 60000,
-    env: { ...env, NOMIC_PERSIST_TO: state, SITE_URL: o.site || "http://localhost", RULES_BASE_URL: o.rulesBase },
+    env: { ...env, PROMPTOCRACY_PERSIST_TO: state, SITE_URL: o.site || "http://localhost", RULES_BASE_URL: o.rulesBase },
   });
   return { slug: o.slug, code: out.match(/Join code: (\S+)/)[1], link: out.match(/Join link: (\S+)/)[1] };
 }
 
 export async function startServer(state, port, bindings = []) {
   if (!existsSync(WRANGLER)) throw new Error("Run `npm install` first.");
-  const args = ["pages", "dev", ".", "--port", String(port), "--persist-to", state, "--ip", "127.0.0.1"];
-  for (const b of bindings) args.push("--binding", b);
+  const args = ["dev", "--port", String(port), "--persist-to", state, "--ip", "127.0.0.1"];
+  for (const b of bindings) args.push("--var", b.replace("=", ":"));
   const child = spawn(WRANGLER, args, { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"], detached: false });
   let log = "";
   child.stdout.on("data", (d) => (log += d));

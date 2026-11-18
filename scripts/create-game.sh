@@ -10,7 +10,7 @@
 #   --winning-score N    default 100
 #   --local | --remote   which D1 (default --local; --remote is run by whoever deploys)
 # Env: SITE_URL (for the printed link, default http://localhost:8788),
-#      NOMIC_PERSIST_TO (local state dir, used by the tests),
+#      PROMPTOCRACY_PERSIST_TO (local state dir, used by the tests),
 #      RULES_BASE_URL (read rules from here instead of raw.githubusercontent.com; tests).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -57,7 +57,7 @@ code="$(LC_ALL=C tr -dc 'A-HJKMNP-Z2-9' </dev/urandom | head -c 8 || true)"
 id="$(uuidgen | tr 'A-Z' 'a-z')"
 sqlname="${name//\'/\'\'}"
 persist=()
-[ -n "${NOMIC_PERSIST_TO:-}" ] && persist=(--persist-to "$NOMIC_PERSIST_TO")
+[ -n "${PROMPTOCRACY_PERSIST_TO:-}" ] && persist=(--persist-to "$PROMPTOCRACY_PERSIST_TO")
 
 out="$(npx wrangler d1 execute DB "$where" ${persist[@]+"${persist[@]}"} --command \
   "INSERT INTO games (id, slug, name, repo, rules_path, rules_ref, join_code, status, max_players, winning_score, created_at)
