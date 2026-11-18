@@ -37,7 +37,7 @@ done
 [[ "$slug" =~ ^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$ ]] || die "slug must be 2-40 characters of a-z, 0-9 and '-', starting and ending with a letter or digit"
 case "$slug" in api|auth|join|assets|static|site.css|index.html|admin|www|mail|help|about|rules|board) die "'$slug' is a reserved word, pick another slug" ;; esac
 seg='[A-Za-z0-9._-]+'
-[[ "$repo" =~ ^$seg/$seg$ ]] && [[ "$repo" != *..* ]] && [[ "$repo" != ./* ]] || die "--repo must look like owner/name"
+[[ "$repo" =~ ^$seg/$seg$ ]] && [[ "$repo" != *..* ]] && [[ "$repo" != ./* ]] && [[ "$repo" != */. ]] || die "--repo must look like owner/name"
 [[ "$rpath" =~ ^$seg(/$seg)*$ ]] && [[ "$rpath" != *..* ]] && [[ "/$rpath/" != */./* ]] || die "--rules-path must be a plain relative path with no '..'"
 [[ "$ref" =~ ^$seg(/$seg)*$ ]] && [[ "$ref" != *..* ]] && [[ "/$ref/" != */./* ]] || die "--rules-ref must be a branch or tag name"
 [[ "$max$win" =~ ^[0-9]+$ ]] || die "--max-players and --winning-score must be numbers"

@@ -347,7 +347,7 @@ try {
   check("create-game refuses reserved slugs", await allRefuse(["api", "auth", "join", "assets", "static", "site.css", "index.html", "admin", "www", "mail", "help", "about", "rules"], (slug) => ({ slug }), /reserved|slug must/));
   check("create-game refuses malformed slugs", await allRefuse(["a", "Bad_Slug", "UPPER", "-x-", "has space", "x".repeat(41), "dots.in"], (slug) => ({ slug }), /slug must/));
   check("create-game refuses a duplicate slug", await refuses({ slug: "one" }, /already exists/));
-  check("create-game refuses a bad repo shape", await allRefuse(["nope", "../x", "a/b/c", "http://x/y", "a/..", "a b/c"], (repo) => ({ slug: "bad-repo", repo }), /owner\/name/));
+  check("create-game refuses a bad repo shape", await allRefuse(["nope", "../x", "a/b/c", "http://x/y", "a/..", "a/.", "./b", "a b/c"], (repo) => ({ slug: "bad-repo", repo }), /owner\/name/));
   check("create-game refuses a bad rules path", await allRefuse(["../../etc/passwd", "/abs", "a/../b", "./RULES.md", "a/./b"], (rulesPath) => ({ slug: "bad-path", rulesPath }), /rules-path/));
   check("create-game refuses a repo whose RULES.md is not publicly readable", await refuses({ slug: "private-one", repo: "busterbenson/not-there" }, /cannot read/));
   check("and inserted nothing", d1(state, "SELECT COUNT(*) AS n FROM games")[0].n === gamesBefore);
