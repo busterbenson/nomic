@@ -101,7 +101,7 @@
     "joined": "You're in. Your seat is yours.",
     "welcome-back": "You're logged in.",
     "link-invalid": "That link has expired or was already used. Log in again to get a new one.",
-    "join-failed": "Couldn't finish joining: the seat or marker was taken, or the game has started. Ask for a new link."
+    "join-failed": "Couldn't finish joining: the marker was taken, the game is full, or it has started. Open the join link again to pick another marker."
   };
   const api = async (path, body) => {
     const res = await fetch(path, body === undefined ? { cache: "no-store" } : {

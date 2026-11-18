@@ -1,6 +1,9 @@
 // End-to-end checks against a real `wrangler pages dev` with a LOCAL D1.
 // Run: npm test
-import { rmSync } from "node:fs";
+import { rmSync, existsSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+const execFileAsync = promisify(execFile);
 import { client, createGame, d1, finish, join, migrate, newState, startServer, MARKERS } from "./lib.mjs";
 
 let pass = 0, fail = 0;
@@ -14,7 +17,8 @@ const stripLinks = (s) => JSON.stringify(s).replace(/token=[\w-]+/g, "token=X");
 
 const state = newState();
 const state2 = newState();
-let main, bare;
+const state3 = newState();
+let main, bare, third;
 try {
   migrate(state);
   const game = createGame(state, { name: "Nomic, game 1" });
@@ -214,6 +218,25 @@ try {
   d1(state, "UPDATE games SET round = 2 WHERE name = 'Nomic, game 1'");
   check("in the next round the same player can submit again", (await bo.post("/api/turn", { prompt: "Round two." })).status === 200);
 
+  console.log("browser");
+  const PY = "/usr/local/bin/python3";
+  if (existsSync(PY)) {
+    // Its own server with SITE_URL unset, so the link's host is one the browser can reach.
+    migrate(state3);
+    const g3 = createGame(state3);
+    third = await startServer(state3, 8794, ["DEV_MODE=1"]);
+    const bl = await client(third.base).post("/api/join", { code: g3.code, email: "br@example.com", name: "Br", marker: MARKERS[0] });
+    let out = "";
+    try {
+      // async: a blocked event loop would stop us draining wrangler's log pipes and stall the servers
+      out = (await execFileAsync(PY, ["tests/browser-continue.py", bl.data.dev_link, third.base], { cwd: new URL("..", import.meta.url).pathname, encoding: "utf8", timeout: 60000 })).stdout;
+    } catch (e) { out = String(e.stdout || "") + String(e.stderr || ""); }
+  check("the Referrer-Policy keeps browsers sending a real Origin", (await client(A).get("/")).headers.get("referrer-policy") === "same-origin");
+  check("a real browser pressing Continue is let in (Origin as browsers send it)", /^OK Br/.test(out.trim()), out.trim().slice(0, 300));
+  } else {
+    console.log("  SKIPPED  real-browser Continue check (no playwright python at " + PY + ")");
+  }
+
   console.log("email not configured");
   migrate(state2);
   const g2 = createGame(state2);
@@ -228,8 +251,8 @@ try {
   console.log("  FAIL  harness error:", e?.stack || e);
   if (main) console.log(main.log().slice(-1500));
 } finally {
-  await main?.stop(); await bare?.stop();
-  for (const s of [state, state2]) { try { rmSync(s, { recursive: true, force: true }); } catch {} }
+  await main?.stop(); await bare?.stop(); await third?.stop();
+  for (const s of [state, state2, state3]) { try { rmSync(s, { recursive: true, force: true }); } catch {} }
 }
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

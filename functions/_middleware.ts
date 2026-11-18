@@ -27,6 +27,8 @@ export const onRequest = async (ctx: Ctx) => {
   const out = new Response(res.body, res);
   out.headers.set("x-content-type-options", "nosniff");
   out.headers.set("x-frame-options", "DENY");
-  out.headers.set("referrer-policy", "no-referrer");
+  // "same-origin", not "no-referrer": with no-referrer a browser sends "Origin: null"
+  // on form posts, which would lock out the Continue button. Nothing is sent cross-site.
+  out.headers.set("referrer-policy", "same-origin");
   return out;
 };
