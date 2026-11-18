@@ -339,12 +339,35 @@ try {
   d1(state, "UPDATE games SET settings = '{\"turn.actions_per_turn\": 1}', status = 'playing', round = 1, turn = 0, moves = 0 WHERE slug = 'sett'");
   d1(state, "DELETE FROM turns WHERE game_id = (SELECT id FROM games WHERE slug='sett')");
   d1(state, "UPDATE tiles SET owner_player_id = NULL, claimed_at = NULL, name = NULL, description = NULL WHERE game_id = (SELECT id FROM games WHERE slug='sett')");
-  const [rc, rp] = await Promise.all([post(sa, { kind: "claim", label: "C4" }, "sett"), sa.post("/sett/api/turn", { prompt: "A proposal racing a move." })]);
-  const sgr = await sgame();
-  const proposals = d1(state, "SELECT COUNT(*) AS n FROM turns WHERE game_id = (SELECT id FROM games WHERE slug='sett')")[0].n;
-  check("a claim and a proposal sent together: exactly one lands, and a proposal never sits beside a completed move",
-    [rc.status, rp.status].filter((x) => x === 200).length === 1 && ((rc.status === 200 && proposals === 0 && sgr.game.turn === 1) || (rp.status === 200 && proposals === 1 && sgr.game.turn === 0)), `${rc.status} ${rp.status} turn=${sgr.game.turn} proposals=${proposals}`);
-  check("/api/game reports how many moves the current turn has used", typeof sgr.game.moves === "number");
+  const reset = () => {
+    d1(state, "UPDATE games SET settings = '{\"turn.actions_per_turn\": 1}', status = 'playing', round = 1, turn = 0, moves = 0 WHERE slug = 'sett'");
+    d1(state, "DELETE FROM turns WHERE game_id = (SELECT id FROM games WHERE slug='sett')");
+    d1(state, "UPDATE tiles SET owner_player_id = NULL, claimed_at = NULL, name = NULL, description = NULL WHERE game_id = (SELECT id FROM games WHERE slug='sett')");
+  };
+  let raceOk = true, raceWhy = "", claimWon = 0, proposalWon = 0;
+  for (let i = 0; i < 8; i++) {
+    reset();
+    const [rc, rp] = await Promise.all([post(sa, { kind: "claim", label: "C4" }, "sett"), sa.post("/sett/api/turn", { prompt: "A proposal racing a move." })]);
+    const sgr = await sgame();
+    const proposals = d1(state, "SELECT COUNT(*) AS n FROM turns WHERE game_id = (SELECT id FROM games WHERE slug='sett')")[0].n;
+    const one = [rc.status, rp.status].filter((x) => x === 200).length === 1;
+    const loserOk = rc.status === 200 ? (rp.status === 409 || rp.status === 403) && /turn changed|not your turn/.test(rp.data.error) : (rc.status === 409 || rc.status === 403) && /changed under you|already proposed|not your turn/.test(rc.data.error);
+    const consistent = rc.status === 200 ? proposals === 0 && sgr.game.turn === 1 : proposals === 1 && sgr.game.turn === 0;
+    if (rc.status === 200) claimWon++; else proposalWon++;
+    if (!(one && loserOk && consistent)) { raceOk = false; raceWhy = `${rc.status} ${rc.text} | ${rp.status} ${rp.text} turn=${sgr.game.turn} proposals=${proposals}`; break; }
+  }
+  check("a claim and a proposal sent together, 8 times: exactly one lands each time, the loser is refused with a clear 403/409, and a proposal never sits beside a completed move", raceOk, raceWhy);
+  reset();
+  d1(state, "UPDATE games SET moves = 1 WHERE slug = 'sett'");
+  const stale = await sa.post("/sett/api/turn", { prompt: "After a move." });
+  check("a proposal after a board move this turn is refused up front (409) and leaves no turn row", stale.status === 409 && /already moved/.test(stale.data.error) && d1(state, "SELECT COUNT(*) AS n FROM turns WHERE game_id = (SELECT id FROM games WHERE slug='sett')")[0].n === 0, stale.text);
+  d1(state, "UPDATE games SET moves = 0 WHERE slug = 'sett'");
+  // The conditional INSERT itself: a proposal whose turn, round or moves no longer match inserts nothing. Prove it in SQL, the way the handler runs it.
+  const gidS = d1(state, "SELECT id FROM games WHERE slug='sett'")[0].id, pidS = d1(state, "SELECT id FROM players WHERE game_id = (SELECT id FROM games WHERE slug='sett') AND turn_order = 0")[0].id;
+  const cond = (turn, round, moves) => { d1(state, `UPDATE games SET moves = ${moves} WHERE id = '${gidS}'`); d1(state, `INSERT INTO turns (id, game_id, player_id, round, turn_index, prompt, status, created_at, updated_at) SELECT 'tt${turn}${round}${moves}', g.id, '${pidS}', g.round, g.turn, 'p', 'submitted', 'n', 'n' FROM games g WHERE g.id = '${gidS}' AND g.status = 'playing' AND g.turn = ${turn} AND g.round = ${round} AND g.moves = 0`); return d1(state, "SELECT COUNT(*) AS n FROM turns WHERE id LIKE 'tt%'")[0].n; };
+  const n0 = cond(1, 1, 0), n1 = cond(0, 2, 0), n2 = cond(0, 1, 1), n3 = cond(0, 1, 0);
+  check("the proposal INSERT lands only if turn, round and moves are exactly as read (wrong turn, wrong round, a move made: nothing; right: one row)", n0 === 0 && n1 === 0 && n2 === 0 && n3 === 1, [n0, n1, n2, n3].join());
+  check("/api/game reports how many moves the current turn has used", typeof (await sgame()).game.moves === "number");
 
   console.log("static files");
   const js = await client(A).get("/js/board.js");

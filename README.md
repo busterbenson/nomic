@@ -140,7 +140,7 @@ In production `wrangler.toml` `[vars]` sets `MAIL_FROM = "Chalant <chalant@promp
 (the sender is Chalant, the referee; Cloudflare Email Sending is set up for promptocracy.us) and
 `SITE_URL = "https://promptocracy.us"` (email links and the Origin check). Local development and
 the tests blank both (`.dev.vars.example`, `tests/lib.mjs`) so email goes to the outbox and links use
-the local origin. Previews do not inherit `[vars]`: they have no `MAIL_FROM`, no `SITE_URL` and no
+the local origin (`npm run dev` passes `--var MAIL_FROM: --var SITE_URL:`, which wins over `.dev.vars`; to test real email links locally, run `wrangler dev` yourself with your own `--var`s). Previews do not inherit `[vars]`: they have no `MAIL_FROM`, no `SITE_URL` and no
 email binding (`tests/hex.mjs` fails if a `previews` block ever adds them).
 
 ## Deploy
