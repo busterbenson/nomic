@@ -69,9 +69,14 @@ export const onRequestGet = async (ctx: Ctx) => {
   const name = user.display_name; // stored raw, escaped when drawn
   await env.DB.prepare("INSERT INTO events (game_id, kind, text, created_at) VALUES (?, 'player_joined', ?, ?)")
     .bind(game.id, `${t.marker} ${name} took a seat.`, now).run();
-  await notify(env, ctx, game.id, {
-    kind: "player_joined", body: `${t.marker} ${name} joined the game.`, link: "/",
-    email: true, exceptUserId: user.id, baseUrl: siteUrl(env, request),
-  });
+  // The seat is already taken: a notification problem must not cost them the session.
+  try {
+    await notify(env, ctx, game.id, {
+      kind: "player_joined", body: `${t.marker} ${name} joined the game.`, link: "/",
+      email: true, exceptUserId: user.id, baseUrl: siteUrl(env, request),
+    });
+  } catch (e: any) {
+    console.error("notify failed after join:", e?.message || e);
+  }
   return back("joined", await createSession(env, user.id));
 };

@@ -10,6 +10,8 @@ export const onRequestPost = async ({ env, request }: Ctx) => {
   const at = nowIso();
   if (body.all === true) {
     await env.DB.prepare("UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL").bind(at, user.id).run();
+  } else if (Array.isArray(body.ids) && body.ids.length === 0) {
+    // nothing to mark
   } else if (Array.isArray(body.ids) && body.ids.length <= 100 && body.ids.every((i: unknown) => typeof i === "string")) {
     await env.DB.batch(
       body.ids.map((id: string) =>

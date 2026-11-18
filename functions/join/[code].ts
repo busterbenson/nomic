@@ -26,7 +26,7 @@ export const onRequestGet = async ({ env, params }: Ctx) => {
       <p><a href="/">See the board</a></p>`, 409);
   }
   const markers = MARKERS.map(
-    (m, i) =>
+    (m) =>
       `<label><input type="radio" name="marker" value="${m.marker}" required ${takenSet.has(m.marker) ? "disabled" : ""}><span>${m.marker}</span></label>`,
   ).join("");
   return page(

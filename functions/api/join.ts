@@ -29,6 +29,6 @@ export const onRequestPost = async (ctx: Ctx) => {
     intro: `Click to take your seat in ${game.name} as ${marker} ${name}.`,
   });
   const res: any = { ok: true, message: "Check your email for a link to finish joining." };
-  if (env.DEV_MODE === "1") res.dev_link = link;
+  if (emailMode(env) === "dev") res.dev_link = link;
   return json(res);
 };

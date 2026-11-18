@@ -18,6 +18,6 @@ export const onRequestPost = async (ctx: Ctx) => {
     subject: "Your Nomic log-in link", intro: "Click to log in to Nomic.",
   });
   const res: any = { ok: true, message: "If that address has an account, a log-in link is on its way." };
-  if (env.DEV_MODE === "1") res.dev_link = link;
+  if (emailMode(env) === "dev") res.dev_link = link;
   return json(res);
 };

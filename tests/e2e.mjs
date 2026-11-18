@@ -127,6 +127,17 @@ try {
   const g4 = await client(A).post("/api/login", { email: "ghost2@example.com" });
   check("the limit applies to unknown emails the same way", g1.status === 200 && g4.status === 429);
 
+  const j1 = await client(A).post("/api/join", { code: game.code, email: "spam@example.com", name: "Sp", marker: MARKERS[3] });
+  await client(A).post("/api/join", { code: game.code, email: "spam@example.com", name: "Sp", marker: MARKERS[3] });
+  await client(A).post("/api/join", { code: game.code, email: "spam@example.com", name: "Sp", marker: MARKERS[3] });
+  const j4 = await client(A).post("/api/join", { code: game.code, email: "spam@example.com", name: "Sp", marker: MARKERS[3] });
+  check("the join form is rate limited the same way (4th link refused)", j1.status === 200 && j4.status === 429);
+  const ads = await ada.post("/api/notifications/read", { ids: [] });
+  check("marking an empty id list is a no-op, not a 500", ads.status === 200);
+  check("bidi/zero-width characters are stripped from names",
+    (await client(A).post("/api/join", { code: game.code, email: "bidi@example.com", name: "A\u202EB\u200Bc", marker: MARKERS[3] })).status === 200 &&
+    d1(state, "SELECT display_name FROM login_tokens WHERE email = 'bidi@example.com'")[0].display_name === "ABc");
+
   console.log("logout");
   const sessionsBefore = d1(state, "SELECT COUNT(*) AS n FROM sessions")[0].n;
   const out = await known.post("/api/logout");

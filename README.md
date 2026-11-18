@@ -93,7 +93,7 @@ npx wrangler pages project create nomic --production-branch main
 # 3. Email. Pick ONE.
 #   a) Cloudflare Email Sending: onboard your sending domain in the dashboard
 #      (Email > Email Sending), uncomment [[send_email]] in wrangler.toml, and set
-#      MAIL_FROM in [vars] to an address on that domain.
+#      MAIL_FROM in [vars] to an address on that domain (it is unset by default).
 #   b) Resend: verify a domain at resend.com, then
 npx wrangler pages secret put RESEND_API_KEY --project-name nomic
 #      and set MAIL_FROM in wrangler.toml [vars].

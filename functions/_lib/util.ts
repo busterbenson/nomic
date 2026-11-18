@@ -77,7 +77,7 @@ export const normEmail = (s: string) => s.trim().toLowerCase();
 // up in email subjects and the public log).
 export function cleanName(s: unknown): string | null {
   if (typeof s !== "string") return null;
-  const t = s.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim(); // \s also folds U+2028/2029
+  const t = s.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g, "").replace(/\s+/g, " ").trim(); // \s also folds U+2028/2029
   return t.length >= 1 && [...t].length <= 40 ? t : null;
 }
 

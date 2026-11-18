@@ -24,6 +24,8 @@ export async function issueLink(
   )
     .bind(await sha256Hex(token), t.email, t.purpose, t.gameId ?? null, t.name ?? null, t.marker ?? null, nowIso(now), nowIso(now + TOKEN_TTL_MS))
     .run();
+  // Decoy rows for unknown addresses would otherwise pile up: sweep old ones.
+  ctx.waitUntil(env.DB.prepare("DELETE FROM login_tokens WHERE expires_at < ?").bind(nowIso(now - 24 * 3600 * 1000)).run());
   const link = `${siteUrl(env, request)}/auth/verify?token=${token}`;
   if (t.send && emailMode(env)) {
     ctx.waitUntil(
