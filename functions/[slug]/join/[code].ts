@@ -1,23 +1,24 @@
-// GET /join/:code serves the join page with the game's name and open seats.
-// The form posts to /api/join; the emailed link finishes the join.
-import { page } from "../_lib/pages";
-import { Ctx, MARKERS, esc, gameByCode, normCode, seatsTaken } from "../_lib/util";
+// GET /<slug>/join/:code serves the join page with the game's name and open seats.
+// The form posts to /<slug>/api/join; the emailed link finishes the join.
+import { page } from "../../_lib/pages";
+import { Ctx, MARKERS, esc, normCode, seatsTaken } from "../../_lib/util";
 
-export const onRequestGet = async ({ env, params }: Ctx) => {
+export const onRequestGet = async ({ env, params, data }: Ctx) => {
   const code = normCode(Array.isArray(params.code) ? params.code[0] : params.code);
-  const game = await gameByCode(env, code);
-  if (!game) {
-    return page("Nomic", `<h1>Nomic</h1><div class="now">That code doesn't match a game. Check the link you were sent, or ask whoever invited you.</div>
-      <p><a href="/">See the board</a></p>`, 404);
+  const game = data.game!;
+  const home = `/${esc(game.slug)}/`;
+  if (!code || code !== game.join_code) {
+    return page(game.name, `<h1>${esc(game.name)}</h1><div class="now">That code doesn't match this game. Check the link you were sent, or ask whoever invited you.</div>
+      <p><a href="${home}">See the board</a></p>`, 404);
   }
   const taken = await seatsTaken(env, game.id);
   const takenSet = new Set(taken.map((t) => t.marker));
   const open = game.max_players - taken.length;
   const closed = game.status !== "setup" || open <= 0;
-  const head = `<h1>Nomic</h1><p class="sub">${esc(game.name)}</p>`;
+  const head = `<h1>${esc(game.name)}</h1><p class="sub">Join this game</p>`;
   if (closed) {
-    return page("Nomic", `${head}<div class="now">${game.status !== "setup" ? "This game has already started, so the seats are closed." : "This game is full."}</div>
-      <p><a href="/">See the board</a></p>`, 409);
+    return page(game.name, `${head}<div class="now">${game.status !== "setup" ? "This game has already started, so the seats are closed." : "This game is full."}</div>
+      <p><a href="${home}">See the board</a></p>`, 409);
   }
   const markers = MARKERS.map(
     (m) =>
@@ -36,7 +37,7 @@ export const onRequestGet = async ({ env, params }: Ctx) => {
   <div id="msg" role="status"></div>
 </form>
 <p class="sub">Your email is used to log you in and to send game notifications. It is never shown on the board.</p>
-<p><a href="/">See the board</a></p>
+<p><a href="${home}">See the board</a></p>
 <script>
 const code = ${JSON.stringify(code).replace(/</g, "\\u003c")};
 document.getElementById("f").addEventListener("submit", async (e) => {
@@ -44,7 +45,7 @@ document.getElementById("f").addEventListener("submit", async (e) => {
   const f = new FormData(e.target), msg = document.getElementById("msg");
   msg.textContent = "Sending…";
   try {
-    const res = await fetch("/api/join", { method: "POST", headers: { "content-type": "application/json" },
+    const res = await fetch(${JSON.stringify(`/${game.slug}/api/join`)}, { method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ code, name: f.get("name"), email: f.get("email"), marker: f.get("marker") }) });
     const data = await res.json();
     msg.className = res.ok ? "notice" : "notice err";

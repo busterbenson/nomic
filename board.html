@@ -3,16 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Nomic</title>
+<title>Promptocracy</title>
 <link rel="stylesheet" href="/site.css">
 </head>
 <body>
 <main>
   <div class="bar">
-    <h1>Nomic</h1>
+    <h1 id="title">Promptocracy</h1>
     <div class="who" id="who"></div>
   </div>
-  <p class="sub" id="game-name">A game where changing the rules is a move.</p>
+  <p class="sub" id="game-name"><a href="/">All games</a></p>
   <div class="notice" id="notice" hidden></div>
   <div class="panel" id="notes-panel" hidden>
     <ul class="notes" id="notes"></ul>
@@ -45,16 +45,18 @@
 
   <footer>
     Joining takes a join code: ask whoever invited you for the link.<br>
-    The rules, the board and this page all live in
-    <a href="https://github.com/busterbenson/nomic">github.com/busterbenson/nomic</a>.
+    <span id="repo-line">This game's rules live in its own repo.</span>
     Every passed proposal is a commit.
   </footer>
 </main>
 
 <script>
-  // The board is drawn from /api/game (players, scores, whose turn, the log)
-  // and RULES.md (the rules, still served from git). /api/me and
-  // /api/notifications say who is looking, when someone is logged in.
+  // One page for every game. The slug is the first path segment; every call goes
+  // to /<slug>/api/... The board is drawn from /api/game (players, scores, whose
+  // turn, the log) and /api/rules (the game's own repo, fetched by the server).
+  // /api/me and /api/notifications say who is looking, when someone is logged in.
+  const SLUG = location.pathname.split("/")[1] || "";
+  const BASE = "/" + SLUG;
 
   const esc = s => String(s).replace(/[&<>"']/g, c => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
@@ -65,6 +67,8 @@
     const inline = s => esc(s)
       .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
       .replace(/`([^`]+)`/g, "<code>$1</code>");
+    // The starter template opens with an HTML comment. (Built from pieces: a literal "<!--" inside a script is an HTML-style comment to the JS parser.)
+    md = md.replace(new RegExp("<" + "!--[\\s\\S]*?--" + ">", "g"), "");
     const out = [];
     let para = [], list = [];
     const flushPara = () => {
@@ -104,7 +108,7 @@
     "join-failed": "Couldn't finish joining: the marker was taken, the game is full, or it has started. Open the join link again to pick another marker."
   };
   const api = async (path, body) => {
-    const res = await fetch(path, body === undefined ? { cache: "no-store" } : {
+    const res = await fetch(BASE + path, body === undefined ? { cache: "no-store" } : {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     let data = null; try { data = await res.json(); } catch (e) {}
     return { ok: res.ok, status: res.status, data };
@@ -115,7 +119,7 @@
   function showNotice() {
     const n = new URLSearchParams(location.search).get("notice");
     if (n && NOTICES[n]) { $("notice").textContent = NOTICES[n]; $("notice").hidden = false; }
-    if (n) history.replaceState(null, "", location.pathname);
+    if (n) history.replaceState(null, "", BASE + "/");
   }
 
   async function loadMe() {
@@ -176,10 +180,11 @@
       drawGame(g.data);
     }
     try {
-      const md = await (await fetch("RULES.md", { cache: "no-store" })).text();
-      $("rules").innerHTML = renderMarkdown(md);
+      const r = await fetch(BASE + "/api/rules");
+      if (!r.ok) throw new Error("rules " + r.status);
+      $("rules").innerHTML = renderMarkdown(await r.text());
     } catch (e) {
-      $("rules").innerHTML = '<span class="err">Could not load RULES.md.</span>';
+      $("rules").innerHTML = '<span class="err">Rules unavailable right now. They live in the game\'s repo.</span>';
     }
   }
 
@@ -235,7 +240,11 @@
     const current = game.status === "setup" ? null : (players[game.turn] || null);
     const open = game.max_players - players.length;
 
-    $("game-name").textContent = game.name || "Nomic";
+    document.title = (game.name || "Promptocracy");
+    $("title").textContent = game.name || "Promptocracy";
+    if (/^[\w.-]+\/[\w.-]+$/.test(game.repo || "")) {
+      $("repo-line").innerHTML = `The rules live in <a href="https://github.com/${esc(game.repo)}">github.com/${esc(game.repo)}</a>.`;
+    }
     const status = game.status === "setup"
       ? `Setting up. ${players.length} of ${game.max_players} seats taken.`
       : `Round ${game.round}. ${current ? esc(current.marker + " " + current.name) + "'s turn." : ""}`;

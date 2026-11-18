@@ -1,5 +1,7 @@
-// Small server-rendered pages shared by /join/:code and /auth/verify.
+// Small server-rendered pages: the landing page, /<slug>/join/<code>, /<slug>/auth/verify, 404s.
 import { esc } from "./util";
+
+export const SITE_NAME = "Promptocracy";
 
 export const page = (title: string, inner: string, status = 200) =>
   new Response(
@@ -8,11 +10,20 @@ export const page = (title: string, inner: string, status = 200) =>
     { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } },
   );
 
-// Shown when a link is expired, used, or never existed: ask for a new one.
-export const expiredPage = () =>
+// Unknown game, or a path that is not one: friendly, and it names no real game.
+export const notFoundPage = () =>
   page(
-    "Nomic",
-    `<h1>Nomic</h1><div class="now">This link expired or was already used. Request a new one below.</div>
+    SITE_NAME,
+    `<h1>${SITE_NAME}</h1><div class="now">There is no game at this address. Check the link you were sent.</div>
+<p><a href="/">See the games</a></p>`,
+    404,
+  );
+
+// Shown when a link is expired, used, or never existed: ask for a new one.
+export const expiredPage = (game: { slug: string; name: string }) =>
+  page(
+    game.name,
+    `<h1>${esc(game.name)}</h1><div class="now">This link expired or was already used. Request a new one below.</div>
 <h2>Log in</h2>
 <form class="stack" id="f">
   <label>Email you joined with<input type="email" name="email" required autocomplete="email"></label>
@@ -20,14 +31,14 @@ export const expiredPage = () =>
   <div id="msg" role="status"></div>
 </form>
 <p class="sub">Not in the game yet? Open the join link you were sent and fill in the form again.</p>
-<p><a href="/">See the board</a></p>
+<p><a href="/${esc(game.slug)}/">See the board</a></p>
 <script>
 document.getElementById("f").addEventListener("submit", async (e) => {
   e.preventDefault();
   const msg = document.getElementById("msg");
   msg.textContent = "Sending…";
   try {
-    const res = await fetch("/api/login", { method: "POST", headers: { "content-type": "application/json" },
+    const res = await fetch(${JSON.stringify(`/${game.slug}/api/login`)}, { method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ email: new FormData(e.target).get("email") }) });
     const data = await res.json();
     msg.className = res.ok ? "notice" : "notice err";

@@ -8,6 +8,9 @@ export type Env = {
   DEV_MODE?: string;
   MAIL_FROM?: string;
   SITE_URL?: string;
+  ASSETS?: { fetch(req: Request | string): Promise<Response> };
+  // Where /<slug>/api/rules reads rules from. Unset = GitHub. Tests point it at a local stub.
+  RULES_BASE_URL?: string;
 };
 export type Ctx = {
   request: Request;
@@ -15,6 +18,8 @@ export type Ctx = {
   waitUntil(p: Promise<unknown>): void;
   next(): Promise<Response>;
   params: Record<string, string | string[]>;
+  // Set by the middleware for every /<slug>/... request: the game row.
+  data: { game?: any };
 };
 
 // The marker set from the original board. A game seats at most this many.
@@ -28,7 +33,8 @@ export const MARKERS = [
 
 export const TOKEN_TTL_MS = 15 * 60 * 1000;
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-export const MAX_LINKS_PER_WINDOW = 3; // magic links per email per TOKEN_TTL_MS
+export const MAX_LINKS_PER_WINDOW = 3; // magic links per (game, email) per TOKEN_TTL_MS
+export const MAX_LINKS_PER_EMAIL_HOUR = 10; // magic links per email across all games per hour
 
 export const nowIso = (ms = Date.now()) => new Date(ms).toISOString();
 
@@ -91,14 +97,27 @@ export function siteUrl(env: Env, request: Request): string {
   return (env.SITE_URL || new URL(request.url).origin).replace(/\/+$/, "");
 }
 
-// There is one game at a time: the newest.
-export async function currentGame(env: Env): Promise<any | null> {
-  return await env.DB.prepare("SELECT * FROM games ORDER BY created_at DESC, rowid DESC LIMIT 1").first();
-}
+// ---- game URLs -----------------------------------------------------------
+// Every game lives under /<slug>/. These words would collide with the site's
+// own routes and files, so no game may use them.
+export const RESERVED_SLUGS = new Set([
+  "api", "auth", "join", "assets", "static", "site.css", "index.html", "admin", "www", "mail", "help", "about", "rules", "board",
+]);
+export const validSlug = (s: unknown): s is string =>
+  typeof s === "string" && /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])$/.test(s) && !RESERVED_SLUGS.has(s);
 
-export async function gameByCode(env: Env, code: string): Promise<any | null> {
-  return await env.DB.prepare("SELECT * FROM games WHERE join_code = ?").bind(code).first();
-}
+// A game's rules come from a public GitHub repo. Shapes are checked before any
+// fetch so a bad row can never make the server request an arbitrary URL.
+const SEG = /^[A-Za-z0-9._-]+$/;
+const plain = (p: string) => SEG.test(p) && p !== "." && !p.includes(".."); // no "." or ".." segments
+export const validRepo = (s: unknown): s is string =>
+  typeof s === "string" && s.split("/").length === 2 && s.split("/").every(plain);
+export const validRulesPath = (s: unknown): s is string =>
+  typeof s === "string" && s.length <= 200 && !s.startsWith("/") && s.split("/").every(plain);
+export const validRef = (s: unknown): s is string =>
+  typeof s === "string" && s.length <= 100 && !s.startsWith("/") && !s.endsWith("/") && s.split("/").every(plain);
+
+export const gameBase = (game: { slug: string }) => `/${game.slug}`;
 
 export async function seatsTaken(env: Env, gameId: string): Promise<{ marker: string }[]> {
   const r = await env.DB.prepare("SELECT marker FROM players WHERE game_id = ?").bind(gameId).all();
