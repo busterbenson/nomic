@@ -1,4 +1,4 @@
-// Small shared helpers for the Pages Functions. No dependencies.
+// Small shared helpers for the Worker. No dependencies.
 
 // Loose types: wrangler bundles this with esbuild and does not type-check.
 export type Env = {
@@ -8,7 +8,7 @@ export type Env = {
   DEV_MODE?: string;
   MAIL_FROM?: string;
   SITE_URL?: string;
-  ASSETS?: { fetch(req: Request | string): Promise<Response> };
+  ASSETS: { fetch(req: Request | string): Promise<Response> };
   // Where /<slug>/api/rules reads rules from. Unset = GitHub. Tests point it at a local stub.
   RULES_BASE_URL?: string;
 };
@@ -16,9 +16,9 @@ export type Ctx = {
   request: Request;
   env: Env;
   waitUntil(p: Promise<unknown>): void;
-  next(): Promise<Response>;
-  params: Record<string, string | string[]>;
-  // Set by the middleware for every /<slug>/... request: the game row.
+  // Path parameters of the matched route (only the join page has one: code).
+  params: Record<string, string>;
+  // Set by the router for every /<slug>/... request: the game row.
   data: { game?: any };
 };
 
@@ -45,7 +45,7 @@ export function json(data: unknown, status = 200, headers: Record<string, string
   });
 }
 
-// POST bodies must be JSON. The middleware enforces the content type; a
+// POST bodies must be JSON. The router enforces the content type; a
 // cross-site HTML form cannot send application/json, so this is the CSRF guard
 // that goes with SameSite=Lax cookies.
 export async function readJson(request: Request): Promise<any | null> {

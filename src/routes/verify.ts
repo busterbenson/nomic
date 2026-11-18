@@ -7,10 +7,10 @@
 //       join. Single use, 15 minutes, only for this game. Because it is a plain
 //       browser form post (not JSON), it is guarded by an Origin check: the Origin
 //       header must match SITE_URL (or the request's own origin when SITE_URL is unset).
-import { createSession } from "../../_lib/auth";
-import { notify } from "../../_lib/notify";
-import { expiredPage, page } from "../../_lib/pages";
-import { Ctx, MARKERS, esc, nowIso, sha256Hex, siteUrl } from "../../_lib/util";
+import { createSession } from "../lib/auth";
+import { notify } from "../lib/notify";
+import { expiredPage, page } from "../lib/pages";
+import { Ctx, MARKERS, esc, nowIso, sha256Hex, siteUrl } from "../lib/util";
 
 const back = (slug: string, notice: string, cookie?: string) => {
   const h = new Headers({ location: `/${slug}/?notice=${notice}`, "cache-control": "no-store" });
@@ -19,7 +19,7 @@ const back = (slug: string, notice: string, cookie?: string) => {
 };
 
 // A look at the token that does not use it.
-export const onRequestGet = async ({ env, request, data }: Ctx) => {
+export const get = async ({ env, request, data }: Ctx) => {
   const game = data.game!;
   const token = new URL(request.url).searchParams.get("token") || "";
   const t: any = token
@@ -39,7 +39,7 @@ export const onRequestGet = async ({ env, request, data }: Ctx) => {
   );
 };
 
-export const onRequestPost = async (ctx: Ctx) => {
+export const post = async (ctx: Ctx) => {
   const { env, request } = ctx;
   const game = ctx.data.game!;
   // CSRF: a cross-site page can make a browser POST here, but cannot make it send our Origin.

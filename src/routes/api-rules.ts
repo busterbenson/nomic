@@ -2,13 +2,13 @@
 // GitHub repo (raw.githubusercontent.com/<repo>/<ref>/<path>) and cached 60 s.
 // Public repos only: no token is ever sent. RULES_BASE_URL overrides the host
 // (tests point it at a local stub; never set it in production).
-import { Ctx, validRef, validRepo, validRulesPath } from "../../_lib/util";
+import { Ctx, validRef, validRepo, validRulesPath } from "../lib/util";
 
 const MAX_BYTES = 200_000;
 const text = (body: string, status: number, extra: Record<string, string> = {}) =>
   new Response(body, { status, headers: { "content-type": "text/markdown; charset=utf-8", ...extra } });
 
-export const onRequestGet = async ({ env, data, waitUntil }: Ctx) => {
+export const get = async ({ env, data, waitUntil }: Ctx) => {
   const g = data.game!;
   if (!validRepo(g.repo) || !validRulesPath(g.rules_path) || !validRef(g.rules_ref)) {
     return text("The rules are unavailable: this game's repo settings are invalid.", 502, { "cache-control": "no-store" });

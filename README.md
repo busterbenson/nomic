@@ -11,12 +11,13 @@ rules already allow it.
 
 This repo is the **platform**: one site that can host many games. Each game has
 its own slug, its own players and its own public GitHub repo holding its rules.
-It runs on Cloudflare Pages (static files plus Pages Functions) with a D1
-database. Players join a game with a code, log in with an emailed link, and get
-notifications on the board and by email.
+It runs as one Cloudflare Worker with static assets, plus a D1 database. Players
+join a game with a code, log in with an emailed link, and get notifications on the
+board and by email.
 
-- `board.html`, `site.css`: the board page, one static file served for every game
-- `functions/`: Pages Functions (`functions/[slug]/...` is everything under a game)
+- `src/index.ts`: the Worker and its small hand-written router (no framework)
+- `src/routes/`, `src/lib/`: the page and API handlers, and shared code
+- `public/`: the static files: `board.html` (one board page for every game) and `site.css`
 - `migrations/`: the D1 schema (`0001_init.sql`)
 - `templates/RULES.md`: the starter ruleset a new game repo begins with
 - `scripts/create-game.sh`: creates a game and prints its join link
@@ -36,9 +37,11 @@ notifications on the board and by email.
 A slug is 2 to 40 characters of `a-z`, `0-9` and `-`, starting and ending with a
 letter or digit. These are refused (they would collide with the site's own
 routes): api, auth, join, assets, static, site.css, index.html, admin, www, mail,
-help, about, rules, board. An unknown slug is a friendly 404. The middleware
-(`functions/_middleware.ts`) is an allowlist: only `/`, `/site.css` and the game
-routes answer; everything else (config, migrations, tests, `templates/`) is 404.
+help, about, rules, board. An unknown slug is a friendly 404. The router
+(`src/index.ts`) is an allowlist: only `/`, `/site.css` and the game routes answer;
+everything else is 404. Only `public/` is ever uploaded as static files (config,
+migrations, tests and `templates/` are not), and the Worker runs first for every
+request (`run_worker_first`), so a file in `public/` is served only if the router names it.
 
 ## Run it locally
 
@@ -53,7 +56,7 @@ npm run migrate:local              # create the tables in the local D1
 # testing, borrow this repo's starter ruleset (readable once it is on main):
 scripts/create-game.sh --slug demo --name "Demo game" \
   --repo busterbenson/promptocracy --rules-path templates/RULES.md
-npm run dev                        # http://localhost:8788
+npm run dev                        # wrangler dev: http://localhost:8788
 ```
 
 Open the printed join link (`http://localhost:8788/demo/join/XXXXXXXX`), fill in the
@@ -71,7 +74,7 @@ the repo's rules file is publicly readable with a plain GET and refuses
 otherwise, generates the join code at run time (never committed), and prints
 `<SITE_URL>/<slug>/join/<CODE>`. Run it again with another slug for a second game.
 
-Tests (starts its own `wrangler pages dev` on a throwaway database and a local
+Tests (starts its own `wrangler dev` on a throwaway database and a local
 stand-in for GitHub's raw host; never reaches GitHub; about two minutes):
 
 ```bash
@@ -119,11 +122,11 @@ only; no token), caches it for 60 seconds, and returns it as `text/markdown`. If
 GitHub cannot be reached it answers 502 with a plain message and the board shows
 "Rules unavailable right now" instead of breaking. The repo, path and ref are
 shape-checked before every fetch. `RULES_BASE_URL` replaces the host (the tests
-use it; never set it in production). The 60-second cache only works on a custom domain (the Cache API does nothing on `*.pages.dev`), so there every board load fetches from GitHub.
+use it; never set it in production). The 60-second cache only works on a custom domain (the Cache API does nothing on `*.workers.dev`), so there every board load fetches from GitHub.
 
 ## Email
 
-One sender, chosen at runtime (`functions/_lib/email.ts`):
+One sender, chosen at runtime (`src/lib/email.ts`):
 
 1. `EMAIL` binding present (Cloudflare Email Sending) and `MAIL_FROM` set
 2. else `RESEND_API_KEY` secret and `MAIL_FROM` set (Resend)
@@ -132,30 +135,59 @@ One sender, chosen at runtime (`functions/_lib/email.ts`):
 
 ## Deploy
 
-Run by whoever owns the Cloudflare account. These are the exact commands; none of
-them were run while building this.
+Deploys are done by **Workers Builds**: the Cloudflare Worker `promptocracy` is
+connected to this GitHub repo (root `/`, no build command, no build variables).
+
+- **Merge to `main`** runs `npx wrangler deploy`: that is the production deploy.
+- **A pull request** runs the preview command, `npx wrangler preview` (the default),
+  which creates or updates a **Preview** of the same Worker for that branch and posts
+  its URL. A Preview is isolated from production:
+  - Cloudflare's rule is "Previews do not inherit production settings" (docs:
+    <https://developers.cloudflare.com/workers/previews/>). A Preview gets only what
+    is in the `previews` block of `wrangler.toml`.
+  - That block binds `DB` to a **separate D1 database, `promptocracy-preview`**. A D1
+    database is shared only when two bindings name the same `database_id`
+    (<https://developers.cloudflare.com/workers/previews/resources/>), so previews can
+    never read or write the production `promptocracy` database.
+  - It has no `EMAIL` binding, no `MAIL_FROM`, no `SITE_URL`, no secrets: a Preview
+    answers 503 on join and log-in, so it can never email anyone. The static files
+    and the board work. (All previews share the one preview database. Two open PRs
+    that change the schema would collide; apply migrations from the branch under test.)
+  - **Dashboard settings to check: none to change.** Keep the Preview command at its
+    default, `npx wrangler preview`. Do **not** change it to `npx wrangler versions
+    upload`: Cloudflare says version URLs "use the resources configured for that Worker
+    version and do not create branch-isolated resources", i.e. the production database.
+    Previews need Wrangler 4.135 or newer; `package-lock.json` pins 4.164.
+  - Do not add `[[d1_databases]]` entries under `previews` that point at the production
+    `database_id`, and do not add a top-level `[env.*]` for previews: it is not how
+    Previews pick their bindings.
+
+### One-time setup (run by whoever owns the Cloudflare account)
+
+None of this was run while the conversion was built. Until it is done the live site
+errors, because the database does not exist.
 
 ```bash
 npx wrangler login
 
-# 1. Database. Copy the printed database_id into wrangler.toml.
-npx wrangler d1 create nomic
-npx wrangler d1 migrations apply DB --remote   # one fresh 0001_init.sql: nothing is deployed yet, so there is nothing to migrate
+# 1. Databases. Paste each printed database_id into wrangler.toml
+#    (production: [[d1_databases]]; preview: [[previews.d1_databases]]) and into
+#    wrangler.preview-migrations.toml (the preview id), and commit.
+npx wrangler d1 create promptocracy
+npx wrangler d1 create promptocracy-preview
 
-# 2. Pages project (production branch: main)
-npx wrangler pages project create nomic --production-branch main
+# 2. Schema, on both. Nothing is deployed yet, so there is nothing to migrate.
+npx wrangler d1 migrations apply DB --remote
+npx wrangler d1 migrations apply DB --remote --config wrangler.preview-migrations.toml
 
-# 3. Email. Pick ONE.
-#   a) Cloudflare Email Sending: onboard your sending domain in the dashboard
-#      (Email > Email Sending), uncomment [[send_email]] in wrangler.toml, and set
-#      MAIL_FROM in [vars] to an address on that domain (it is unset by default).
-#   b) Resend: verify a domain at resend.com, then
-npx wrangler pages secret put RESEND_API_KEY --project-name nomic
-#      and set MAIL_FROM in wrangler.toml [vars].
-# Set SITE_URL in wrangler.toml [vars] to the public address once it is known.
+# 3. Email for promptocracy.us. Onboard the sending domain in the dashboard
+#    (Compute > Email Service / Email Sending), then set MAIL_FROM in wrangler.toml [vars]
+#    to an address on it. The [[send_email]] EMAIL binding is already declared.
+#    Or use Resend instead: verify a domain there, set MAIL_FROM, and
+npx wrangler secret put RESEND_API_KEY
+# Set SITE_URL in [vars] to the public address once it is known (the Origin check uses it).
 
-# 4. Ship it
-npx wrangler pages deploy . --project-name nomic --branch main
+# 4. Merge to main: Workers Builds deploys. (Or by hand: npx wrangler deploy.)
 
 # 5. Make the game (its repo must already exist, be public and contain RULES.md) and
 #    print its join link. The code is generated here, not committed.
@@ -163,6 +195,7 @@ SITE_URL=https://promptocracy.us scripts/create-game.sh --remote \
   --slug <slug> --name "<Game name>" --repo <owner>/<game-repo>
 ```
 
-Never set `DEV_MODE` on the deployed project. Pages deploys the repo root, but
-`functions/_middleware.ts` serves only `/`, `/site.css` and the `/<slug>/...`
-game routes; everything else (config, migrations, tests, templates) answers 404.
+To check that the config builds without deploying: `npm run deploy:dry-run`
+(`wrangler deploy --dry-run`).
+
+Never set `DEV_MODE` on the deployed Worker.

@@ -17,16 +17,19 @@ First game: public, played by friends. The site is built to host several games
 | Rules | The rules in effect, and nothing else | `RULES.md` in **the game's own repo** (the starter is `templates/RULES.md` here) |
 | Accounts | Who is playing, per game: email, display name, session. No global users | D1 (`players`, `sessions`, `login_tokens`) |
 | Board state | Players, markers, scores, whose turn, the log | D1 (`games`, `players`, `events`), read through `/<slug>/api/game` |
-| Notifications | In-game and email notices to every player | D1 (`notifications`), sent by `functions/_lib/notify.ts` |
-| Board | The public page that draws the state above and the game's rules | `board.html`, `site.css`, served by Cloudflare Pages |
+| Notifications | In-game and email notices to every player | D1 (`notifications`), sent by `src/lib/notify.ts` |
+| Board | The public page that draws the state above and the game's rules | `public/board.html`, `public/site.css`, served as Worker static assets |
 | Rulings | Every ruling the referee makes, with the rules it cited | `rulings/` (created by the first ruling) |
 | Referee | An AI model that drafts proposals and rules on what the rules mean | GitHub Actions + the Claude API (not built yet) |
 
 ## Hosting, accounts and the git / D1 split
 
-The site is hosted on **Cloudflare Pages**: static files plus Pages Functions
-(`functions/`) and a **D1** database. Pages replaced GitHub Pages so the game can
-grow server-side features without a second host.
+The site is hosted as one **Cloudflare Worker with static assets** (`src/index.ts`
+routes requests; `public/` holds the static files) and a **D1** database. It runs
+on Workers rather than Pages because Cloudflare recommends Workers for new
+projects. It replaced GitHub Pages so the game can grow server-side features
+without a second host. Pull request previews get their own D1 database, never the
+production one (see the README).
 
 Anyone who wants to play signs up on the site: a **join code** (shared as a link,
 `/<slug>/join/<CODE>`) lets them ask for a seat, and an emailed **magic link** completes
@@ -44,7 +47,7 @@ database itself refuses a notification, session or turn that points at a player
 of another game). The same email in two games is two accounts. A session cookie
 is scoped to `Path=/<slug>` and is also checked against the game on the server.
 
-**Platform vs game.** The platform code (functions, schema, board page) lives in
+**Platform vs game.** The platform code (Worker, schema, board page) lives in
 `busterbenson/promptocracy` and changes only through Buster's PRs. Each game's
 rules live in that game's own public repo (`games.repo`, `rules_path`,
 `rules_ref`), and later its rulings and any game-specific board extensions do
@@ -127,11 +130,11 @@ code, not in the referee's instructions:
   D1 access later, with a narrow token that can write scores, turns and
   notifications but not accounts or sessions. Not built.
 - **How the referee gets a turn.** The site records the turn; the referee will
-  read `turns` rows with status `submitted` (mechanism not built: a Pages Function
+  read `turns` rows with status `submitted` (mechanism not built: a Worker route
   calling the Claude API, or a scheduled job).
 - **The referee's model and API key.** Which model, and whose key pays for it.
   Each turn is a few calls; the cost per game should be small.
-- **Publishing.** Creating the Cloudflare Pages project and D1 database, and
+- **Publishing.** Creating the Cloudflare D1 databases (production and preview), and
   choosing the email sender (Cloudflare Email Sending or Resend). Steps are in the README.
 - **Email abuse limits.** Magic links are limited per address, not per IP.
 - **Starting values.** 10 points per passed proposal and a win at 100 are
@@ -140,7 +143,7 @@ code, not in the referee's instructions:
 ## Order of work
 
 1. This skeleton: rules, state, a static board. (This PR.)
-2. Deploy to Cloudflare Pages, make the game, share the join link. (Accounts, join codes and notifications are built.)
+2. Deploy to Cloudflare Workers, make the game, share the join link. (Accounts, join codes and notifications are built.)
 3. The referee: an Action that reads a turn issue, drafts the proposal and opens
    the PR.
 4. Vote counting, merge, score and turn updates.

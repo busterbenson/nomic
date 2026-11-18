@@ -1,10 +1,10 @@
 // GET /<slug>/join/:code serves the join page with the game's name and open seats.
 // The form posts to /<slug>/api/join; the emailed link finishes the join.
-import { page } from "../../_lib/pages";
-import { Ctx, MARKERS, esc, normCode, seatsTaken } from "../../_lib/util";
+import { page } from "../lib/pages";
+import { Ctx, MARKERS, esc, normCode, seatsTaken } from "../lib/util";
 
-export const onRequestGet = async ({ env, params, data }: Ctx) => {
-  const code = normCode(Array.isArray(params.code) ? params.code[0] : params.code);
+export const get = async ({ env, params, data }: Ctx) => {
+  const code = normCode(params.code);
   const game = data.game!;
   const home = `/${esc(game.slug)}/`;
   if (!code || code !== game.join_code) {

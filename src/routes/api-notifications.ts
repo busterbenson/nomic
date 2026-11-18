@@ -1,7 +1,7 @@
-import { getPlayer } from "../../../_lib/auth";
-import { Ctx, json } from "../../../_lib/util";
+import { getPlayer } from "../lib/auth";
+import { Ctx, json } from "../lib/util";
 
-export const onRequestGet = async ({ env, request, data }: Ctx) => {
+export const get = async ({ env, request, data }: Ctx) => {
   const game = data.game!;
   const p = await getPlayer(env, request, game);
   if (!p) return json({ error: "Not logged in." }, 401);

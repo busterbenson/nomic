@@ -1,7 +1,7 @@
 // PUBLIC. Never include emails, player ids or the join code.
-import { Ctx, json } from "../../_lib/util";
+import { Ctx, json } from "../lib/util";
 
-export const onRequestGet = async ({ env, data }: Ctx) => {
+export const get = async ({ env, data }: Ctx) => {
   const g = data.game!;
   const players = (
     await env.DB.prepare(

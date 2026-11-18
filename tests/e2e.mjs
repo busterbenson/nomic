@@ -1,4 +1,4 @@
-// End-to-end checks against a real `wrangler pages dev` with a LOCAL D1.
+// End-to-end checks against a real `wrangler dev` (Worker + static assets) with a LOCAL D1.
 // Run: npm test
 import { rmSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -193,7 +193,7 @@ try {
   console.log("guards");
   const form = await fetch(A + "/one/api/login", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "email=a@b.co" });
   check("POST without application/json is refused (415)", form.status === 415);
-  for (const p of ["/wrangler.toml", "/.dev.vars", "/migrations/0001_init.sql", "/package.json", "/functions/[slug]/api/join.ts", "/tests/e2e.mjs", "/RULES.md", "/templates/RULES.md", "/board.html", "/board", "/index.html", "/scripts/create-game.sh", "/one/wrangler.toml", "/one/migrations/0001_init.sql", "/one/RULES.md"]) {
+  for (const p of ["/wrangler.toml", "/.dev.vars", "/migrations/0001_init.sql", "/package.json", "/src/index.ts", "/src/lib/util.ts", "/README.md", "/DESIGN.md", "/package-lock.json", "/wrangler.preview-migrations.toml", "/public/site.css", "/public/board.html", "/site.css/", "/board.html/", "/.git/config", "/functions/[slug]/api/join.ts", "/tests/e2e.mjs", "/RULES.md", "/templates/RULES.md", "/board.html", "/board", "/index.html", "/scripts/create-game.sh", "/one/wrangler.toml", "/one/migrations/0001_init.sql", "/one/RULES.md"]) {
     const r = await client(A).get(p);
     check(`${p} is not served`, r.status === 404);
   }
@@ -201,6 +201,13 @@ try {
   const board = await client(A).get("/one/");
   check("the stylesheet and the board are served", css.status === 200 && /css/.test(css.headers.get("content-type")) && board.status === 200 && board.text.includes("/api/game") && board.text.includes("/api/rules"));
   check("the board page is the same file for every game", (await client(A).get("/two/")).text === board.text);
+  check("site.css is served as text/css with the security headers", /^text\/css/.test(css.headers.get("content-type")) && css.headers.get("x-content-type-options") === "nosniff" && css.headers.get("referrer-policy") === "same-origin" && css.text.includes("{"));
+  check("the board is text/html, no-store, with the security headers", /^text\/html/.test(board.headers.get("content-type")) && board.headers.get("cache-control") === "no-store" && board.headers.get("x-frame-options") === "DENY");
+  const head = await fetch(A + "/one/", { method: "HEAD" });
+  check("HEAD on the board answers 200", head.status === 200);
+  const wrongMethod = await client(A).post("/one/api/game", {});
+  check("a wrong method on a known route is 404", wrongMethod.status === 404 && (await client(A).post("/", {})).status === 404);
+  check("a 404 carries the security headers too", (await fetch(A + "/src/index.ts")).headers.get("x-content-type-options") === "nosniff");
 
   console.log("turns");
   // game 1 is still in 'setup' here

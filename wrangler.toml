@@ -1,28 +1,59 @@
-# Cloudflare Pages project config. Pages Functions live in functions/ and are
-# bundled by wrangler; there is no build step.
-name = "nomic"
-pages_build_output_dir = "."
+# One Cloudflare Worker with static assets, deployed by Workers Builds from GitHub
+# (production: `npx wrangler deploy`; pull requests: `npx wrangler preview`).
+# There is no build step.
+name = "promptocracy"
+main = "src/index.ts"
 compatibility_date = "2026-11-01"
+
+# Static files: only what is in public/ can ever be served, and only because
+# src/index.ts asks for it (run_worker_first), so a file in public/ is NOT public
+# unless the router names it. Everything else in the repo is never uploaded.
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
+html_handling = "none"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "nomic"
-# Placeholder. `wrangler d1 create nomic` prints the real id; paste it here
-# before the first deploy. Local development ignores it.
+database_name = "promptocracy"
+# Placeholder. `npx wrangler d1 create promptocracy` prints the real id; paste it
+# here before the first deploy. Local development ignores it.
 database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
 
 [vars]
 # (Nothing is set by default; see below.)
-# The From address for every email, e.g. MAIL_FROM = "Promptocracy <play@your-domain.com>".
+# The From address for every email, e.g. MAIL_FROM = "Promptocracy <play@promptocracy.us>".
 # Must be on a domain set up for sending (Cloudflare Email Sending, or the domain
 # you verified with Resend). Deliberately unset: until you set it, join and
 # log-in answer 503 "email is not configured" instead of failing silently.
-# MAIL_FROM = "Promptocracy <play@example.com>"
-# Public address of the site, used in email links. Set it once the site has one.
+# MAIL_FROM = "Promptocracy <play@promptocracy.us>"
+# Public address of the site, used in email links and the Origin check. Set it once the site has one.
 # SITE_URL = "https://promptocracy.us"   # placeholder: the domain is not registered yet
 
-# Cloudflare Email Sending. Uncomment to send through it (see README, Deploy).
-# When this binding exists it is used first; otherwise RESEND_API_KEY, then
+# Cloudflare Email Sending (https://developers.cloudflare.com/email-service/). When this
+# binding exists AND MAIL_FROM is set it is used first; otherwise RESEND_API_KEY, then
 # DEV_MODE (local only). With none of them, join and log-in return 503.
-# [[send_email]]
-# name = "EMAIL"
+[[send_email]]
+name = "EMAIL"
+# No `remote = true` here: that flag only affects `wrangler dev` (it would make local
+# development, and the tests, demand a Cloudflare login to reach the real service).
+# A deployed Worker always uses the real service.
+
+# ---------------------------------------------------------------------------
+# PREVIEWS (pull request builds) MUST NEVER SHARE THE PRODUCTION DATABASE.
+# `wrangler preview` creates a Preview of this same Worker per branch. Cloudflare's
+# docs: "Previews do not inherit production settings", so a Preview gets only what
+# is in this `previews` block: the preview D1 below, no EMAIL binding, no MAIL_FROM,
+# no SITE_URL, no secrets. With no email sender, a preview answers 503 on join and
+# log-in; it can never email a real person. (Only top-level `assets` and
+# `compatibility_date` carry over.)
+# https://developers.cloudflare.com/workers/previews/
+# https://developers.cloudflare.com/workers/previews/resources/
+[[previews.d1_databases]]
+binding = "DB"
+database_name = "promptocracy-preview"
+# Placeholder. `npx wrangler d1 create promptocracy-preview` prints the real id.
+# Keep wrangler.preview-migrations.toml pointing at the same database.
+database_id = "00000000-0000-0000-0000-000000000001"

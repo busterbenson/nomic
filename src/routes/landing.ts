@@ -1,11 +1,11 @@
 // GET / : the list of games. Public. Names, status and player counts only: no
 // emails, no join codes.
-import { SITE_NAME, page } from "./_lib/pages";
-import { Ctx, esc } from "./_lib/util";
+import { SITE_NAME, page } from "../lib/pages";
+import { Ctx, esc } from "../lib/util";
 
 const STATUS: Record<string, string> = { setup: "Setting up", playing: "In play", over: "Finished" };
 
-export const onRequestGet = async ({ env }: Ctx) => {
+export const get = async ({ env }: Ctx) => {
   const games = (
     await env.DB.prepare(
       `SELECT g.slug, g.name, g.status, g.max_players,

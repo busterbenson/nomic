@@ -1,0 +1,11 @@
+# Used ONLY to run migrations against the preview database (not for deploys):
+#   npx wrangler d1 migrations apply DB --remote --config wrangler.preview-migrations.toml
+# Keep database_id identical to [[previews.d1_databases]] in wrangler.toml.
+name = "promptocracy"
+compatibility_date = "2026-11-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "promptocracy-preview"
+database_id = "00000000-0000-0000-0000-000000000001"
+migrations_dir = "migrations"
