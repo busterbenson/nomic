@@ -80,6 +80,8 @@ try {
   check("empty and 41-char names rejected",
     (await client(A).post("/api/join", { code: game.code, email: "n1@example.com", name: "  ", marker: MARKERS[2] })).status === 400 &&
     (await client(A).post("/api/join", { code: game.code, email: "n2@example.com", name: "x".repeat(41), marker: MARKERS[2] })).status === 400);
+  check("a name made only of zero-width joiners is rejected",
+    (await client(A).post("/api/join", { code: game.code, email: "zz@example.com", name: "\u200C\u200D", marker: MARKERS[3] })).status === 400);
   check("unknown marker rejected", (await client(A).post("/api/join", { code: game.code, email: "n3@example.com", name: "Z", marker: "💩" })).status === 400);
   // full game: `small` seats 2. It is not the current game (game 1 has a later created_at) but joins go by code.
   await join(A, small.code, { email: "s1@example.com", name: "S1", marker: MARKERS[0] });
@@ -162,6 +164,9 @@ try {
   const early = await bo.post("/api/turn", { prompt: "Too early." });
   check("a turn in a game that has not started is refused (409)", early.status === 409, early.text);
   d1(state, "UPDATE games SET status = 'playing', round = 1, turn = 1 WHERE name = 'Nomic, game 1'");
+  const outsider = client(A);
+  await outsider.post("/api/login", { email: "s1@example.com" }).then(async (r) => outsider.get(new URL(r.data.dev_link).pathname + new URL(r.data.dev_link).search));
+  check("a logged-in user who is not a player in this game is refused (403)", (await outsider.post("/api/turn", { prompt: "Hi" })).status === 403);
   check("logged-out submit is 401", (await client(A).post("/api/turn", { prompt: "Hi" })).status === 401);
   const notYours = await ada.post("/api/turn", { prompt: "Out of turn." });
   check("a player who is not up is refused (403)", notYours.status === 403 && /not your turn/i.test(notYours.data.error), notYours.text);

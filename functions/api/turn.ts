@@ -22,16 +22,24 @@ export const onRequestPost = async (ctx: Ctx) => {
   if (player.turn_order !== game.turn) return json({ error: "It is not your turn." }, 403);
 
   const now = nowIso();
-  try {
-    await env.DB.prepare(
-      "INSERT INTO turns (id, game_id, user_id, round, turn_index, prompt, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'submitted', ?, ?)",
-    ).bind(crypto.randomUUID(), game.id, user.id, game.round, game.turn, prompt, now, now).run();
-  } catch {
-    return json({ error: "You already took your turn this round." }, 409);
-  }
   const name = user.display_name;
-  await env.DB.prepare("INSERT INTO events (game_id, kind, text, created_at) VALUES (?, 'turn_submitted', ?, ?)")
-    .bind(game.id, `${player.marker} ${name} took their turn.`, now).run();
+  // The turn and its log line land together or not at all.
+  try {
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO turns (id, game_id, user_id, round, turn_index, prompt, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'submitted', ?, ?)",
+      ).bind(crypto.randomUUID(), game.id, user.id, game.round, game.turn, prompt, now, now),
+      env.DB.prepare("INSERT INTO events (game_id, kind, text, created_at) VALUES (?, 'turn_submitted', ?, ?)")
+        .bind(game.id, `${player.marker} ${name} took their turn.`, now),
+    ]);
+  } catch (e: any) {
+    // Only the one-live-turn-per-round index means "already took it"; anything else is a real failure.
+    if (/UNIQUE constraint failed/i.test(String(e?.message || e) + String(e?.cause?.message || ""))) {
+      return json({ error: "You already took your turn this round." }, 409);
+    }
+    console.error("turn insert failed:", e?.message || e);
+    return json({ error: "Could not record your turn. Try again." }, 500);
+  }
   try {
     await notify(env, ctx, game.id, {
       kind: "turn_submitted", body: `${player.marker} ${name} took their turn.`, link: "/",

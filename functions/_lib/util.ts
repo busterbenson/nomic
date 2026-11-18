@@ -78,7 +78,8 @@ export const normEmail = (s: string) => s.trim().toLowerCase();
 export function cleanName(s: unknown): string | null {
   if (typeof s !== "string") return null;
   const t = s.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/[\u200B\u200E\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g, "").replace(/\s+/g, " ").trim(); // \s also folds U+2028/2029
-  return t.length >= 1 && [...t].length <= 40 ? t : null;
+  // ZWNJ/ZWJ are kept (real orthography) but a name needs at least one visible character.
+  return /[^\s\u200C\u200D]/.test(t) && [...t].length <= 40 ? t : null;
 }
 
 export const esc = (s: unknown) =>

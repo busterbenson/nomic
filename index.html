@@ -220,6 +220,7 @@
       if (r.ok) { const g = await api("/api/game"); if (g.ok) drawGame(g.data); loadNotes(false); return; }
       msg.className = "notice err";
       msg.textContent = (r.data && r.data.error) || "Something went wrong.";
+      if (r.status === 409 || r.status === 403) { const g = await api("/api/game"); if (g.ok) { const t = msg.textContent; drawGame(g.data); const m = $("turn-msg"); if (m) m.textContent = t; } }
     });
   }
 
