@@ -14,30 +14,61 @@ First game: public, played by friends.
 | Piece | What it is | Where it lives |
 |---|---|---|
 | Rules | The rules in effect, and nothing else | `RULES.md` |
-| Board state | Players, markers, scores, whose turn, the log | `game.json` |
-| Board | The public page that draws the two files above | `index.html`, served by GitHub Pages |
+| Accounts | Who is playing: email, display name, session | D1 (`users`, `sessions`, `login_tokens`) |
+| Board state | Players, markers, scores, whose turn, the log | D1 (`games`, `players`, `events`), read through `/api/game` |
+| Notifications | In-game and email notices to every player | D1 (`notifications`), sent by `functions/_lib/notify.ts` |
+| Board | The public page that draws the state above and `RULES.md` | `index.html`, `site.css`, served by Cloudflare Pages |
 | Rulings | Every ruling the referee makes, with the rules it cited | `rulings/` (created by the first ruling) |
 | Referee | An AI model that drafts proposals and rules on what the rules mean | GitHub Actions + the Claude API (not built yet) |
 
-The repo is the game. Every passed proposal is a commit, so `git log` is the
-game's history, and the referee rereads `RULES.md` and `game.json` on every turn
-instead of remembering anything. (Earlier attempts to have a chatbot run Nomic
+## Hosting, accounts and the git / D1 split
+
+The site is hosted on **Cloudflare Pages**: static files plus Pages Functions
+(`functions/`) and a **D1** database. Pages replaced GitHub Pages so the game can
+grow server-side features without a second host.
+
+Anyone who wants to play signs up on the site: a **join code** (shared as a link,
+`/join/<CODE>`) lets them ask for a seat, and an emailed **magic link** completes
+it and logs them in. There are no passwords. Every player then gets
+**notifications**: an in-game list under a bell on the board, and an email. Only
+"player joined" exists today; turn started, proposal open, vote result and ruling
+call the same `notify()` once the referee exists.
+
+What lives where:
+
+- **In git:** the rules (`RULES.md`), the site's code, the schema (`migrations/`),
+  and later `rulings/`. Changes here are proposals, votes and commits.
+- **In D1:** everything players create by using the site: accounts, sessions,
+  scores, whose turn, notifications and the public game log. These change on every
+  action and hold private data (emails), so they do not belong in a public repo.
+- **Never in the repo:** emails, session ids, the join code. The code is generated
+  when the game is created (`scripts/create-game.sh`).
+
+The repo still holds the rules: every passed proposal is a commit, so `git log` is
+the history of the rules, and the referee rereads `RULES.md` and the game state
+on every turn instead of remembering anything. (Earlier attempts to have a chatbot run Nomic
 broke down because the model lost track of which rules were in effect.)
 
 ## A turn
 
-1. **Prompt.** The player whose turn it is opens a GitHub issue with one prompt,
-   e.g. "Anyone who proposes a rule about cats gets 5 points."
-2. **Draft.** The referee replies on the issue with:
+1. **Prompt.** The player whose turn it is logs in to the website and submits one
+   prompt in the "Your turn" box, e.g. "Anyone who proposes a rule about cats gets
+   5 points." (Turns come in through the site, not GitHub issues, so players do not
+   need GitHub accounts.) The site records it in the `turns` table as `submitted`,
+   shows it to the whole table, and notifies the other players. One live turn per
+   player per round; 1 to 2000 characters. **Built.**
+   *Not built yet:* submitting does **not** advance the turn. The turn moves on
+   only when the referee and the vote exist (next PR), so for now a submitted turn
+   just waits, and `games.turn` / `games.round` are changed by hand.
+2. **Draft.** The referee replies on the turn with:
    - whether this is a **proposal** (it changes the rules or the site) or an
      **action** (something a rule already allows);
    - for a proposal, the exact new text and a PR containing it;
    - the rules it relied on, and any conflicts it found.
    The player can revise the prompt until the draft says what they meant.
-3. **Vote.** Players vote on the PR with a comment, `/vote yes` or `/vote no`.
-   Code counts the votes (rule 104), not the referee.
-4. **Result.** If the vote passes, the PR merges, `game.json` is updated (points,
-   next turn, a log line), and the board updates. If it fails, the PR is
+3. **Vote.** Players vote on the website (or on the PR; undecided). Code counts the votes (rule 104), not the referee.
+4. **Result.** If the vote passes, the PR merges, the game state in D1 is updated
+   (points, next turn, a log line), and the board updates. If it fails, the PR is
    closed and the turn moves on.
 5. **Appeal.** Any ruling can be appealed within 24 hours. A majority vote
    overturns it (rule 201).
@@ -51,7 +82,7 @@ code, not in the referee's instructions:
 
 - It only ever **proposes**: it opens PRs and writes comments. It never merges.
   Merging happens when the code that counts votes says the vote passed.
-- It may edit `RULES.md`, `game.json`, `rulings/` and the site's files. It may not
+- It may edit `RULES.md`, `rulings/` and the site's files. It may not
   touch `.github/` (the workflows and their secrets). A rule cannot change that,
   because the rule would have to be carried out by code the referee can't edit.
 - It cites rule numbers for every ruling and writes the ruling down. Later
@@ -61,21 +92,30 @@ code, not in the referee's instructions:
 
 ## Not decided yet
 
-- **Players.** Who, and how many. `game.json` has Buster plus four open seats.
-- **How players submit turns.** GitHub issues mean every player needs a GitHub
-  account. The alternative is a small form on the site that files the issue for
-  them.
+- **Players.** Who. Up to 5 can join with the code; the seat count and the
+  marker set are constants today.
+- **Starting a game.** Nothing flips a game from `setup` to `playing` yet; it is a
+  manual D1 update (see README). Seats close at that point.
+- **Who the host is.** The first person to join is marked host, which grants
+  nothing yet.
+- **Referee access to D1.** The referee (a GitHub Action today) will get its own
+  D1 access later, with a narrow token that can write scores, turns and
+  notifications but not accounts or sessions. Not built.
+- **How the referee gets a turn.** The site records the turn; the referee will
+  read `turns` rows with status `submitted` (mechanism not built: a Pages Function
+  calling the Claude API, or a scheduled job).
 - **The referee's model and API key.** Which model, and whose key pays for it.
   Each turn is a few calls; the cost per game should be small.
-- **Publishing.** Turning on GitHub Pages for this repo (Settings → Pages →
-  deploy from `main`, root) makes the board public.
+- **Publishing.** Creating the Cloudflare Pages project and D1 database, and
+  choosing the email sender (Cloudflare Email Sending or Resend). Steps are in the README.
+- **Email abuse limits.** Magic links are limited per address, not per IP.
 - **Starting values.** 10 points per passed proposal and a win at 100 are
   placeholders, meant to be changed in play.
 
 ## Order of work
 
 1. This skeleton: rules, state, a static board. (This PR.)
-2. Turn on Pages and fill in the players.
+2. Deploy to Cloudflare Pages, make the game, share the join link. (Accounts, join codes and notifications are built.)
 3. The referee: an Action that reads a turn issue, drafts the proposal and opens
    the PR.
 4. Vote counting, merge, score and turn updates.

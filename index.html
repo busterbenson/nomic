@@ -4,59 +4,29 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Nomic</title>
-<style>
-  :root {
-    --bg: #f6f1e7; --ink: #1f1b16; --muted: #6d6458; --line: #d8cfbf;
-    --card: #fffaf0; --track: #e9e0cf; --accent: #c47f2c;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #17140f; --ink: #efe7da; --muted: #a69a88; --line: #3a332a;
-      --card: #201c16; --track: #2c261e; --accent: #e0a050;
-    }
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--ink);
-    font: 16px/1.5 Georgia, "Iowan Old Style", serif;
-  }
-  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
-  h1 { font-size: 2.2rem; margin: 0; letter-spacing: 0.02em; }
-  h2 { font-size: 1.1rem; text-transform: uppercase; letter-spacing: 0.12em;
-       color: var(--muted); margin: 40px 0 12px; font-weight: normal; }
-  .sub { color: var(--muted); margin: 4px 0 0; }
-  .now { margin-top: 16px; padding: 12px 14px; background: var(--card);
-         border-left: 3px solid var(--accent); }
-  /* the track: one lane per player, marker placed by score */
-  .lane { position: relative; height: 40px; margin: 6px 0;
-          background: var(--track); border-radius: 20px; }
-  .lane .marker { position: absolute; top: 50%; transform: translate(-50%, -50%);
-                  font-size: 26px; transition: left 0.6s ease; }
-  .lane .finish { position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
-                  color: var(--muted); font-size: 0.8rem; }
-  table { width: 100%; border-collapse: collapse; }
-  td, th { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: left; }
-  th { color: var(--muted); font-weight: normal; font-size: 0.85rem; }
-  td.num { text-align: right; font-variant-numeric: tabular-nums; }
-  tr.current td { font-weight: bold; }
-  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
-         margin-right: 6px; vertical-align: middle; }
-  #rules h1 { display: none; }
-  #rules h2 { margin-top: 24px; }
-  #rules p, #rules li { max-width: 65ch; }
-  #rules code { font-size: 0.9em; background: var(--track); padding: 1px 4px; border-radius: 3px; }
-  .log li { color: var(--muted); }
-  .log li b { color: var(--ink); font-weight: normal; }
-  footer { margin-top: 48px; color: var(--muted); font-size: 0.85rem; }
-  a { color: var(--accent); }
-  .err { color: #b5452f; }
-</style>
+<link rel="stylesheet" href="/site.css">
 </head>
 <body>
 <main>
-  <h1>Nomic</h1>
+  <div class="bar">
+    <h1>Nomic</h1>
+    <div class="who" id="who"></div>
+  </div>
   <p class="sub" id="game-name">A game where changing the rules is a move.</p>
+  <div class="notice" id="notice" hidden></div>
+  <div class="panel" id="notes-panel" hidden>
+    <ul class="notes" id="notes"></ul>
+  </div>
+  <div class="panel" id="login-panel" hidden>
+    <form class="stack" id="login-form">
+      <label>Email you joined with<input type="email" name="email" required autocomplete="email"></label>
+      <button class="primary" type="submit">Email me a log-in link</button>
+      <div id="login-msg" role="status"></div>
+    </form>
+  </div>
   <div class="now" id="now">Loading the board…</div>
+
+  <div class="panel" id="turn-box" hidden></div>
 
   <h2>The track</h2>
   <div id="track"></div>
@@ -74,6 +44,7 @@
   <div id="rules">Loading…</div>
 
   <footer>
+    Joining takes a join code: ask whoever invited you for the link.<br>
     The rules, the board and this page all live in
     <a href="https://github.com/busterbenson/nomic">github.com/busterbenson/nomic</a>.
     Every passed proposal is a commit.
@@ -81,9 +52,9 @@
 </main>
 
 <script>
-  // Everything on this page is drawn from two files in the repo: game.json
-  // (players, scores, whose turn) and RULES.md (the rules). The referee
-  // updates those files; this page only reads them.
+  // The board is drawn from /api/game (players, scores, whose turn, the log)
+  // and RULES.md (the rules, still served from git). /api/me and
+  // /api/notifications say who is looking, when someone is logged in.
 
   const esc = s => String(s).replace(/[&<>"']/g, c => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
@@ -125,56 +96,174 @@
     return out.join("\n");
   }
 
-  async function load() {
-    const opts = { cache: "no-store" };
-    let game;
-    try {
-      game = await (await fetch("game.json", opts)).json();
-    } catch (e) {
-      document.getElementById("now").innerHTML = '<span class="err">Could not load game.json.</span>';
+  const $ = id => document.getElementById(id);
+  const NOTICES = {
+    "joined": "You're in. Your seat is yours.",
+    "welcome-back": "You're logged in.",
+    "link-invalid": "That link has expired or was already used. Log in again to get a new one.",
+    "join-failed": "Couldn't finish joining: the marker was taken, the game is full, or it has started. Open the join link again to pick another marker."
+  };
+  const api = async (path, body) => {
+    const res = await fetch(path, body === undefined ? { cache: "no-store" } : {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    let data = null; try { data = await res.json(); } catch (e) {}
+    return { ok: res.ok, status: res.status, data };
+  };
+  let ME = null, DATA = null;   // who is looking, and the last /api/game
+  const when = iso => String(iso || "").slice(0, 10);
+
+  function showNotice() {
+    const n = new URLSearchParams(location.search).get("notice");
+    if (n && NOTICES[n]) { $("notice").textContent = NOTICES[n]; $("notice").hidden = false; }
+    if (n) history.replaceState(null, "", location.pathname);
+  }
+
+  async function loadMe() {
+    const me = await api("/api/me");
+    const who = $("who");
+    ME = me.ok ? me.data : null;
+    drawTurn();
+    if (!me.ok) {
+      who.innerHTML = '<button id="login-btn" type="button">Log in</button>';
+      $("login-btn").onclick = () => { $("login-panel").hidden = !$("login-panel").hidden; };
       return;
     }
+    const p = me.data.player;
+    who.innerHTML = `<span>${p ? esc(p.marker) + " " : ""}${esc(me.data.user.name)}</span>
+      <button class="bell" id="bell" type="button" aria-label="Notifications">🔔<span class="badge" id="badge" hidden>0</span></button>
+      <button id="logout" type="button">Log out</button>`;
+    $("logout").onclick = async () => { await api("/api/logout", {}); location.reload(); };
+    $("bell").onclick = toggleNotes;
+    await loadNotes(false);
+  }
 
-    const players = game.players || [];
+  async function loadNotes(open) {
+    const r = await api("/api/notifications");
+    if (!r.ok) return;
+    const list = r.data.notifications, unread = r.data.unread;
+    $("badge").textContent = unread; $("badge").hidden = !unread;
+    $("notes").innerHTML = list.length ? list.map(n => `<li class="${n.read_at ? "" : "unread"}">${esc(n.body)}
+      <small>${esc(when(n.created_at))}</small></li>`).join("") : "<li>Nothing yet.</li>";
+    if (open && unread) { await api("/api/notifications/read", { all: true }); $("badge").hidden = true; }
+  }
+  async function toggleNotes() {
+    const panel = $("notes-panel");
+    panel.hidden = !panel.hidden;
+    if (!panel.hidden) await loadNotes(true);
+  }
+
+  $("login-form").addEventListener("submit", async e => {
+    e.preventDefault();
+    const msg = $("login-msg");
+    msg.textContent = "Sending…";
+    const r = await api("/api/login", { email: new FormData(e.target).get("email") });
+    msg.className = r.ok ? "notice" : "notice err";
+    msg.textContent = (r.data && (r.data.message || r.data.error)) || "Something went wrong.";
+    if (r.ok && r.data.dev_link) {
+      const p = document.createElement("p"); p.className = "dev"; p.append("Dev mode link: ");
+      const a = document.createElement("a"); a.href = r.data.dev_link; a.textContent = r.data.dev_link;
+      p.append(a); msg.append(p);
+    }
+  });
+
+  async function load() {
+    showNotice();
+    loadMe();
+    const g = await api("/api/game");
+    if (!g.ok) {
+      $("now").innerHTML = '<span class="err">No game has been set up yet.</span>';
+    } else {
+      drawGame(g.data);
+    }
+    try {
+      const md = await (await fetch("RULES.md", { cache: "no-store" })).text();
+      $("rules").innerHTML = renderMarkdown(md);
+    } catch (e) {
+      $("rules").innerHTML = '<span class="err">Could not load RULES.md.</span>';
+    }
+  }
+
+  // The turn box: a form for the player whose turn it is, otherwise who is playing.
+  function drawTurn() {
+    const box = $("turn-box");
+    if (!DATA || DATA.game.status !== "playing") { box.hidden = true; return; }
+    const { game, players, turns } = DATA;
+    const current = players[game.turn];
+    if (!current) { box.hidden = true; return; }
+    const mine = ME && ME.player && ME.player.turn_order === game.turn;
+    const taken = turns.find(t => t.turn_index === game.turn);
+    let html = "";
+    if (mine && !taken) {
+      html = `<strong>Your turn.</strong> Write one prompt: a rule change, or something the rules let you do.
+        <form class="stack" id="turn-form" style="margin-top:10px; max-width:none">
+          <textarea name="prompt" rows="4" maxlength="2000" required aria-label="Your prompt"></textarea>
+          <button class="primary" type="submit">Submit my turn</button>
+          <div id="turn-msg" role="status"></div>
+        </form>`;
+    } else if (mine) {
+      html = `<strong>Your turn.</strong> Your prompt is in: waiting for the referee.
+        <blockquote class="prompt">${esc(taken.prompt)}</blockquote>`;
+    } else if (taken) {
+      html = `<strong>${esc(current.marker + " " + current.name)}</strong> took their turn. Waiting for the referee.
+        <blockquote class="prompt">${esc(taken.prompt)}</blockquote>`;
+    } else {
+      html = `<strong>${esc(current.marker + " " + current.name)}</strong> is playing.`;
+    }
+    box.innerHTML = html;
+    box.hidden = false;
+    const form = $("turn-form");
+    if (form) form.addEventListener("submit", async e => {
+      e.preventDefault();
+      const msg = $("turn-msg");
+      msg.textContent = "Sending…";
+      const r = await api("/api/turn", { prompt: new FormData(form).get("prompt") });
+      if (r.ok) { const g = await api("/api/game"); if (g.ok) drawGame(g.data); loadNotes(false); return; }
+      msg.className = "notice err";
+      msg.textContent = (r.data && r.data.error) || "Something went wrong.";
+      if (r.status === 409 || r.status === 403) { const g = await api("/api/game"); if (g.ok) { const t = msg.textContent; drawGame(g.data); const m = $("turn-msg"); if (m) m.textContent = t; } }
+    });
+  }
+
+  function drawGame(data) {
+    DATA = data;
+    drawTurn();
+    const game = data.game;
+    // Players come ordered by turn_order; the marker identifies a player.
+    const players = data.players || [];
     const target = Number(game.winning_score) || 100;
     // Nobody is "to play" until the game has started.
     const current = game.status === "setup" ? null : (players[game.turn] || null);
+    const open = game.max_players - players.length;
 
-    document.getElementById("game-name").textContent = game.game || "Nomic";
+    $("game-name").textContent = game.name || "Nomic";
     const status = game.status === "setup"
-      ? "Setting up. Waiting for players to take their seats."
+      ? `Setting up. ${players.length} of ${game.max_players} seats taken.`
       : `Round ${game.round}. ${current ? esc(current.marker + " " + current.name) + "'s turn." : ""}`;
-    document.getElementById("now").innerHTML = status +
+    $("now").innerHTML = status +
       ` First to <strong>${target}</strong> points wins (for now).`;
 
     // Track: one lane per player. Clamp so a marker never leaves its lane.
-    document.getElementById("track").innerHTML = players.map(p => {
+    $("track").innerHTML = players.length ? players.map(p => {
       const pct = Math.max(0, Math.min(1, (Number(p.score) || 0) / target));
       return `<div class="lane" title="${esc(p.name)}: ${esc(p.score)} points">
         <span class="marker" style="left: calc(20px + ${pct} * (100% - 70px))">${esc(p.marker)}</span>
         <span class="finish">${target}</span>
       </div>`;
-    }).join("");
+    }).join("") : `<p class="sub">${open > 0 ? "No one has taken a seat yet." : ""}</p>`;
 
     // Scoreboard, highest first; ties keep turn order.
     const ranked = players.map((p, i) => ({ ...p, i }))
       .sort((a, b) => (b.score - a.score) || (a.i - b.i));
-    document.getElementById("scores").innerHTML = ranked.map(p => `
-      <tr class="${current && p.id === current.id ? "current" : ""}">
+    $("scores").innerHTML = ranked.map(p => `
+      <tr class="${current && p.marker === current.marker ? "current" : ""}">
         <td><span class="dot" style="background:${/^#[0-9a-f]{3,8}$/i.test(p.color) ? p.color : "#888"}"></span>${esc(p.marker)} ${esc(p.name)}</td>
-        <td>${current && p.id === current.id ? "to play" : ""}</td>
+        <td>${current && p.marker === current.marker ? "to play" : ""}</td>
         <td class="num">${esc(p.score)}</td>
       </tr>`).join("");
 
-    document.getElementById("log").innerHTML = (game.log || []).slice().reverse()
-      .map(e => `<li><b>${esc(e.when)}</b> · ${esc(e.text)}</li>`).join("");
-
-    try {
-      const md = await (await fetch("RULES.md", opts)).text();
-      document.getElementById("rules").innerHTML = renderMarkdown(md);
-    } catch (e) {
-      document.getElementById("rules").innerHTML = '<span class="err">Could not load RULES.md.</span>';
-    }
+    // The API sends the newest first.
+    $("log").innerHTML = (data.events || [])
+      .map(e => `<li><b>${esc(when(e.created_at))}</b> · ${esc(e.text)}</li>`).join("");
   }
   load();
 </script>
