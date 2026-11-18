@@ -142,6 +142,11 @@ try {
   await client(A).post("/api/join", { code: game.code, email: "zw@example.com", name: "\u0645\u06CC\u200C\u062E", marker: MARKERS[3] });
   check("ZWNJ (needed in Persian names) is kept", d1(state, "SELECT display_name FROM login_tokens WHERE email = 'zw@example.com'")[0].display_name.includes("\u200C"));
 
+  const burst = await Promise.all(Array.from({ length: 8 }, () => client(A).post("/api/login", { email: "burst@example.com" })));
+  check("concurrent requests cannot exceed the limit (at most 3 admitted)",
+    burst.filter((r) => r.status === 200).length <= 3 && d1(state, "SELECT COUNT(*) AS n FROM login_tokens WHERE email = 'burst@example.com'")[0].n <= 3,
+    burst.map((r) => r.status).join());
+
   console.log("logout");
   const sessionsBefore = d1(state, "SELECT COUNT(*) AS n FROM sessions")[0].n;
   const out = await known.post("/api/logout");

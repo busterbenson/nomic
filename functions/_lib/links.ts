@@ -14,16 +14,21 @@ export async function tooManyLinks(env: Ctx["env"], email: string): Promise<bool
 export async function issueLink(
   ctx: Ctx,
   t: { email: string; purpose: "join" | "login"; gameId?: string; name?: string; marker?: string; send: boolean; subject: string; intro: string },
-): Promise<string> {
+): Promise<string | null> {
   const { env, request } = ctx;
   const token = randomToken(32);
   const now = Date.now();
-  await env.DB.prepare(
+  // The limit check and the insert are ONE statement, so concurrent requests
+  // cannot all read "under the limit" and each insert a token.
+  const ins = await env.DB.prepare(
     `INSERT INTO login_tokens (token_hash, email, purpose, game_id, display_name, marker, created_at, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+     SELECT ?, ?, ?, ?, ?, ?, ?, ?
+     WHERE (SELECT COUNT(*) FROM login_tokens WHERE email = ? AND created_at > ?) < ?`,
   )
-    .bind(await sha256Hex(token), t.email, t.purpose, t.gameId ?? null, t.name ?? null, t.marker ?? null, nowIso(now), nowIso(now + TOKEN_TTL_MS))
+    .bind(await sha256Hex(token), t.email, t.purpose, t.gameId ?? null, t.name ?? null, t.marker ?? null, nowIso(now), nowIso(now + TOKEN_TTL_MS),
+      t.email, nowIso(now - TOKEN_TTL_MS), MAX_LINKS_PER_WINDOW)
     .run();
+  if (!(ins.meta?.changes > 0)) return null; // over the limit: nothing stored, nothing sent
   // Decoy rows for unknown addresses would otherwise pile up: sweep old ones.
   ctx.waitUntil(env.DB.prepare("DELETE FROM login_tokens WHERE expires_at < ?").bind(nowIso(now - 24 * 3600 * 1000)).run());
   const link = `${siteUrl(env, request)}/auth/verify?token=${token}`;

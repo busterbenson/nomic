@@ -28,6 +28,7 @@ export const onRequestPost = async (ctx: Ctx) => {
     subject: `Finish joining ${game.name}`,
     intro: `Click to take your seat in ${game.name} as ${marker} ${name}.`,
   });
+  if (!link) return json({ error: "Too many links requested. Wait 15 minutes and try again." }, 429);
   const res: any = { ok: true, message: "Check your email for a link to finish joining." };
   if (emailMode(env) === "dev") res.dev_link = link;
   return json(res);

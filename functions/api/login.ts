@@ -17,6 +17,7 @@ export const onRequestPost = async (ctx: Ctx) => {
     email, purpose: "login", send: !!user,
     subject: "Your Nomic log-in link", intro: "Click to log in to Nomic.",
   });
+  if (!link) return json({ error: "Too many links requested. Wait 15 minutes and try again." }, 429);
   const res: any = { ok: true, message: "If that address has an account, a log-in link is on its way." };
   if (emailMode(env) === "dev") res.dev_link = link;
   return json(res);
