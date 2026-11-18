@@ -1,0 +1,26 @@
+# Cloudflare Pages project config. Pages Functions live in functions/ and are
+# bundled by wrangler; there is no build step.
+name = "nomic"
+pages_build_output_dir = "."
+compatibility_date = "2026-11-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "nomic"
+# Placeholder. `wrangler d1 create nomic` prints the real id; paste it here
+# before the first deploy. Local development ignores it.
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[vars]
+# The From address for every email. Must be on a domain set up for sending
+# (Cloudflare Email Sending, or the domain you verified with Resend).
+# "Nomic <play@example.com>" works too.
+MAIL_FROM = "Nomic <play@example.com>"
+# Public address of the site, used in email links. Set it once the site has one.
+# SITE_URL = "https://nomic.pages.dev"
+
+# Cloudflare Email Sending. Uncomment to send through it (see README, Deploy).
+# When this binding exists it is used first; otherwise RESEND_API_KEY, then
+# DEV_MODE (local only). With none of them, join and log-in return 503.
+# [[send_email]]
+# name = "EMAIL"

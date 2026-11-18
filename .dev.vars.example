@@ -1,0 +1,4 @@
+# Copy to .dev.vars for local development. Never commit .dev.vars.
+# DEV_MODE=1 writes email to the outbox table and returns magic links in the
+# API response. It exists for local testing only: never set it in production.
+DEV_MODE=1
