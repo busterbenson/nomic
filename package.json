@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "wrangler dev --port 8788",
     "migrate:local": "wrangler d1 migrations apply DB --local",
-    "test": "node tests/e2e.mjs",
+    "test": "node tests/e2e.mjs && node tests/board.mjs",
     "deploy:dry-run": "wrangler deploy --dry-run"
   },
   "devDependencies": {

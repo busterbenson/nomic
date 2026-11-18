@@ -22,14 +22,23 @@ export type Ctx = {
   data: { game?: any };
 };
 
-// The marker set from the original board. A game seats at most this many.
-export const MARKERS = [
-  { marker: "🦉", color: "#c47f2c" },
-  { marker: "🐙", color: "#3a7ca5" },
-  { marker: "🦊", color: "#b5452f" },
-  { marker: "🐢", color: "#4f8a4b" },
-  { marker: "🦋", color: "#7a5ba8" },
-];
+// The piece colours a player can claim at sign-up: eight, chosen to stay apart for
+// the common kinds of colour blindness (hue, lightness and a name to go with each).
+// A game seats at most this many players. `players.color` stores the key.
+export const PALETTE = [
+  { key: "vermilion", name: "Vermilion", hex: "#d55e00" },
+  { key: "saffron", name: "Saffron", hex: "#e8b200" },
+  { key: "moss", name: "Moss", hex: "#6f8f1f" },
+  { key: "teal", name: "Teal", hex: "#009e8e" },
+  { key: "cobalt", name: "Cobalt", hex: "#0059b3" },
+  { key: "violet", name: "Violet", hex: "#7b4fc0" },
+  { key: "rose", name: "Rose", hex: "#d97fae" },
+  { key: "graphite", name: "Graphite", hex: "#5a6270" },
+] as const;
+export const MAX_SEATS = PALETTE.length;
+export const colorInfo = (key: unknown) => PALETTE.find((c) => c.key === key) ?? null;
+// How a player is named in the log, emails and notifications: "Ana (Teal)".
+export const who = (name: string, colorKey: string) => `${name} (${colorInfo(colorKey)?.name ?? colorKey})`;
 
 export const TOKEN_TTL_MS = 15 * 60 * 1000;
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -101,7 +110,7 @@ export function siteUrl(env: Env, request: Request): string {
 // Every game lives under /<slug>/. These words would collide with the site's
 // own routes and files, so no game may use them.
 export const RESERVED_SLUGS = new Set([
-  "api", "auth", "join", "assets", "static", "site.css", "index.html", "admin", "www", "mail", "help", "about", "rules", "board",
+  "api", "auth", "join", "assets", "static", "site.css", "theme.css", "index.html", "admin", "www", "mail", "help", "about", "rules", "board", "js", "vendor",
 ]);
 export const validSlug = (s: unknown): s is string =>
   typeof s === "string" && /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])$/.test(s) && !RESERVED_SLUGS.has(s);
@@ -119,7 +128,18 @@ export const validRef = (s: unknown): s is string =>
 
 export const gameBase = (game: { slug: string }) => `/${game.slug}`;
 
-export async function seatsTaken(env: Env, gameId: string): Promise<{ marker: string }[]> {
-  const r = await env.DB.prepare("SELECT marker FROM players WHERE game_id = ?").bind(gameId).all();
-  return r.results as { marker: string }[];
+export async function seatsTaken(env: Env, gameId: string): Promise<{ color: string }[]> {
+  const r = await env.DB.prepare("SELECT color FROM players WHERE game_id = ?").bind(gameId).all();
+  return r.results as { color: string }[];
+}
+
+// A game seats at most as many players as there are colours.
+export const seatLimit = (game: { max_players: number }) => Math.min(game.max_players, MAX_SEATS);
+
+// Free text typed by players (tile names and descriptions): no control characters or
+// bidi tricks, whitespace folded, 1..max characters. Returns null when it does not fit.
+export function cleanText(s: unknown, max: number): string | null {
+  if (typeof s !== "string") return null;
+  const t = s.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/[\u200B\u200E\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g, "").replace(/\s+/g, " ").trim();
+  return /[^\s\u200C\u200D]/.test(t) && [...t].length <= max ? t : null;
 }

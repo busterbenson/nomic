@@ -6,7 +6,7 @@ export const SITE_NAME = "Promptocracy";
 export const page = (title: string, inner: string, status = 200) =>
   new Response(
     `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(title)}</title><link rel="stylesheet" href="/site.css"></head><body><main>${inner}</main></body></html>`,
+<title>${esc(title)}</title><link rel="stylesheet" href="/theme.css"><link rel="stylesheet" href="/site.css"></head><body><main>${inner}</main></body></html>`,
     { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } },
   );
 

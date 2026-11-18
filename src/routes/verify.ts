@@ -10,7 +10,7 @@
 import { createSession } from "../lib/auth";
 import { notify } from "../lib/notify";
 import { expiredPage, page } from "../lib/pages";
-import { Ctx, MARKERS, esc, nowIso, sha256Hex, siteUrl } from "../lib/util";
+import { Ctx, MAX_SEATS, colorInfo, esc, nowIso, sha256Hex, siteUrl, who } from "../lib/util";
 
 const back = (slug: string, notice: string, cookie?: string) => {
   const h = new Headers({ location: `/${slug}/?notice=${notice}`, "cache-control": "no-store" });
@@ -80,7 +80,7 @@ export const post = async (ctx: Ctx) => {
   }
 
   // purpose === "join"
-  const color = MARKERS.find((m) => m.marker === t.marker)?.color;
+  const color = colorInfo(t.color)?.key;
   if (!color) return back(game.slug, "join-failed");
 
   const existing: any = await env.DB.prepare("SELECT id FROM players WHERE game_id = ? AND email = ?").bind(game.id, t.email).first();
@@ -92,26 +92,26 @@ export const post = async (ctx: Ctx) => {
   let joined = false;
   try {
     const r = await env.DB.prepare(
-      `INSERT INTO players (id, game_id, email, display_name, marker, color, score, turn_order, is_host, joined_at)
-       SELECT ?, g.id, ?, ?, ?, ?, 0,
+      `INSERT INTO players (id, game_id, email, display_name, color, score, turn_order, is_host, joined_at)
+       SELECT ?, g.id, ?, ?, ?, 0,
               (SELECT COUNT(*) FROM players WHERE game_id = g.id),
               (SELECT COUNT(*) = 0 FROM players WHERE game_id = g.id), ?
        FROM games g
-       WHERE g.id = ? AND g.status = 'setup' AND (SELECT COUNT(*) FROM players WHERE game_id = g.id) < g.max_players`,
-    ).bind(playerId, t.email, t.display_name, t.marker, color, now, game.id).run();
+       WHERE g.id = ? AND g.status = 'setup' AND (SELECT COUNT(*) FROM players WHERE game_id = g.id) < MIN(g.max_players, ${MAX_SEATS})`,
+    ).bind(playerId, t.email, t.display_name, color, now, game.id).run();
     joined = (r.meta?.changes ?? 0) > 0;
   } catch {
-    joined = false; // marker taken in the meantime (UNIQUE constraint)
+    joined = false; // color taken in the meantime (UNIQUE constraint)
   }
   if (!joined) return back(game.slug, "join-failed");
 
   const name = t.display_name; // stored raw, escaped when drawn
   await env.DB.prepare("INSERT INTO events (game_id, kind, text, created_at) VALUES (?, 'player_joined', ?, ?)")
-    .bind(game.id, `${t.marker} ${name} took a seat.`, now).run();
+    .bind(game.id, `${who(name, color)} took a seat.`, now).run();
   // The seat is already taken: a notification problem must not cost them the session.
   try {
     await notify(env, ctx, game, {
-      kind: "player_joined", body: `${t.marker} ${name} joined the game.`,
+      kind: "player_joined", body: `${who(name, color)} joined the game.`,
       email: true, exceptPlayerId: playerId, baseUrl: siteUrl(env, request),
     });
   } catch (e: any) {

@@ -1,6 +1,6 @@
 import { emailMode } from "../lib/email";
 import { issueLink, tooManyLinks } from "../lib/links";
-import { Ctx, MARKERS, cleanName, json, normCode, normEmail, readJson, seatsTaken, validEmail } from "../lib/util";
+import { Ctx, PALETTE, cleanName, json, normCode, normEmail, readJson, seatLimit, seatsTaken, validEmail, who } from "../lib/util";
 
 export const post = async (ctx: Ctx) => {
   const { env } = ctx;
@@ -13,10 +13,10 @@ export const post = async (ctx: Ctx) => {
   if (!normCode(body.code) || normCode(body.code) !== game.join_code) return json({ error: "That code doesn't match this game." }, 404);
   if (game.status !== "setup") return json({ error: "This game has already started, so the seats are closed." }, 409);
   const taken = await seatsTaken(env, game.id);
-  if (taken.length >= game.max_players) return json({ error: "This game is full." }, 409);
-  const marker = MARKERS.find((m) => m.marker === body.marker)?.marker;
-  if (!marker) return json({ error: "Pick one of the markers." }, 400);
-  if (taken.some((t) => t.marker === marker)) return json({ error: "Someone already has that marker. Pick another." }, 409);
+  if (taken.length >= seatLimit(game)) return json({ error: "This game is full." }, 409);
+  const color = PALETTE.find((c) => c.key === body.color)?.key;
+  if (!color) return json({ error: "Pick one of the piece colors." }, 400);
+  if (taken.some((t) => t.color === color)) return json({ error: "Someone already has that color. Pick another." }, 409);
   const name = cleanName(body.name);
   if (!name) return json({ error: "Your name needs 1 to 40 characters." }, 400);
   if (!validEmail(body.email)) return json({ error: "That doesn't look like an email address." }, 400);
@@ -25,9 +25,9 @@ export const post = async (ctx: Ctx) => {
   if (await tooManyLinks(env, game.id, email)) return json({ error: "Too many links requested. Wait 15 minutes and try again." }, 429);
   // Same answer whether or not this address already has a seat here.
   const link = await issueLink(ctx, game, {
-    email, purpose: "join", name, marker, send: true,
+    email, purpose: "join", name, color, send: true,
     subject: `Finish joining ${game.name}`,
-    intro: `Click to take your seat in ${game.name} as ${marker} ${name}.`,
+    intro: `Click to take your seat in ${game.name} as ${who(name, color)}.`,
   });
   if (!link) return json({ error: "Too many links requested. Wait 15 minutes and try again." }, 429);
   const res: any = { ok: true, message: "Check your email for a link to finish joining." };

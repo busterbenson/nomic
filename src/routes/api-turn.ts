@@ -3,7 +3,7 @@
 // the referee and the vote are built.
 import { getPlayer } from "../lib/auth";
 import { notify } from "../lib/notify";
-import { Ctx, json, nowIso, readJson, siteUrl } from "../lib/util";
+import { Ctx, json, nowIso, readJson, siteUrl, who } from "../lib/util";
 
 export const post = async (ctx: Ctx) => {
   const { env, request } = ctx;
@@ -26,7 +26,7 @@ export const post = async (ctx: Ctx) => {
         "INSERT INTO turns (id, game_id, player_id, round, turn_index, prompt, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'submitted', ?, ?)",
       ).bind(crypto.randomUUID(), game.id, player.id, game.round, game.turn, prompt, now, now),
       env.DB.prepare("INSERT INTO events (game_id, kind, text, created_at) VALUES (?, 'turn_submitted', ?, ?)")
-        .bind(game.id, `${player.marker} ${name} took their turn.`, now),
+        .bind(game.id, `${who(name, player.color)} took their turn.`, now),
     ]);
   } catch (e: any) {
     // Only the one-live-turn-per-round index means "already took it"; anything else is a real failure.
@@ -38,11 +38,11 @@ export const post = async (ctx: Ctx) => {
   }
   try {
     await notify(env, ctx, game, {
-      kind: "turn_submitted", body: `${player.marker} ${name} took their turn.`,
+      kind: "turn_submitted", body: `${who(name, player.color)} took their turn.`,
       email: true, exceptPlayerId: player.id, baseUrl: siteUrl(env, request),
     });
   } catch (e: any) {
     console.error("notify failed after turn:", e?.message || e);
   }
-  return json({ ok: true, status: "submitted", message: "Turn recorded. Waiting for the referee." });
+  return json({ ok: true, status: "submitted", message: "Turn recorded. Waiting for Chalant (the referee)." });
 };

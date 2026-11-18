@@ -32,7 +32,7 @@ within 48 hours of the referee publishing its final text. A proposal that
 changes a core rule (1xx) passes only if every player votes yes. Votes are
 counted by code, not by the referee.
 
-**105. The referee.** The referee is an AI model. It drafts each prompt into
+**105. The referee.** The referee is Chalant, an AI model. It drafts each prompt into
 exact text before anyone votes, and it rules on what the rules mean. Every
 ruling names the rules it relies on and is written to `rulings/`. Earlier
 rulings count as precedent.
@@ -57,3 +57,33 @@ starting is skipped for that round.
 **206. Paradox.** If the rules are changed so that further play is impossible,
 the first player who is unable to complete a turn wins. This rule takes
 precedence over every other rule about winning. (Suber's rule 213.)
+
+**207. The Board.** The game is played on an endless grid of square tiles. Every
+tile has a name like a chess square: the columns are letters and the rows are
+numbers, so C4 is the third column, fourth row. Land begins as an island 8 tiles
+wide and 8 tall, labeled A-H and 1-8. [setting: board.island]
+
+**208. Land and terrain.** Only land exists; everything else is open sea. The
+island's corners are bitten off, two tiles at each, with up to two more bites out of
+its sides. Most land is meadow. A quarter of it is water (a lake inside the island),
+sand (along the coast), stone or forest, in clumps. Land may only exist east of
+column A and north of row 1: nowhere with x or y below 0.
+[setting: board.erosion, board.terrain, board.land_bounds]
+
+**209. Claiming land.** Instead of proposing, a player may claim one unowned land
+tile by its name, for example "C4". The tile is theirs and their piece stands on it.
+A turn holds one such move, and the turn ends with it.
+[setting: turn.actions, turn.actions_per_turn]
+
+**210. Naming and describing.** Instead of proposing, a player may name and
+describe one tile they own (the name up to 40 characters, the description up to 280).
+It counts as the player's move for the turn. The referee, or the site, records the
+name and description on the tile. [setting: turn.actions, turn.actions_per_turn]
+
+**211. Harvest.** At the end of each round, when every player has had a turn, every
+player gets 1 point for each tile they own. [setting: harvest]
+
+**212. Changing the board.** A passed rule may change any setting named in brackets in
+rules 207 to 211, or add new tile properties, new kinds of terrain, or new moves.
+The brackets name the setting each rule controls, so a change to a number, a size or
+a timing is a change to that rule's wording and to that setting together.

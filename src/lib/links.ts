@@ -21,7 +21,7 @@ export async function tooManyLinks(env: Ctx["env"], gameId: string, email: strin
 export async function issueLink(
   ctx: Ctx,
   game: { id: string; slug: string; name: string },
-  t: { email: string; purpose: "join" | "login"; name?: string; marker?: string; send: boolean; subject: string; intro: string },
+  t: { email: string; purpose: "join" | "login"; name?: string; color?: string; send: boolean; subject: string; intro: string },
 ): Promise<string | null> {
   const { env, request } = ctx;
   const token = randomToken(32);
@@ -29,12 +29,12 @@ export async function issueLink(
   // The limit checks and the insert are ONE statement, so concurrent requests
   // cannot all read "under the limit" and each insert a token.
   const ins = await env.DB.prepare(
-    `INSERT INTO login_tokens (token_hash, game_id, email, purpose, display_name, marker, created_at, expires_at)
+    `INSERT INTO login_tokens (token_hash, game_id, email, purpose, display_name, color, created_at, expires_at)
      SELECT ?, ?, ?, ?, ?, ?, ?, ?
      WHERE (SELECT COUNT(*) FROM login_tokens WHERE game_id = ? AND email = ? AND created_at > ?) < ?
        AND (SELECT COUNT(*) FROM login_tokens WHERE email = ? AND created_at > ?) < ?`,
   )
-    .bind(await sha256Hex(token), game.id, t.email, t.purpose, t.name ?? null, t.marker ?? null, nowIso(now), nowIso(now + TOKEN_TTL_MS),
+    .bind(await sha256Hex(token), game.id, t.email, t.purpose, t.name ?? null, t.color ?? null, nowIso(now), nowIso(now + TOKEN_TTL_MS),
       game.id, t.email, nowIso(now - TOKEN_TTL_MS), MAX_LINKS_PER_WINDOW,
       t.email, nowIso(now - HOUR_MS), MAX_LINKS_PER_EMAIL_HOUR)
     .run();

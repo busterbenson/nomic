@@ -1,0 +1,49 @@
+/* THE THEME: every color the site uses, in one file. Restyle the site by editing only this file.
+   Page and form colors are used by site.css and board.html. The --terrain-*, --sea-*, --tile-*
+   and --pawn-* tokens are also read by the board's WebGL and SVG renderers (public/js/theme.js),
+   so the island, its grid and its pieces follow it too. Placeholder palette: neutral and calm. */
+:root {
+  --bg: #f6f1e7; --ink: #1f1b16; --muted: #6d6458; --line: #d8cfbf;
+  --card: #fffaf0; --track: #e9e0cf; --accent: #c47f2c;
+
+  /* the board */
+  --board-bg: #e6edf0;            /* the sea behind the island */
+  --sea-line: #5b7480;            /* the faint endless grid (its strength fades out toward the view's edges) */
+  --sea-line-alpha: 0.32;
+  --terrain-meadow: #a9c47c;
+  --terrain-water: #6fa8cf;
+  --terrain-forest: #5a8a5f;
+  --terrain-stone: #a3a29c;
+  --terrain-sand: #e3d097;
+  --decor-forest: #33583d;        /* trees on forest tiles */
+  --decor-stone: #7c7c79;         /* boulders on stone tiles */
+  --tile-select: #ffffff;         /* outline of the selected tile */
+  --tile-hover: #ffffff;
+  --pawn-ink: #1d1a16;            /* a piece's foot */
+  --board-label: #3d4a52;         /* A-H / 1-8 along the island and the C4 tag */
+  --board-label-bg: rgba(255, 255, 255, 0.85);
+  --light-sky: #ffffff; --light-ground: #8d8f96;   /* WebGL lights */
+  --light-sky-strength: 1.5; --light-sun-strength: 1.5;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17140f; --ink: #efe7da; --muted: #a69a88; --line: #3a332a;
+    --card: #201c16; --track: #2c261e; --accent: #e0a050;
+
+    --board-bg: #1c2428;
+    --sea-line: #8fa8b4;
+    --sea-line-alpha: 0.28;
+    --terrain-meadow: #8aa862;
+    --terrain-water: #4f86ad;
+    --terrain-forest: #46734b;
+    --terrain-stone: #85847e;
+    --terrain-sand: #c9b67e;
+    --decor-forest: #2a4a33;
+    --decor-stone: #66665f;
+    --tile-select: #ffffff;
+    --tile-hover: #ffffff;
+    --board-label: #d5e0e5;
+    --board-label-bg: rgba(20, 26, 29, 0.85);
+    --light-sky-strength: 1.25; --light-sun-strength: 1.3;
+  }
+}

@@ -27,14 +27,14 @@ export async function createSession(env: Env, game: { id: string; slug: string }
   return cookieHeader(game.slug, id, SESSION_TTL_MS / 1000);
 }
 
-export type Player = { id: string; email: string; display_name: string; marker: string; color: string; score: number; turn_order: number; is_host: number };
+export type Player = { id: string; email: string; display_name: string; color: string; score: number; turn_order: number; is_host: number };
 
 // The logged-in player of THIS game, or null.
 export async function getPlayer(env: Env, request: Request, game: { id: string }): Promise<Player | null> {
   const id = readCookie(request, COOKIE);
   if (!id) return null;
   return await env.DB.prepare(
-    `SELECT p.id, p.email, p.display_name, p.marker, p.color, p.score, p.turn_order, p.is_host
+    `SELECT p.id, p.email, p.display_name, p.color, p.score, p.turn_order, p.is_host
      FROM sessions s JOIN players p ON p.id = s.player_id AND p.game_id = s.game_id
      WHERE s.id_hash = ? AND s.game_id = ? AND s.expires_at > ?`,
   ).bind(await sha256Hex(id), game.id, nowIso()).first();

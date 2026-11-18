@@ -1,7 +1,8 @@
 // The Worker's entry point and router. Static files (public/) are bound as ASSETS and
 // the Worker runs first for every request (run_worker_first), so only what is routed
 // here, or lives in public/ and is named below, is ever served. Everything else is 404.
-//  1. Routes: /  (the list of games), /site.css, and under /<slug>/ : the board,
+//  1. Routes: /  (the list of games), /site.css, the board's scripts (/js/*.js and the pinned
+//     three.js in /vendor/*.js), and under /<slug>/ : the board,
 //     /<slug>/join/<code>, /<slug>/auth/verify, /<slug>/api/*.
 //  2. For a /<slug>/ request, look the game up once and hand it to the handler in
 //     ctx.data.game. An unknown, malformed or reserved slug is a 404 before any handler runs.
@@ -20,6 +21,8 @@ import * as apiLogout from "./routes/api-logout";
 import * as apiMe from "./routes/api-me";
 import * as apiRules from "./routes/api-rules";
 import * as apiTurn from "./routes/api-turn";
+import * as apiBoard from "./routes/api-board";
+import * as apiAction from "./routes/api-action";
 import * as apiNotifications from "./routes/api-notifications";
 import * as apiNotificationsRead from "./routes/api-notifications-read";
 
@@ -31,7 +34,7 @@ type Methods = { get?: Handler; post?: Handler };
 // /<slug>/api/<name>
 const API: Record<string, Methods> = {
   game: apiGame, me: apiMe, join: apiJoin, login: apiLogin, logout: apiLogout,
-  turn: apiTurn, rules: apiRules, notifications: apiNotifications,
+  turn: apiTurn, rules: apiRules, notifications: apiNotifications, board: apiBoard, action: apiAction,
 };
 
 const secure = (res: Response) => {
@@ -60,11 +63,13 @@ async function route(request: Request, env: Env, execCtx: ExecutionContext): Pro
   if (segs.length > 1 && segs[segs.length - 1] === "") segs.pop();
 
   const isRoot = path === "/";
-  const isCss = path === "/site.css";
+  const isCss = path === "/site.css" || path === "/theme.css";
+  // The board's own scripts and the vendored three.js: one flat folder each, plain file names only.
+  const isScript = /^\/(js|vendor)\/[A-Za-z0-9._-]+\.js$/.test(path) && !path.includes("..");
   const slug = segs[0];
   const sub = segs[1];
-  const isGame = !isRoot && !isCss && validSlug(slug) && (sub === undefined || SUBROUTES.has(sub));
-  if (!isRoot && !isCss && !isGame) return notFound();
+  const isGame = !isRoot && !isCss && !isScript && validSlug(slug) && (sub === undefined || SUBROUTES.has(sub));
+  if (!isRoot && !isCss && !isScript && !isGame) return notFound();
 
   // /auth/verify is the one POST that is a browser form post (the "Continue"
   // button); it is guarded by an Origin check inside the handler instead.
@@ -78,6 +83,7 @@ async function route(request: Request, env: Env, execCtx: ExecutionContext): Pro
 
   if (isRoot) return run(landing, method, ctx);
   if (isCss) return method === "GET" || method === "HEAD" ? env.ASSETS.fetch(request) : notFound();
+  if (isScript) return method === "GET" || method === "HEAD" ? env.ASSETS.fetch(request) : notFound();
 
   const game = await env.DB.prepare("SELECT * FROM games WHERE slug = ?").bind(slug).first();
   if (!game) return sub === "api" ? json({ error: "There is no game at this address." }, 404) : notFoundPage();

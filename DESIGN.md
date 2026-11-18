@@ -16,9 +16,9 @@ First game: public, played by friends. The site is built to host several games
 |---|---|---|
 | Rules | The rules in effect, and nothing else | `RULES.md` in **the game's own repo** (the starter is `templates/RULES.md` here) |
 | Accounts | Who is playing, per game: email, display name, session. No global users | D1 (`players`, `sessions`, `login_tokens`) |
-| Board state | Players, markers, scores, whose turn, the log | D1 (`games`, `players`, `events`), read through `/<slug>/api/game` |
+| Board state | Players, piece colors, scores, whose turn, the log, the tiles | D1 (`games`, `players`, `events`), read through `/<slug>/api/game` |
 | Notifications | In-game and email notices to every player | D1 (`notifications`), sent by `src/lib/notify.ts` |
-| Board | The public page that draws the state above and the game's rules | `public/board.html`, `public/site.css`, served as Worker static assets |
+| Board | The public page that draws the state above and the game's rules; the island is drawn in WebGL (three.js, vendored) with an SVG fallback | `public/board.html`, `public/js/`, `public/theme.css` (the one file of colors), `public/site.css`, served as Worker static assets |
 | Rulings | Every ruling the referee makes, with the rules it cited | `rulings/` (created by the first ruling) |
 | Referee | An AI model that drafts proposals and rules on what the rules mean | GitHub Actions + the Claude API (not built yet) |
 
@@ -94,6 +94,47 @@ broke down because the model lost track of which rules were in effect.)
 5. **Appeal.** Any ruling can be appealed within 24 hours. A majority vote
    overturns it (rule 201).
 
+## The board
+
+The world is an **infinite isometric grid of square tiles**, with signed integer
+coordinates `(x, y)`: x runs east, y runs north. Only **land** exists as data: a
+`tiles` row per land tile; everything else is open sea (drawn as a faint grid that
+fades out). A new game starts with an **island** of side 8 (`--size`, 4 to 16) on
+x 0..7, y 0..7, with each corner bitten off so it reads as an island, which leaves
+54 to 58 land tiles.
+
+- **Names.** Tiles are named like chess squares: x is a letter (A..Z, then AA, AB,
+  ...) and y + 1 is the number, so `C4` is x 2, y 3 and `AA12` is x 26, y 11. The
+  conversion is `coordLabel` / `parseLabel` in `src/lib/geometry.js`.
+- **Land is only at x >= 0 and y >= 0 for now.** That is a default, not a law: the
+  schema allows any signed coordinates, and `landAllowed` in `src/lib/geometry.js` is
+  the one place that says where land may exist. A rule may lift it (the island could
+  grow west and south) with a code change to that function.
+- **Adjacency** is the four orthogonal neighbours; the diagonals are available
+  separately (`neighbors`, `diagonals`) for rules that want them. The geometry is one
+  file, so a different grid is a different `geometry.js` (plus the projection in
+  `public/js/board.js` and the slab in `board-gl.js`).
+- **Terrain** is one of meadow (default), water, forest, stone, sand, seeded and
+  deterministic (the seed is stored on the game): a lake inside the island, sand on
+  the coast, forest and stone in clumps. Terrain means nothing until a rule gives
+  it meaning.
+- **Tile properties** are an open-ended JSON object per tile (`props`, at most 4 KB,
+  validated by the database). Rules and the referee can put anything in it. Players
+  cannot write it.
+- **Pieces.** Each player claims one of eight piece colors at sign-up. A piece stands
+  on the player's most recently claimed tile (on a bench below the board until they
+  own one).
+- **Moves the site carries out itself** (`POST /<slug>/api/action`, no referee):
+  claim an unowned land tile, or name and describe a tile you own, by label
+  (`{"kind":"claim","label":"C4"}`). Only on your turn, only while the game is
+  `playing`. A move completes the turn; when the turn wraps past the last player the
+  round ends and every player harvests 1 point per tile owned. Proposals are still
+  recorded and wait for the referee, and do not advance the turn; a player who
+  proposed this turn cannot also act on it.
+- **Look.** Isometric (2:1 dimetric), one fixed angle, no rotation; pan, zoom and
+  recenter. All colors are CSS tokens in `public/theme.css`, which the WebGL and SVG
+  renderers read too, so a new palette is a one-file change.
+
 ## What the referee may and may not do
 
 The referee is the most interesting player at the table and the easiest one to
@@ -120,8 +161,8 @@ code, not in the referee's instructions:
 - **Accounts across games.** Per game for now (a deliberate choice). A global
   account may come later; the schema has no global users table to migrate from.
 
-- **Players.** Who. Up to 5 can join with the code; the seat count and the
-  marker set are constants today.
+- **Players.** Who. Up to 5 can join with the code (at most 8: there are eight piece colors); the seat count and the
+  color palette are constants today.
 - **Starting a game.** Nothing flips a game from `setup` to `playing` yet; it is a
   manual D1 update (see README). Seats close at that point.
 - **Who the host is.** The first person to join is marked host, which grants

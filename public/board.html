@@ -4,9 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Promptocracy</title>
+<link rel="stylesheet" href="/theme.css">
 <link rel="stylesheet" href="/site.css">
 </head>
-<body>
+<body class="wide">
 <main>
   <div class="bar">
     <h1 id="title">Promptocracy</h1>
@@ -26,10 +27,17 @@
   </div>
   <div class="now" id="now">Loading the board…</div>
 
-  <div class="panel" id="turn-box" hidden></div>
 
-  <h2>The track</h2>
-  <div id="track"></div>
+  <div class="stage">
+    <div class="board-wrap" id="board-wrap"><noscript>The board needs JavaScript. The tiles are listed below.</noscript></div>
+    <aside class="panel tile-panel" id="tile-panel" aria-live="polite">
+      <p class="sub">Tap a tile to see what it is. Drag to move around, scroll or pinch to zoom.</p>
+    </aside>
+  </div>
+  <div class="notice" id="act-note" role="status" hidden></div>
+  <div class="panel" id="turn-box" hidden></div>
+  <h2 class="sr-only">Tiles</h2>
+  <ul class="sr-only" id="tile-list"></ul>
 
   <h2>Scores</h2>
   <table>
@@ -105,7 +113,7 @@
     "joined": "You're in. Your seat is yours.",
     "welcome-back": "You're logged in.",
     "link-invalid": "That link has expired or was already used. Log in again to get a new one.",
-    "join-failed": "Couldn't finish joining: the marker was taken, the game is full, or it has started. Open the join link again to pick another marker."
+    "join-failed": "Couldn't finish joining: that piece color was taken, the game is full, or it has started. Open the join link again to pick another color."
   };
   const api = async (path, body) => {
     const res = await fetch(BASE + path, body === undefined ? { cache: "no-store" } : {
@@ -114,6 +122,11 @@
     return { ok: res.ok, status: res.status, data };
   };
   let ME = null, DATA = null;   // who is looking, and the last /api/game
+  let BOARD = null, SEL = null, VIEW = null;   // the last /api/board, the selected tile {x,y}, the drawn board
+  const hex = c => (c && /^#[0-9a-f]{6}$/i.test(c.hex) ? c.hex : "#888");
+  const who = (name, c) => `${name} (${c ? c.name : "?"})`;
+  const TERRAIN_LABEL = { meadow: "Meadow", water: "Water", forest: "Forest", stone: "Stone", sand: "Sand" };
+  
   const when = iso => String(iso || "").slice(0, 10);
 
   function showNotice() {
@@ -127,13 +140,14 @@
     const who = $("who");
     ME = me.ok ? me.data : null;
     drawTurn();
+    drawPanel();
     if (!me.ok) {
       who.innerHTML = '<button id="login-btn" type="button">Log in</button>';
       $("login-btn").onclick = () => { $("login-panel").hidden = !$("login-panel").hidden; };
       return;
     }
     const p = me.data.player;
-    who.innerHTML = `<span>${p ? esc(p.marker) + " " : ""}${esc(me.data.user.name)}</span>
+    who.innerHTML = `<span>${p ? `<span class="dot" style="background:${hex(p.color)}"></span>` : ""}${esc(me.data.user.name)}</span>
       <button class="bell" id="bell" type="button" aria-label="Notifications">🔔<span class="badge" id="badge" hidden>0</span></button>
       <button id="logout" type="button">Log out</button>`;
     $("logout").onclick = async () => { await api("/api/logout", {}); location.reload(); };
@@ -199,30 +213,31 @@
     const taken = turns.find(t => t.turn_index === game.turn);
     let html = "";
     if (mine && !taken) {
-      html = `<strong>Your turn.</strong> Write one prompt: a rule change, or something the rules let you do.
+      html = `<strong>Your turn.</strong> Do one of two things. <strong>Act on the board:</strong> tap a tile to claim it, or to name and describe one of yours. That ends your turn. Or <strong>propose:</strong> write one prompt for Chalant (the referee): a rule change, or something the rules let you do.
         <form class="stack" id="turn-form" style="margin-top:10px; max-width:none">
           <textarea name="prompt" rows="4" maxlength="2000" required aria-label="Your prompt"></textarea>
           <button class="primary" type="submit">Submit my turn</button>
           <div id="turn-msg" role="status"></div>
         </form>`;
     } else if (mine) {
-      html = `<strong>Your turn.</strong> Your prompt is in: waiting for the referee.
+      html = `<strong>Your turn.</strong> Your prompt is in: waiting for Chalant (the referee).
         <blockquote class="prompt">${esc(taken.prompt)}</blockquote>`;
     } else if (taken) {
-      html = `<strong>${esc(current.marker + " " + current.name)}</strong> took their turn. Waiting for the referee.
+      html = `<strong>${esc(who(current.name, current.color))}</strong> took their turn. Waiting for Chalant (the referee).
         <blockquote class="prompt">${esc(taken.prompt)}</blockquote>`;
     } else {
-      html = `<strong>${esc(current.marker + " " + current.name)}</strong> is playing.`;
+      html = `<strong>${esc(who(current.name, current.color))}</strong> is playing.`;
     }
     box.innerHTML = html;
     box.hidden = false;
+    drawPanel();
     const form = $("turn-form");
     if (form) form.addEventListener("submit", async e => {
       e.preventDefault();
       const msg = $("turn-msg");
       msg.textContent = "Sending…";
       const r = await api("/api/turn", { prompt: new FormData(form).get("prompt") });
-      if (r.ok) { const g = await api("/api/game"); if (g.ok) drawGame(g.data); loadNotes(false); return; }
+      if (r.ok) { await refresh(); loadNotes(false); return; }
       msg.className = "notice err";
       msg.textContent = (r.data && r.data.error) || "Something went wrong.";
       if (r.status === 409 || r.status === 403) { const g = await api("/api/game"); if (g.ok) { const t = msg.textContent; drawGame(g.data); const m = $("turn-msg"); if (m) m.textContent = t; } }
@@ -232,13 +247,14 @@
   function drawGame(data) {
     DATA = data;
     drawTurn();
+    drawPanel();
     const game = data.game;
-    // Players come ordered by turn_order; the marker identifies a player.
+    // Players come ordered by turn_order; their color identifies them.
     const players = data.players || [];
     const target = Number(game.winning_score) || 100;
     // Nobody is "to play" until the game has started.
     const current = game.status === "setup" ? null : (players[game.turn] || null);
-    const open = game.max_players - players.length;
+    const open = Math.min(game.max_players, 8) - players.length;
 
     document.title = (game.name || "Promptocracy");
     $("title").textContent = game.name || "Promptocracy";
@@ -246,27 +262,18 @@
       $("repo-line").innerHTML = `The rules live in <a href="https://github.com/${esc(game.repo)}">github.com/${esc(game.repo)}</a>.`;
     }
     const status = game.status === "setup"
-      ? `Setting up. ${players.length} of ${game.max_players} seats taken.`
-      : `Round ${game.round}. ${current ? esc(current.marker + " " + current.name) + "'s turn." : ""}`;
+      ? `Setting up. ${players.length} of ${Math.min(game.max_players, 8)} seats taken.`
+      : `Round ${game.round}. ${current ? esc(who(current.name, current.color)) + "'s turn." : ""}`;
     $("now").innerHTML = status +
       ` First to <strong>${target}</strong> points wins (for now).`;
-
-    // Track: one lane per player. Clamp so a marker never leaves its lane.
-    $("track").innerHTML = players.length ? players.map(p => {
-      const pct = Math.max(0, Math.min(1, (Number(p.score) || 0) / target));
-      return `<div class="lane" title="${esc(p.name)}: ${esc(p.score)} points">
-        <span class="marker" style="left: calc(20px + ${pct} * (100% - 70px))">${esc(p.marker)}</span>
-        <span class="finish">${target}</span>
-      </div>`;
-    }).join("") : `<p class="sub">${open > 0 ? "No one has taken a seat yet." : ""}</p>`;
 
     // Scoreboard, highest first; ties keep turn order.
     const ranked = players.map((p, i) => ({ ...p, i }))
       .sort((a, b) => (b.score - a.score) || (a.i - b.i));
     $("scores").innerHTML = ranked.map(p => `
-      <tr class="${current && p.marker === current.marker ? "current" : ""}">
-        <td><span class="dot" style="background:${/^#[0-9a-f]{3,8}$/i.test(p.color) ? p.color : "#888"}"></span>${esc(p.marker)} ${esc(p.name)}</td>
-        <td>${current && p.marker === current.marker ? "to play" : ""}</td>
+      <tr class="${current && p.color.key === current.color.key ? "current" : ""}">
+        <td><span class="dot" style="background:${hex(p.color)}"></span>${esc(p.name)} <span class="sub">${esc(p.color.name)}</span></td>
+        <td>${current && p.color.key === current.color.key ? "to play" : ""}</td>
         <td class="num">${esc(p.score)}</td>
       </tr>`).join("");
 
@@ -274,6 +281,125 @@
     $("log").innerHTML = (data.events || [])
       .map(e => `<li><b>${esc(when(e.created_at))}</b> · ${esc(e.text)}</li>`).join("");
   }
+
+  // ---- the hex board ------------------------------------------------------
+  const tileAt = (q, r) => BOARD && BOARD.tiles.find(t => t.x === q && t.y === r);
+  const tileLabel = t => {
+    const bits = [`Tile ${t.label}`, TERRAIN_LABEL[t.terrain] || t.terrain];
+    if (t.name) bits.push(`named ${t.name}`);
+    bits.push(t.owner ? `owned by ${who(t.owner.name, t.owner.color)}` : "unowned");
+    return bits.join(", ");
+  };
+
+  function propValue(v) {
+    return typeof v === "string" ? esc(v) : esc(JSON.stringify(v));
+  }
+
+  // What can the person looking do right now? Only act on the board on your own turn.
+  function myMove() {
+    if (!ME || !ME.player || !DATA) return { ok: false, why: ME ? "" : "Log in to play." };
+    const g = DATA.game;
+    if (g.status === "setup") return { ok: false, why: "The game has not started yet." };
+    if (g.status !== "playing") return { ok: false, why: "" };
+    const current = DATA.players[g.turn];
+    if (ME.player.turn_order !== g.turn) return { ok: false, why: current ? `Waiting for ${who(current.name, current.color)} to play.` : "" };
+    if (DATA.turns.some(t => t.turn_index === g.turn)) return { ok: false, why: "Your proposal is in and waiting for Chalant (the referee)." };
+    return { ok: true };
+  }
+
+  function drawPanel() {
+    const box = $("tile-panel");
+    const t = SEL && tileAt(SEL.x, SEL.y);
+    if (!t) { box.innerHTML = '<p class="sub">Tap a tile to see what it is. Drag to move around, scroll or pinch to zoom.</p>'; return; }
+    const props = Object.entries(t.props || {});
+    const move = myMove();
+    const mine = !!(t.owner && ME && ME.player && t.owner.color.key === ME.player.color.key);
+    let html = `<h3><span class="swatch" style="background:var(--terrain-${t.terrain}, #aaa)"></span>${esc(TERRAIN_LABEL[t.terrain] || t.terrain)} <small>${esc(t.label)}</small></h3>
+      <p class="tile-name">${t.name ? esc(t.name) : '<span class="sub">Unnamed</span>'}</p>
+      ${t.description ? `<p class="tile-desc">${esc(t.description)}</p>` : ""}
+      <p class="tile-owner">${t.owner ? `<span class="dot" style="background:${hex(t.owner.color)}"></span>${esc(who(t.owner.name, t.owner.color))}` : '<span class="sub">Nobody owns this tile.</span>'}</p>`;
+    if (props.length) html += `<dl class="props">${props.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${propValue(v)}</dd>`).join("")}</dl>`;
+    if (move.ok && !t.owner) {
+      html += `<button class="primary" id="claim-btn" type="button">Claim this tile</button><div id="act-msg" role="status"></div>`;
+    } else if (move.ok && mine) {
+      html += `<form class="stack" id="describe-form">
+        <label>Name<input type="text" name="name" maxlength="40" required value="${esc(t.name || "")}"></label>
+        <label>Description<textarea name="description" rows="3" maxlength="280" required>${esc(t.description || "")}</textarea></label>
+        <button class="primary" type="submit">Name &amp; describe</button><div id="act-msg" role="status"></div></form>`;
+    } else if (move.ok) {
+      html += `<p class="sub">It is your turn: pick an unowned tile to claim, or one of yours to name.</p>`;
+    } else if (move.why) {
+      html += `<p class="sub">${esc(move.why)}</p>`;
+    }
+    box.innerHTML = html;
+    const claim = $("claim-btn");
+    if (claim) claim.onclick = () => act({ kind: "claim", label: t.label }, claim);
+    const form = $("describe-form");
+    if (form) form.addEventListener("submit", e => {
+      e.preventDefault();
+      const f = new FormData(form);
+      act({ kind: "describe", label: t.label, name: f.get("name"), description: f.get("description") }, form.querySelector("button"));
+    });
+  }
+
+  async function act(body, button) {
+    const msg = $("act-msg");
+    button.disabled = true; msg.className = ""; msg.textContent = "Sending…";
+    const r = await api("/api/action", body);
+    if (r.ok) {
+      await refresh();
+      const n = $("act-note"); n.textContent = r.data.harvest ? "Done. " + r.data.harvest : "Done. Your turn is over."; n.hidden = false;
+      loadNotes(false);
+      return;
+    }
+    msg.className = "notice err";
+    msg.textContent = (r.data && r.data.error) || "Something went wrong.";
+    button.disabled = false;
+    if (r.status === 409 || r.status === 403) { const t = msg.textContent; await refresh(); const m = $("act-msg"); if (m) { m.className = "notice err"; m.textContent = t; } }
+  }
+
+  function select(q, r) {
+    $("act-note").hidden = true;
+    SEL = q == null ? null : { x: q, y: r };
+    if (VIEW) VIEW.select(q, r);
+    drawPanel();
+  }
+
+  function drawBoard(b) {
+    BOARD = b;
+    if (VIEW) VIEW.setData(b);
+    $("tile-list").innerHTML = b.tiles.map(t => `<li><button type="button" data-x="${t.x}" data-y="${t.y}">${esc(tileLabel(t))}</button></li>`).join("");
+    drawPanel();
+  }
+  $("tile-list").addEventListener("click", e => {
+    const b = e.target.closest("button[data-x]");
+    if (b) select(Number(b.dataset.x), Number(b.dataset.y));
+  });
+
+  async function refresh() {
+    const [g, b, me] = await Promise.all([api("/api/game"), api("/api/board"), api("/api/me")]);
+    if (me.ok) ME = me.data;
+    if (g.ok) drawGame(g.data);
+    if (b.ok) drawBoard(b.data);
+  }
+
+  async function initBoard() {
+    const wrap = $("board-wrap");
+    try {
+      const { createBoard } = await import("/js/board.js");
+      VIEW = await createBoard(wrap, { onSelect: select });
+      window.__board = VIEW;   // handle for the browser tests
+      if (BOARD) VIEW.setData(BOARD);
+      if (SEL) VIEW.select(SEL.x, SEL.y);
+    } catch (e) {
+      wrap.innerHTML = '<p class="sub" style="padding:12px">The board could not be drawn. The tiles are listed below.</p>';
+    }
+  }
+  async function loadBoard() {
+    const b = await api("/api/board");
+    if (b.ok) drawBoard(b.data);
+  }
+  initBoard(); loadBoard();
   load();
 </script>
 </body>
