@@ -21,6 +21,17 @@ with sync_playwright() as p:
         page.wait_for_selector("#notes li")
         page.screenshot(path=f"{out}/board-{name}-notifications.png")
         ctx.close()
+    # the logged-in player is up: the turn form, then after submitting
+    ctx = b.new_context(viewport={"width": 390, "height": 844}, device_scale_factor=2)
+    ctx.add_cookies([{"name": "nomic_session", "value": cookie, "url": base}])
+    page = ctx.new_page()
+    page.goto(base + "/"); page.wait_for_selector("#turn-form")
+    page.screenshot(path=f"{out}/turn-phone-form.png", clip={"x": 0, "y": 0, "width": 390, "height": 520})
+    page.fill("textarea[name=prompt]", "Anyone who proposes a rule about cats gets 5 points.")
+    page.click("#turn-form button")
+    page.wait_for_selector("blockquote.prompt")
+    page.screenshot(path=f"{out}/turn-phone-submitted.png", clip={"x": 0, "y": 0, "width": 390, "height": 520})
+    ctx.close()
     # logged out + join page
     ctx = b.new_context(viewport={"width": 390, "height": 844}, device_scale_factor=2)
     page = ctx.new_page()

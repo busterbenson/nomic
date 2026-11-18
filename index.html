@@ -26,6 +26,8 @@
   </div>
   <div class="now" id="now">Loading the board…</div>
 
+  <div class="panel" id="turn-box" hidden></div>
+
   <h2>The track</h2>
   <div id="track"></div>
 
@@ -107,6 +109,7 @@
     let data = null; try { data = await res.json(); } catch (e) {}
     return { ok: res.ok, status: res.status, data };
   };
+  let ME = null, DATA = null;   // who is looking, and the last /api/game
   const when = iso => String(iso || "").slice(0, 10);
 
   function showNotice() {
@@ -118,6 +121,8 @@
   async function loadMe() {
     const me = await api("/api/me");
     const who = $("who");
+    ME = me.ok ? me.data : null;
+    drawTurn();
     if (!me.ok) {
       who.innerHTML = '<button id="login-btn" type="button">Log in</button>';
       $("login-btn").onclick = () => { $("login-panel").hidden = !$("login-panel").hidden; };
@@ -178,7 +183,49 @@
     }
   }
 
+  // The turn box: a form for the player whose turn it is, otherwise who is playing.
+  function drawTurn() {
+    const box = $("turn-box");
+    if (!DATA || DATA.game.status !== "playing") { box.hidden = true; return; }
+    const { game, players, turns } = DATA;
+    const current = players[game.turn];
+    if (!current) { box.hidden = true; return; }
+    const mine = ME && ME.player && ME.player.turn_order === game.turn;
+    const taken = turns.find(t => t.turn_index === game.turn);
+    let html = "";
+    if (mine && !taken) {
+      html = `<strong>Your turn.</strong> Write one prompt: a rule change, or something the rules let you do.
+        <form class="stack" id="turn-form" style="margin-top:10px; max-width:none">
+          <textarea name="prompt" rows="4" maxlength="2000" required aria-label="Your prompt"></textarea>
+          <button class="primary" type="submit">Submit my turn</button>
+          <div id="turn-msg" role="status"></div>
+        </form>`;
+    } else if (mine) {
+      html = `<strong>Your turn.</strong> Your prompt is in: waiting for the referee.
+        <blockquote class="prompt">${esc(taken.prompt)}</blockquote>`;
+    } else if (taken) {
+      html = `<strong>${esc(current.marker + " " + current.name)}</strong> took their turn. Waiting for the referee.
+        <blockquote class="prompt">${esc(taken.prompt)}</blockquote>`;
+    } else {
+      html = `<strong>${esc(current.marker + " " + current.name)}</strong> is playing.`;
+    }
+    box.innerHTML = html;
+    box.hidden = false;
+    const form = $("turn-form");
+    if (form) form.addEventListener("submit", async e => {
+      e.preventDefault();
+      const msg = $("turn-msg");
+      msg.textContent = "Sending…";
+      const r = await api("/api/turn", { prompt: new FormData(form).get("prompt") });
+      if (r.ok) { const g = await api("/api/game"); if (g.ok) drawGame(g.data); loadNotes(false); return; }
+      msg.className = "notice err";
+      msg.textContent = (r.data && r.data.error) || "Something went wrong.";
+    });
+  }
+
   function drawGame(data) {
+    DATA = data;
+    drawTurn();
     const game = data.game;
     // Players come ordered by turn_order; the marker identifies a player.
     const players = data.players || [];

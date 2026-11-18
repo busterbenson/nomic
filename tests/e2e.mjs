@@ -137,6 +137,8 @@ try {
   check("bidi/zero-width characters are stripped from names",
     (await client(A).post("/api/join", { code: game.code, email: "bidi@example.com", name: "A\u202EB\u200Bc", marker: MARKERS[3] })).status === 200 &&
     d1(state, "SELECT display_name FROM login_tokens WHERE email = 'bidi@example.com'")[0].display_name === "ABc");
+  await client(A).post("/api/join", { code: game.code, email: "zw@example.com", name: "\u0645\u06CC\u200C\u062E", marker: MARKERS[3] });
+  check("ZWNJ (needed in Persian names) is kept", d1(state, "SELECT display_name FROM login_tokens WHERE email = 'zw@example.com'")[0].display_name.includes("\u200C"));
 
   console.log("logout");
   const sessionsBefore = d1(state, "SELECT COUNT(*) AS n FROM sessions")[0].n;
@@ -154,6 +156,34 @@ try {
   }
   const rules = await client(A).get("/RULES.md");
   check("RULES.md and the board are served", rules.status === 200 && rules.text.includes("Follow the rules") && (await client(A).get("/")).text.includes("/api/game"));
+
+  console.log("turns");
+  // game 1 is still in 'setup' here
+  const early = await bo.post("/api/turn", { prompt: "Too early." });
+  check("a turn in a game that has not started is refused (409)", early.status === 409, early.text);
+  d1(state, "UPDATE games SET status = 'playing', round = 1, turn = 1 WHERE name = 'Nomic, game 1'");
+  check("logged-out submit is 401", (await client(A).post("/api/turn", { prompt: "Hi" })).status === 401);
+  const notYours = await ada.post("/api/turn", { prompt: "Out of turn." });
+  check("a player who is not up is refused (403)", notYours.status === 403 && /not your turn/i.test(notYours.data.error), notYours.text);
+  check("an empty prompt and a 2001-char prompt are refused",
+    (await bo.post("/api/turn", { prompt: "   " })).status === 400 && (await bo.post("/api/turn", { prompt: "x".repeat(2001) })).status === 400);
+  const before = (await ada.get("/api/notifications")).data.unread;
+  const pub0 = await client(A).get("/api/game");
+  check("before submitting, the board says the current player is waiting", pub0.data.turn_status === "waiting" && pub0.data.turns.length === 0);
+  const mine = await bo.post("/api/turn", { prompt: "Anyone who proposes a rule about cats gets 5 points." });
+  check("the current player can submit", mine.status === 200 && mine.data.status === "submitted", mine.text);
+  const pub1 = await client(A).get("/api/game");
+  check("the turn does NOT advance on submit", pub1.data.game.turn === 1 && pub1.data.game.round === 1);
+  check("/api/game shows the prompt and status, still no '@' or ids",
+    pub1.data.turn_status === "submitted" && pub1.data.turns[0].prompt.includes("cats") && pub1.data.turns[0].name === "Bo" && !pub1.text.includes("@") && !/user_id|"id"/.test(pub1.text), pub1.text);
+  check("the log records it", pub1.data.events[0].text.includes("Bo took their turn"));
+  const after = await ada.get("/api/notifications");
+  check("the other players were notified in-game", after.data.unread === before + 1 && after.data.notifications[0].kind === "turn_submitted");
+  check("and by email, but not the submitter", (() => { const o = d1(state, "SELECT to_addr FROM outbox WHERE subject LIKE '%took their turn%'"); return o.some((r) => r.to_addr === "ada@example.com") && !o.some((r) => r.to_addr === "bo@example.com"); })());
+  const twice = await bo.post("/api/turn", { prompt: "A second try." });
+  check("a second submit in the same round is refused (409)", twice.status === 409 && /already/i.test(twice.data.error), twice.text);
+  d1(state, "UPDATE games SET round = 2 WHERE name = 'Nomic, game 1'");
+  check("in the next round the same player can submit again", (await bo.post("/api/turn", { prompt: "Round two." })).status === 200);
 
   console.log("email not configured");
   migrate(state2);

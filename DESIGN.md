@@ -51,16 +51,22 @@ broke down because the model lost track of which rules were in effect.)
 
 ## A turn
 
-1. **Prompt.** The player whose turn it is opens a GitHub issue with one prompt,
-   e.g. "Anyone who proposes a rule about cats gets 5 points."
-2. **Draft.** The referee replies on the issue with:
+1. **Prompt.** The player whose turn it is logs in to the website and submits one
+   prompt in the "Your turn" box, e.g. "Anyone who proposes a rule about cats gets
+   5 points." (Turns come in through the site, not GitHub issues, so players do not
+   need GitHub accounts.) The site records it in the `turns` table as `submitted`,
+   shows it to the whole table, and notifies the other players. One live turn per
+   player per round; 1 to 2000 characters. **Built.**
+   *Not built yet:* submitting does **not** advance the turn. The turn moves on
+   only when the referee and the vote exist (next PR), so for now a submitted turn
+   just waits, and `games.turn` / `games.round` are changed by hand.
+2. **Draft.** The referee replies on the turn with:
    - whether this is a **proposal** (it changes the rules or the site) or an
      **action** (something a rule already allows);
    - for a proposal, the exact new text and a PR containing it;
    - the rules it relied on, and any conflicts it found.
    The player can revise the prompt until the draft says what they meant.
-3. **Vote.** Players vote on the PR with a comment, `/vote yes` or `/vote no`.
-   Code counts the votes (rule 104), not the referee.
+3. **Vote.** Players vote on the website (or on the PR; undecided). Code counts the votes (rule 104), not the referee.
 4. **Result.** If the vote passes, the PR merges, the game state in D1 is updated
    (points, next turn, a log line), and the board updates. If it fails, the PR is
    closed and the turn moves on.
@@ -95,9 +101,9 @@ code, not in the referee's instructions:
 - **Referee access to D1.** The referee (a GitHub Action today) will get its own
   D1 access later, with a narrow token that can write scores, turns and
   notifications but not accounts or sessions. Not built.
-- **How players submit turns.** GitHub issues mean every player needs a GitHub
-  account. The alternative is a small form on the site that files the issue for
-  them.
+- **How the referee gets a turn.** The site records the turn; the referee will
+  read `turns` rows with status `submitted` (mechanism not built: a Pages Function
+  calling the Claude API, or a scheduled job).
 - **The referee's model and API key.** Which model, and whose key pays for it.
   Each turn is a few calls; the cost per game should be small.
 - **Publishing.** Creating the Cloudflare Pages project and D1 database, and

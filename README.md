@@ -65,6 +65,7 @@ node tests/seed-demo.mjs /some/dir   # seeds two players and takes screenshots (
 To start a game by hand (no referee yet):
 `npx wrangler d1 execute DB --local --command "UPDATE games SET status='playing', round=1, turn=0"`
 (add `--remote` against the deployed database).
+Once playing, the player whose turn it is (`games.turn` = their seat number, from 0) sees a "Your turn" box on the board and submits one prompt per round. This only records the turn; nothing advances `turn` or `round` yet.
 
 ## Email
 

@@ -14,7 +14,20 @@ export const onRequestGet = async ({ env }: Ctx) => {
       .bind(g.id)
       .all()
   ).results;
+  // Prompts for the current round are public to the table. No emails or ids.
+  const turns = (
+    await env.DB.prepare(
+      `SELECT u.display_name AS name, p.marker, t.turn_index, t.prompt, t.status, t.created_at
+       FROM turns t JOIN users u ON u.id = t.user_id
+       JOIN players p ON p.game_id = t.game_id AND p.user_id = t.user_id
+       WHERE t.game_id = ? AND t.round = ? AND t.status != 'withdrawn' ORDER BY t.created_at`,
+    ).bind(g.id, g.round).all()
+  ).results;
+  const current = players.find((p: any) => p.turn_order === g.turn);
+  const mine = turns.find((t: any) => t.turn_index === g.turn);
   return json({
+    turn_status: g.status === "playing" && current ? (mine ? (mine as any).status : "waiting") : null,
+    turns,
     game: {
       name: g.name,
       status: g.status,

@@ -76,3 +76,7 @@ input[type=email], input[type=text] { font: inherit; padding: 8px 10px; color: v
 .markers input:disabled + span { opacity: 0.3; cursor: not-allowed; }
 .dev { font-size: 0.8rem; color: var(--muted); overflow-wrap: anywhere; }
 .badge[hidden] { display: none; }
+textarea { font: inherit; padding: 8px 10px; color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 6px; width: 100%; resize: vertical; }
+blockquote.prompt { margin: 10px 0 0; padding: 8px 12px; border-left: 3px solid var(--line);
+  white-space: pre-wrap; overflow-wrap: anywhere; }

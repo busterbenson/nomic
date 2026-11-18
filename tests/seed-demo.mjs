@@ -21,7 +21,7 @@ try {
   await join(srv.base, g.code, { email: "bo@example.com", name: "Bo", marker: MARKERS[1] });
   d1(state, "UPDATE players SET score = 30 WHERE marker = '" + MARKERS[0] + "'");
   d1(state, "UPDATE players SET score = 55 WHERE marker = '" + MARKERS[1] + "'");
-  d1(state, "UPDATE games SET status = 'playing', round = 1, turn = 1 WHERE name = 'Nomic, game 1'");
+  d1(state, "UPDATE games SET status = 'playing', round = 1, turn = 0 WHERE name = 'Nomic, game 1'");
   const cookie = ada.cookie.split("=")[1];
   execFileSync("/usr/local/bin/python3", [ROOT + "/tests/screenshot.py", srv.base, out, cookie, open.code], { stdio: "inherit", timeout: 120000 });
 } finally {
