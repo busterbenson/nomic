@@ -7,5 +7,5 @@ compatibility_date = "2026-11-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "promptocracy-preview"
-database_id = "00000000-0000-0000-0000-000000000001"
+database_id = "9f652287-3859-4597-9c1b-c92b9185d9a7"
 migrations_dir = "migrations"

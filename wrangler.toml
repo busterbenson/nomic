@@ -19,7 +19,7 @@ binding = "DB"
 database_name = "promptocracy"
 # Placeholder. `npx wrangler d1 create promptocracy` prints the real id; paste it
 # here before the first deploy. Local development ignores it.
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "639f045e-df2d-406e-91a4-a1facc4ca2fe"
 migrations_dir = "migrations"
 
 [vars]
@@ -56,4 +56,4 @@ binding = "DB"
 database_name = "promptocracy-preview"
 # Placeholder. `npx wrangler d1 create promptocracy-preview` prints the real id.
 # Keep wrangler.preview-migrations.toml pointing at the same database.
-database_id = "00000000-0000-0000-0000-000000000001"
+database_id = "9f652287-3859-4597-9c1b-c92b9185d9a7"
