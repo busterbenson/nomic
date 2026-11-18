@@ -10,19 +10,15 @@
 // Tiles are named like chess squares: column letters for x (A..Z, then AA, AB, ...) and
 // the row number for y + 1, so "C4" is x 2, y 3 and "AA12" is x 26, y 11.
 
-export const ISLAND_SIZE = 8;
-export const MIN_SIZE = 4;
-export const MAX_SIZE = 16;
-export const TERRAINS = ["meadow", "water", "forest", "stone", "sand"];
+import { DEFAULT_SETTINGS, landAllowed } from "./settings.js";
+export { landAllowed };
+
 // Rules (and later the referee) get both kinds of neighbour. Adjacency in the game is orthogonal.
 export const ORTHOGONAL = [[1, 0], [0, 1], [-1, 0], [0, -1]];
 export const DIAGONAL = [[1, 1], [-1, 1], [-1, -1], [1, -1]];
 export const neighbors = (x, y) => ORTHOGONAL.map(([dx, dy]) => [x + dx, y + dy]);
 export const diagonals = (x, y) => DIAGONAL.map(([dx, dy]) => [x + dx, y + dy]);
 
-export const validSize = (n) => Number.isInteger(n) && n >= MIN_SIZE && n <= MAX_SIZE;
-// The default limit on where land may exist. A game's rules may lift it.
-export const landAllowed = (x, y) => Number.isInteger(x) && Number.isInteger(y) && x >= 0 && y >= 0;
 const MAX_COORD = 1_000_000;
 export const validCoord = (x, y) => Number.isSafeInteger(x) && Number.isSafeInteger(y) && Math.abs(x) <= MAX_COORD && Math.abs(y) <= MAX_COORD;
 
@@ -63,26 +59,27 @@ export function rng(seed) {
 const key = (x, y) => `${x},${y}`;
 const pickOne = (rand, arr) => arr[Math.floor(rand() * arr.length)];
 
-// The island's outline: a size x size square with each corner eroded by two tiles (the corner and
-// one neighbour along an edge), plus 0-2 small bays bitten out of the sides, so it reads as an island.
-export function islandLand(size, seed) {
+// The island's outline: a width x height rectangle with each corner eroded (settings board.erosion),
+// plus up to max_bays small bites out of the sides, so it reads as an island.
+export function islandLand(width, height, seed, erosion = DEFAULT_SETTINGS["board.erosion"]) {
   const rand = rng(seed ^ 0x51ed270b);
   const gone = new Set();
-  const last = size - 1;
-  for (const [cx, cy] of [[0, 0], [last, 0], [0, last], [last, last]]) {
-    gone.add(key(cx, cy));
+  const lx = width - 1, ly = height - 1;
+  for (const [cx, cy] of [[0, 0], [lx, 0], [0, ly], [lx, ly]]) {
     const sx = cx === 0 ? 1 : -1, sy = cy === 0 ? 1 : -1;
-    gone.add(pickOne(rand, [key(cx + sx, cy), key(cx, cy + sy)]));
+    // the corner, then its neighbours along the two edges, in a random order
+    const order = [[cx, cy], ...(rand() < 0.5 ? [[cx + sx, cy], [cx, cy + sy]] : [[cx, cy + sy], [cx + sx, cy]])];
+    for (const [x, y] of order.slice(0, erosion.corner_tiles)) gone.add(key(x, y));
   }
-  const bays = Math.floor(rand() * 3);
+  const bays = erosion.max_bays > 0 ? Math.floor(rand() * (erosion.max_bays + 1)) : 0;
+  const sideLen = Math.min(width, height);
   for (let i = 0, tries = 0; i < bays && tries < 40; tries++) {
-    const t = 2 + Math.floor(rand() * (size - 4)); // never next to a corner
-    const [bx, by] = pickOne(rand, [[t, 0], [t, last], [0, t], [last, t]]);
-    if (gone.has(key(bx, by))) continue;
+    const [bx, by] = pickOne(rand, [[2 + Math.floor(rand() * Math.max(1, width - 4)), 0], [2 + Math.floor(rand() * Math.max(1, width - 4)), ly], [0, 2 + Math.floor(rand() * Math.max(1, height - 4))], [lx, 2 + Math.floor(rand() * Math.max(1, height - 4))]]);
+    if (gone.has(key(bx, by)) || bx < 0 || by < 0 || bx > lx || by > ly || sideLen < 5) continue;
     gone.add(key(bx, by)); i++;
   }
   const land = [];
-  for (let x = 0; x < size; x++) for (let y = 0; y < size; y++) if (!gone.has(key(x, y))) land.push([x, y]);
+  for (let x = 0; x < width; x++) for (let y = 0; y < height; y++) if (!gone.has(key(x, y))) land.push([x, y]);
   return land;
 }
 
@@ -110,38 +107,32 @@ function growClump(rand, pool, terrain, size, grid) {
   return clump.length;
 }
 
-// Returns [{x, y, terrain}] for the island: meadow by default, about a quarter of it not.
-// A lake of water tiles INSIDE the island (never on the coast); sand along the coast; forest and
-// stone in clumps. Same size and seed, same island.
-export function generateTiles(size = ISLAND_SIZE, seed = 1) {
+// Returns [{x, y, terrain}] for the island, from the game's seed and its settings (board.island,
+// board.erosion, board.terrain, board.land_bounds): the default terrain most everywhere, the other
+// kinds in clumps. With the defaults: a lake INSIDE the island, sand along the coast, forest and stone.
+// Same seed and settings, same island.
+export function generateTiles(seed = 1, settings = DEFAULT_SETTINGS) {
   const rand = rng(seed);
-  const land = islandLand(size, seed);
+  const { width, height } = settings["board.island"];
+  const terrain = settings["board.terrain"];
+  const land = islandLand(width, height, seed, settings["board.erosion"]).filter(([x, y]) => landAllowed(x, y, settings));
   const set = new Set(land.map(([x, y]) => key(x, y)));
   const isCoast = ([x, y]) => neighbors(x, y).some(([nx, ny]) => !set.has(key(nx, ny)));
   const coast = new Set(land.filter(isCoast).map(([x, y]) => key(x, y)));
-  const inner = new Set(land.filter(([x, y]) => !coast.has(key(x, y)) && !isCoast([x, y])).map(([x, y]) => key(x, y)));
+  const inner = new Set(land.filter((t) => !isCoast(t)).map(([x, y]) => key(x, y)));
   const grid = new Map();
-  const budget = Math.round(land.length * 0.25);
-  const lake = Math.max(3, Math.round(budget * 0.27));
-  const sand = Math.max(3, Math.round(budget * 0.27));
-  const stone = Math.max(2, Math.round(budget * 0.18));
-  const forest = Math.max(3, budget - lake - sand - stone);
-  const free = new Set(set);
-  const take = (terrain, want, pool, maxClump) => {
+  const budget = Math.round(land.length * terrain.share);
+  // each kind's `share` is its portion of the non-default land; portions are scaled if they add up to more than 1
+  const total = Math.max(1, Object.values(terrain.kinds).reduce((n, k) => n + k.share, 0));
+  let used = 0;
+  for (const [kind, k] of Object.entries(terrain.kinds)) {
+    const want = Math.min(budget - used, Math.max(k.share > 0 ? 2 : 0, Math.round((budget * k.share) / total)));
+    const pool = new Set([...set].filter((t) => !grid.has(t) && (k.where === "inner" ? inner.has(t) : k.where === "coast" ? coast.has(t) : true)));
     let left = want, guard = 0;
-    while (left > 0 && pool.size && guard++ < 30) {
-      const got = growClump(rand, pool, terrain, Math.min(left, maxClump), grid);
-      left -= got;
-    }
-    for (const k of grid.keys()) free.delete(k);
-  };
-  take("water", lake, new Set([...inner]), lake);
-  for (const k of grid.keys()) inner.delete(k);
-  // keep sand off tiles beside the lake, so the lake reads as a lake
-  take("sand", sand, new Set([...coast].filter((k) => free.has(k))), sand);
-  take("stone", stone, new Set([...free]), 3);
-  take("forest", forest, new Set([...free]), 5);
-  return land.map(([x, y]) => ({ x, y, terrain: grid.get(key(x, y)) || "meadow" }));
+    while (left > 0 && pool.size && guard++ < 30) left -= growClump(rand, pool, kind, Math.min(left, k.clump), grid);
+    used += want - left;
+  }
+  return land.map(([x, y]) => ({ x, y, terrain: grid.get(key(x, y)) || terrain.default }));
 }
 
 // Tile props are a JSON object of at most 4 KB (rules and the referee may put anything in it).
@@ -155,10 +146,11 @@ export function validProps(v) {
   }
 }
 
-// The SQL that creates a board's tiles (also used by the Worker's lazy seeding).
+// The SQL that creates a board's tiles (also used by the Worker's lazy seeding). Terrain names are
+// checked by the settings validator (lowercase words), so literals are safe.
 // Values are integers and fixed words, so literals are safe.
-export function tileInsertSql(gameId, size, seed, nowIso) {
-  const rows = generateTiles(size, seed);
+export function tileInsertSql(gameId, seed, settings, nowIso) {
+  const rows = generateTiles(seed, settings);
   const esc = (s) => String(s).replace(/'/g, "''");
   const out = [];
   for (let i = 0; i < rows.length; i += 40) {

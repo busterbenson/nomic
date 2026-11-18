@@ -6,7 +6,9 @@ import { mkdtempSync, mkdirSync, copyFileSync, writeFileSync, rmSync } from "nod
 import { tmpdir } from "node:os";
 import { join as pjoin } from "node:path";
 import { ROOT, COLORS, client, createGame, d1, join, migrate, newState, startRulesStub, startServer } from "./lib.mjs";
-import { coordLabel, diagonals, generateTiles, landAllowed, neighbors, parseLabel, validProps } from "../src/lib/geometry.js";
+import { coordLabel, diagonals, generateTiles, neighbors, parseLabel, validProps } from "../src/lib/geometry.js";
+import { DEFAULT_SETTINGS, getSettings, landAllowed, settingsForSize, validateSettings } from "../src/lib/settings.js";
+import { readFileSync as readText } from "node:fs";
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = "") => {
@@ -28,10 +30,10 @@ check("things that are not labels are refused", ["", "4C", "C", "C0", "C-1", "C 
 check("a coordinate with no chess name falls back to (x, y)", coordLabel(-1, 2) === "(-1, 2)" && coordLabel(2, -1) === "(2, -1)");
 check("neighbours: four orthogonal, four diagonal, kept apart",
   JSON.stringify(neighbors(2, 3)) === "[[3,3],[2,4],[1,3],[2,2]]" && JSON.stringify(diagonals(2, 3)) === "[[3,4],[1,4],[1,2],[3,2]]");
-check("by default land is only at x >= 0 and y >= 0 (a rule may change that)", landAllowed(0, 0) && landAllowed(7, 7) && landAllowed(40, 9) && !landAllowed(-1, 0) && !landAllowed(0, -1) && !landAllowed(0.5, 0));
+check("by default land is only at x >= 0 and y >= 0 (a rule may change that)", landAllowed(0, 0) && landAllowed(7, 7) && landAllowed(40, 9) && !landAllowed(-1, 0) && !landAllowed(0, -1) && !landAllowed(0.5, 0) && landAllowed(-5, -5, { ...DEFAULT_SETTINGS, "board.land_bounds": { min_x: null, min_y: null, max_x: null, max_y: null } }) && !landAllowed(9, 0, { ...DEFAULT_SETTINGS, "board.land_bounds": { min_x: 0, min_y: 0, max_x: 8, max_y: null } }));
 
 console.log("island generator");
-const land = (size, seed) => generateTiles(size, seed);
+const land = (size, seed) => generateTiles(seed, settingsForSize(size));
 const tiles8 = land(8, 12345);
 check("an 8x8 island: tiles inside x 0..7, y 0..7, none repeated, no row for the sea",
   tiles8.every((t) => t.x >= 0 && t.x <= 7 && t.y >= 0 && t.y <= 7) && new Set(tiles8.map((t) => t.x + "," + t.y)).size === tiles8.length && tiles8.length < 64);
@@ -65,7 +67,7 @@ const isCoast = (ts, t) => { const set = new Set(ts.map((u) => u.x + "," + u.y))
 check("the lake is INSIDE the island: no water tile touches the sea", seeds.every((s) => { const ts = land(8, s); return ts.filter((t) => t.terrain === "water").every((t) => !isCoast(ts, t)); }));
 check("sand lies along the coast", seeds.every((s) => { const ts = land(8, s); const sand = ts.filter((t) => t.terrain === "sand"); return sand.length >= 2 && sand.every((t) => isCoast(ts, t)); }));
 check("forest and stone come in clumps too", seeds.every((s) => comps(land(8, s), "stone") >= 2 && comps(land(8, s), "forest") >= 2));
-check("every terrain comes from the fixed set", seeds.every((s) => land(8, s).every((t) => ["meadow", "water", "forest", "stone", "sand"].includes(t.terrain))));
+check("every terrain is the default or one of the kinds in the settings", seeds.every((s) => land(8, s).every((t) => ["meadow", ...Object.keys(DEFAULT_SETTINGS["board.terrain"].kinds)].includes(t.terrain))));
 check("other sizes work (4 to 16): one piece, inside x,y < size, corners bitten", [4, 5, 6, 12, 16].every((n) => { const t = land(n, 5); return t.length >= n * n - 11 && t.length <= n * n - 8 && connected(t) && t.every((u) => u.x < n && u.y < n); }));
 check("props must be an object of at most 4 KB",
   validProps({}) && validProps({ a: 1, b: [1, 2], c: { d: true } }) && !validProps([]) && !validProps(null) && !validProps("x") && !validProps({ big: "x".repeat(4100) }));
@@ -101,8 +103,8 @@ console.log("migration 0002");
       sql("SELECT COUNT(*) AS n FROM sessions s JOIN players p ON p.id = s.player_id AND p.game_id = s.game_id")[0].n === 3 &&
       sql("SELECT COUNT(*) AS n FROM notifications")[0].n === 3 && sql("SELECT COUNT(*) AS n FROM turns")[0].n === 1);
     check("foreign keys are intact after the rebuild", sql("PRAGMA foreign_key_check").length === 0);
-    check("the existing game got an island size and a seed; unused join links were voided",
-      sql("SELECT size, seed FROM games")[0].size === 8 && sql("SELECT seed FROM games")[0].seed > 0 && sql("SELECT COUNT(*) AS n FROM login_tokens")[0].n === 0);
+    check("the existing game got a seed, empty settings (so the defaults apply) and a move counter; unused join links were voided",
+      sql("SELECT settings, seed FROM games")[0].settings === "{}" && sql("SELECT moves FROM games")[0].moves === 0 && sql("SELECT seed FROM games")[0].seed > 0 && sql("SELECT COUNT(*) AS n FROM login_tokens")[0].n === 0);
     let dup = "ok"; try { sql(`INSERT INTO players (id, game_id, email, display_name, color, turn_order, joined_at) VALUES ('px','g1','x@x.test','x','vermilion',9,'2026-01-01T00:00:00Z')`); } catch { dup = "refused"; }
     check("the new table keeps one color per player per game", dup === "refused");
     let bad = 0;
@@ -132,10 +134,11 @@ try {
 
   console.log("board at creation");
   const nTiles = (slug) => d1(state, `SELECT COUNT(*) AS n FROM tiles WHERE game_id = (SELECT id FROM games WHERE slug='${slug}')`)[0].n;
-  const row = d1(state, "SELECT seed, size FROM games WHERE slug = 'hex'")[0];
-  const want = generateTiles(row.size, row.seed).sort((a, b) => a.x - b.x || a.y - b.y);
-  check("a new game has its island already: an 8x8 island with eroded corners (54-58 tiles)", row.size === 8 && nTiles("hex") === want.length && want.length >= 54 && want.length <= 58, String(nTiles("hex")));
-  check("and a --size 4 game has a smaller one", nTiles("eight") === generateTiles(4, d1(state, "SELECT seed FROM games WHERE slug='eight'")[0].seed).length && nTiles("eight") < 16);
+  const row = d1(state, "SELECT seed, settings FROM games WHERE slug = 'hex'")[0];
+  const want = generateTiles(row.seed, getSettings(row.settings)).sort((a, b) => a.x - b.x || a.y - b.y);
+  check("a new game's row holds every board setting, written out, equal to the defaults", JSON.stringify(JSON.parse(row.settings)) === JSON.stringify(DEFAULT_SETTINGS) && validateSettings(JSON.parse(row.settings)).length === 0);
+  check("a new game has its island already: an 8x8 island with eroded corners (54-58 tiles)", getSettings(row.settings)["board.island"].width === 8 && nTiles("hex") === want.length && want.length >= 54 && want.length <= 58, String(nTiles("hex")));
+  check("and a --size 4 game has a smaller one", nTiles("eight") === generateTiles(d1(state, "SELECT seed FROM games WHERE slug='eight'")[0].seed, settingsForSize(4)).length && nTiles("eight") < 16);
   const stored = d1(state, "SELECT x, y, terrain FROM tiles WHERE game_id = (SELECT id FROM games WHERE slug='hex') ORDER BY x, y");
   check("stored terrain is exactly what the seed on the game generates, and there are no rows for sea", JSON.stringify(stored) === JSON.stringify(want) && d1(state, "SELECT COUNT(*) AS n FROM tiles WHERE x < 0 OR y < 0 OR x > 7 OR y > 7")[0].n === 0);
   let refused = "";
@@ -164,7 +167,7 @@ try {
   const me = await ana.get("/hex/api/me");
   check("/api/me carries the claimed color", me.data.player.color.key === "teal" && me.data.player.color.name === "Teal" && /^#[0-9a-f]{6}$/.test(me.data.player.color.hex) && !("marker" in me.data.player));
   const game = (await client(A).get("/hex/api/game")).data;
-  check("/api/game players carry colors, not markers", game.players.every((p) => p.color?.key && !("marker" in p)) && game.players.map((p) => p.color.key).join() === "teal,cobalt,rose" && game.game.size === 8);
+  check("/api/game players carry colors, not markers", game.players.every((p) => p.color?.key && !("marker" in p)) && game.players.map((p) => p.color.key).join() === "teal,cobalt,rose");
 
   const eight = [];
   for (let i = 0; i < 8; i++) eight.push(await join(A, "eight", big.code, { email: `e${i}@example.com`, name: `E${i}`, color: COLORS[i] }));
@@ -199,7 +202,7 @@ try {
   check("the tile shows its owner and color", tileOf(board, 2, 3).owner.name === "Ana" && tileOf(board, 2, 3).owner.color.key === "teal");
   check("the log records it, naming the tile like a chess square", (await client(A).get("/hex/api/game")).data.events[0].text === "Ana (Teal) claimed tile C4.");
   check("every tile in /api/board carries its label, and so does a piece's position", board.tiles.every((t) => /^[A-H][1-8]$/.test(t.label)) && tileOf(board, 2, 3).label === "C4" && board.pieces.find((p) => p.name === "Ana").at.label === "C4");
-  check("board size and island extent are reported", board.size === 8 && board.tiles.length === want.length);
+  check("board size and island extent are reported", board.width === 8 && board.height === 8 && board.tiles.length === want.length && board.settings["harvest"].points_per_tile === 1);
   const notes = (await bo.get("/hex/api/notifications")).data;
   check("the table is notified, and told who is up", notes.unread === notesBefore + 1 && notes.notifications[0].body.includes("Ana (Teal) claimed tile C4. Bo (Cobalt) is up."), JSON.stringify(notes.notifications[0]));
   check("Ana's own turn is spent: she is refused now", (await post(ana, { kind: "claim", x: 2, y: 4 })).status === 403);
@@ -246,7 +249,7 @@ try {
   board = raw.data;
   check("it is public and never cached", raw.status === 200 && raw.headers.get("cache-control") === "no-store");
   check("it has no email addresses and no ids", !raw.text.includes("@") && !/"(id|player_id|owner_player_id|game_id|email)"/.test(raw.text), raw.text.slice(0, 200));
-  check("size 8, the whole island, and a piece per player", board.size === 8 && board.tiles.length === want.length && board.pieces.length === 3 && board.game.round === 3);
+  check("an 8x8 island, the whole of it, and a piece per player", board.width === 8 && board.tiles.length === want.length && board.pieces.length === 3 && board.game.round === 3);
   const anaPiece = board.pieces.find((p) => p.name === "Ana");
   check("a piece stands on its owner's most recently claimed tile", (anaPiece.at.x === 4 && anaPiece.at.y === 3) || (anaPiece.at.x === 5 && anaPiece.at.y === 3));
   check("pieces report color, score and tile count", anaPiece.color.key === "teal" && anaPiece.tiles === 2 && anaPiece.score === 2);
@@ -269,12 +272,64 @@ try {
 
   console.log("legacy games");
   const gid = "11111111-2222-3333-4444-555555555555";
-  d1(state, `INSERT INTO games (id, slug, name, repo, join_code, status, size, seed, created_at) VALUES ('${gid}','old','Old game','a/b','ZZZZ2222','setup',6,123,'2026-01-01T00:00:00Z')`);
+  d1(state, `INSERT INTO games (id, slug, name, repo, join_code, status, settings, seed, created_at) VALUES ('${gid}','old','Old game','a/b','ZZZZ2222','setup','{"board.island":{"width":6,"height":5}}',123,'2026-01-01T00:00:00Z')`);
   const lazy = (await client(A).get("/old/api/board")).data;
-  const exp = generateTiles(6, 123);
+  const exp = generateTiles(123, settingsForSize(6, 5));
   check("a game with no tiles gets them from its stored seed the first time the board is read, same as at creation",
-    lazy.tiles.length === exp.length && lazy.size === 6 && lazy.tiles.every((t) => exp.find((e) => e.x === t.x && e.y === t.y).terrain === t.terrain));
+    lazy.tiles.length === exp.length && lazy.width === 6 && lazy.height === 5 && lazy.tiles.every((t) => exp.find((e) => e.x === t.x && e.y === t.y).terrain === t.terrain));
   check("and not twice", d1(state, `SELECT COUNT(*) AS n FROM tiles WHERE game_id = '${gid}'`)[0].n === exp.length && (await client(A).get("/old/api/board")).data.tiles.length === exp.length);
+
+  console.log("settings");
+  check("the default settings are valid, and every game setting has a validator", validateSettings(DEFAULT_SETTINGS).length === 0 && validateSettings(settingsForSize(16, 4)).length === 0);
+  const bad = (k, v) => validateSettings({ ...DEFAULT_SETTINGS, [k]: v }).length > 0;
+  check("bad values are refused: sizes, erosion, shares, kinds, bounds, moves, harvest",
+    bad("board.island", { width: 3, height: 8 }) && bad("board.island", { width: 8 }) && bad("board.island", { width: 8, height: 8, depth: 1 }) && bad("board.erosion", { corner_tiles: 0, max_bays: 0 }) &&
+    bad("board.terrain", { ...DEFAULT_SETTINGS["board.terrain"], share: 0.9 }) && bad("board.terrain", { ...DEFAULT_SETTINGS["board.terrain"], kinds: { Lava: { share: 0.1, where: "any", clump: 2 } } }) &&
+    bad("board.terrain", { ...DEFAULT_SETTINGS["board.terrain"], kinds: { lava: { share: 0.1, where: "moon", clump: 2 } } }) && bad("board.land_bounds", { min_x: 5, min_y: 0, max_x: 2, max_y: null }) &&
+    bad("turn.actions", { claim: "yes", describe: true }) && bad("turn.actions_per_turn", 0) && bad("turn.actions_per_turn", 1.5) && bad("harvest", { points_per_tile: 1, when: "never" }) && validateSettings({ ...DEFAULT_SETTINGS, mystery: 1 }).length > 0);
+  check("a game's stored settings override only what they name; an invalid stored value falls back to the default",
+    getSettings({ harvest: { points_per_tile: 3 } }).harvest.when === "end_of_round" && getSettings({ harvest: { points_per_tile: 3 } }).harvest.points_per_tile === 3 &&
+    getSettings({ harvest: { points_per_tile: "lots" } }).harvest.points_per_tile === 1 && getSettings("not json")["turn.actions_per_turn"] === 1 && getSettings(null)["board.island"].width === 8 && getSettings({ nope: 1 }).nope === undefined);
+  check("a new terrain kind in the settings shows up on the board (a rule can add one)", (() => { const st = getSettings({ "board.terrain": { ...DEFAULT_SETTINGS["board.terrain"], kinds: { ...DEFAULT_SETTINGS["board.terrain"].kinds, lava: { share: 0.1, where: "inner", clump: 2 } } } }); return generateTiles(7, st).some((t) => t.terrain === "lava"); })());
+  check("the island size setting changes the island: 12 x 6 fits x 0..11, y 0..5", (() => { const t = generateTiles(3, settingsForSize(12, 6)); return Math.max(...t.map((u) => u.x)) === 11 && Math.max(...t.map((u) => u.y)) === 5 && t.length > 50; })());
+  check("land bounds clip the island", (() => { const st = getSettings({ "board.land_bounds": { min_x: 3, min_y: 0, max_x: null, max_y: null } }); return generateTiles(3, st).every((t) => t.x >= 3); })());
+  const rulesText = readText(pjoin(ROOT, "templates/RULES.md"), "utf8");
+  const named = [...rulesText.matchAll(/\[setting: ([^\]]+)\]/g)].flatMap((m) => m[1].split(",").map((n) => n.trim()));
+  const inRules = new Set(named), inCode = new Set(Object.keys(DEFAULT_SETTINGS));
+  check("every [setting: x] named in templates/RULES.md exists in the default settings", named.length > 0 && [...inRules].every((n) => inCode.has(n)), [...inRules].filter((n) => !inCode.has(n)).join());
+  check("and every default setting is named in templates/RULES.md", [...inCode].every((n) => inRules.has(n)), [...inCode].filter((n) => !inRules.has(n)).join());
+  check("the rules number the board rules 207 to 212 and keep 201 to 206", ["201.", "202.", "203.", "204.", "205.", "206.", "207. The Board.", "208. Land and terrain.", "209. Claiming land.", "210. Naming and describing.", "211. Harvest.", "212. Changing the board."].every((h) => rulesText.includes("**" + h)));
+
+  console.log("settings at work");
+  const sg = await createGame(state, { slug: "sett", name: "Settings game", max: 2, ...R });
+  const sa = await join(A, "sett", sg.code, { email: "sa@example.com", name: "Sa", color: "vermilion" });
+  const sb = await join(A, "sett", sg.code, { email: "sb@example.com", name: "Sb", color: "teal" });
+  const setSettings = (o) => d1(state, `UPDATE games SET settings = '${JSON.stringify(o)}', status = 'playing', round = 1, turn = 0, moves = 0 WHERE slug = 'sett'`);
+  const sgame = async () => (await client(A).get("/sett/api/game")).data;
+  setSettings({ "turn.actions": { claim: false, describe: true } });
+  const noClaim = await post(sa, { kind: "claim", label: "C4" }, "sett");
+  check("a move the settings switch off is refused (403) and nothing changes", noClaim.status === 403 && /do not allow/.test(noClaim.data.error) && (await sgame()).game.turn === 0);
+  setSettings({ "turn.actions_per_turn": 2, harvest: { points_per_tile: 3, when: "end_of_round" } });
+  const m1 = await post(sa, { kind: "claim", label: "C4" }, "sett");
+  check("with 2 moves per turn the first move does not end the turn", m1.status === 200 && m1.data.turn_over === false && m1.data.moves_left === 1 && (await sgame()).game.turn === 0);
+  check("a proposal after moving on the board this turn is refused", (await sa.post("/sett/api/turn", { prompt: "hi" })).status === 409);
+  check("the other player is still not up", (await post(sb, { kind: "claim", label: "D4" }, "sett")).status === 403);
+  const m2 = await post(sa, { kind: "claim", label: "C5" }, "sett");
+  check("the second move ends the turn", m2.status === 200 && m2.data.turn_over === true && (await sgame()).game.turn === 1);
+  await post(sb, { kind: "claim", label: "E4" }, "sett");
+  await post(sb, { kind: "describe", label: "E4", name: "Ebb", description: "Low tide." }, "sett");
+  const sg2 = await sgame();
+  check("harvest pays points_per_tile (3) per tile at the end of the round: Sa 2 tiles = 6, Sb 1 tile = 3", sg2.game.round === 2 && sg2.players.map((p) => p.score).join() === "6,3", JSON.stringify(sg2.players.map((p) => p.score)));
+  check("the harvest line shows the multiplied points", sg2.events.find((e) => e.kind === "harvest").text === "Harvest at the end of round 1: Sa (Vermilion) +6, Sb (Teal) +3.", sg2.events.find((e) => e.kind === "harvest")?.text);
+  d1(state, "UPDATE players SET score = 0 WHERE game_id = (SELECT id FROM games WHERE slug='sett')");
+  setSettings({ harvest: { points_per_tile: 2, when: "end_of_turn" } });
+  await post(sa, { kind: "describe", label: "C4", name: "Camp", description: "Tents." }, "sett");
+  const sg3 = await sgame();
+  check("end_of_turn harvest pays the player who just moved, right away, and nobody else", sg3.players.map((p) => p.score).join() === "4,0" && sg3.events[0].text === "Harvest after Sa (Vermilion)'s turn: +4." && sg3.game.round === 1 && sg3.game.turn === 1, JSON.stringify(sg3.players.map((p) => p.score)));
+  setSettings({ harvest: { points_per_tile: 0, when: "end_of_round" } });
+  await post(sa, { kind: "describe", label: "C4", name: "Camp", description: "Tents." }, "sett");
+  await post(sb, { kind: "describe", label: "E4", name: "Ebb", description: "Low." }, "sett");
+  check("0 points per tile means no harvest and no harvest log line", (await sgame()).events.filter((e) => e.kind === "harvest").length === 2 && (await sgame()).game.round === 2);
 
   console.log("static files");
   const js = await client(A).get("/js/board.js");

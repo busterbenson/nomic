@@ -72,7 +72,7 @@ npx wrangler d1 execute DB --local --command "SELECT to_addr, subject, body FROM
 
 `create-game.sh` takes `--slug`, `--name`, `--repo owner/name`, and optionally
 `--rules-path` (default `RULES.md`), `--rules-ref` (default `main`),
-`--max-players` (1 to 8), `--size` (island side, 4 to 16, default 8), `--winning-score`, `--local` (default) or `--remote`. It checks
+`--max-players` (1 to 8), `--size` (island side, 4 to 16, default 8; every other board setting is written to the game's row at its default and can be changed there: `src/lib/settings.js`), `--winning-score`, `--local` (default) or `--remote`. It checks
 the repo's rules file is publicly readable with a plain GET and refuses
 otherwise, generates the join code at run time (never committed), and prints
 `<SITE_URL>/<slug>/join/<CODE>`. Run it again with another slug for a second game.

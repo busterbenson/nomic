@@ -204,7 +204,7 @@ export function createGLBoard(container, { onSelect } = {}) {
     camera.updateProjectionMatrix();
   }
   const clampTarget = () => {
-    const S = board ? board.size : 8, lim = S * 0.9;
+    const S = board ? Math.max(board.width, board.height) : 8, lim = S * 0.9;
     target.x = Math.max(home.x - lim, Math.min(home.x + lim, target.x));
     target.z = Math.max(home.z - lim, Math.min(home.z + lim, target.z));
   };

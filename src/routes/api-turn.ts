@@ -16,6 +16,7 @@ export const post = async (ctx: Ctx) => {
 
   if (game.status !== "playing") return json({ error: "The game has not started, so there are no turns yet." }, 409);
   if (player.turn_order !== game.turn) return json({ error: "It is not your turn." }, 403);
+  if (game.moves > 0) return json({ error: "You already moved on the board this turn." }, 409);
 
   const now = nowIso();
   const name = player.display_name;

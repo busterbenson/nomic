@@ -125,7 +125,7 @@
   let BOARD = null, SEL = null, VIEW = null;   // the last /api/board, the selected tile {x,y}, the drawn board
   const hex = c => (c && /^#[0-9a-f]{6}$/i.test(c.hex) ? c.hex : "#888");
   const who = (name, c) => `${name} (${c ? c.name : "?"})`;
-  const TERRAIN_LABEL = { meadow: "Meadow", water: "Water", forest: "Forest", stone: "Stone", sand: "Sand" };
+  const terrainName = t => (t || "").replace(/^./, c => c.toUpperCase());
   
   const when = iso => String(iso || "").slice(0, 10);
 
@@ -285,7 +285,7 @@
   // ---- the hex board ------------------------------------------------------
   const tileAt = (q, r) => BOARD && BOARD.tiles.find(t => t.x === q && t.y === r);
   const tileLabel = t => {
-    const bits = [`Tile ${t.label}`, TERRAIN_LABEL[t.terrain] || t.terrain];
+    const bits = [`Tile ${t.label}`, terrainName(t.terrain)];
     if (t.name) bits.push(`named ${t.name}`);
     bits.push(t.owner ? `owned by ${who(t.owner.name, t.owner.color)}` : "unowned");
     return bits.join(", ");
@@ -314,7 +314,7 @@
     const props = Object.entries(t.props || {});
     const move = myMove();
     const mine = !!(t.owner && ME && ME.player && t.owner.color.key === ME.player.color.key);
-    let html = `<h3><span class="swatch" style="background:var(--terrain-${t.terrain}, #aaa)"></span>${esc(TERRAIN_LABEL[t.terrain] || t.terrain)} <small>${esc(t.label)}</small></h3>
+    let html = `<h3><span class="swatch" style="background:var(--terrain-${t.terrain}, #aaa)"></span>${esc(terrainName(t.terrain))} <small>${esc(t.label)}</small></h3>
       <p class="tile-name">${t.name ? esc(t.name) : '<span class="sub">Unnamed</span>'}</p>
       ${t.description ? `<p class="tile-desc">${esc(t.description)}</p>` : ""}
       <p class="tile-owner">${t.owner ? `<span class="dot" style="background:${hex(t.owner.color)}"></span>${esc(who(t.owner.name, t.owner.color))}` : '<span class="sub">Nobody owns this tile.</span>'}</p>`;

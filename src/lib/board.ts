@@ -1,15 +1,16 @@
 // Reading and seeding a game's hex board. Tiles are normally created with the game
 // (scripts/create-game.sh); a game that predates the board gets them the first time
-// anything needs them, from the seed and radius stored on the game, so it is the
+// anything needs them, from the seed and settings stored on the game, so it is the
 // same board either way.
 import { tileInsertSql } from "./geometry.js";
+import { getSettings } from "./settings.js";
 import { Env, nowIso } from "./util";
 
-export async function ensureTiles(env: Env, game: { id: string; size: number; seed: number }): Promise<void> {
+export async function ensureTiles(env: Env, game: { id: string; settings: string; seed: number }): Promise<void> {
   const row: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM tiles WHERE game_id = ?").bind(game.id).first();
   if (row?.n > 0) return;
   // INSERT OR IGNORE: two requests seeding at once cannot clash.
-  await env.DB.batch(tileInsertSql(game.id, game.size, game.seed, nowIso()).map((sql: string) => env.DB.prepare(sql)));
+  await env.DB.batch(tileInsertSql(game.id, game.seed, getSettings(game.settings), nowIso()).map((sql: string) => env.DB.prepare(sql)));
 }
 
 export type TileRow = {

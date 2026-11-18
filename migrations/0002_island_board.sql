@@ -12,8 +12,12 @@
 -- new parent), drop the old children, drop the old parent, rename the new parent into
 -- place (SQLite rewrites the new children's references to follow it), rename the children.
 
--- Side of the starting island, in tiles (it occupies x 0..size-1, y 0..size-1).
-ALTER TABLE games ADD COLUMN size INTEGER NOT NULL DEFAULT 8 CHECK (size BETWEEN 4 AND 16);
+-- The game's board settings, as JSON: only the ones this game changes; the rest are the defaults in
+-- src/lib/settings.js (island size, erosion, terrain kinds, land bounds, allowed moves, moves per turn,
+-- harvest). Validated by the code that reads them. A passed rule changes a value here, not code.
+ALTER TABLE games ADD COLUMN settings TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(settings) AND json_type(settings) = 'object');
+-- Moves made so far in the current turn (a turn may hold several: setting turn.actions_per_turn).
+ALTER TABLE games ADD COLUMN moves INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE games ADD COLUMN seed INTEGER NOT NULL DEFAULT 0;
 UPDATE games SET seed = abs(random() % 2147483647);
 
@@ -99,13 +103,14 @@ ALTER TABLE login_tokens RENAME COLUMN marker TO color;
 -- One row per LAND tile, on an infinite grid of signed integer coordinates (x east, y north);
 -- there is no row for open sea. Where land may exist, and how tiles are named (C4 = x 2, y 3), is
 -- geometry (src/lib/geometry.js), not schema, so a rule can change it. `props` is a JSON object that rules (and later the referee) can
--- put anything in: {"fertility": 2, "haunted": true}. Terrain is one of a small fixed
--- set and means nothing by itself until a rule gives it meaning.
+-- put anything in: {"fertility": 2, "haunted": true}. Terrain means nothing by
+-- itself until a rule gives it meaning.
 CREATE TABLE tiles (
   game_id TEXT NOT NULL REFERENCES games(id),
   x INTEGER NOT NULL,
   y INTEGER NOT NULL,
-  terrain TEXT NOT NULL DEFAULT 'meadow' CHECK (terrain IN ('meadow','water','forest','stone','sand')),
+  -- Any lowercase word: the kinds a game has come from its settings (board.terrain), so a rule can add one.
+  terrain TEXT NOT NULL DEFAULT 'meadow' CHECK (terrain GLOB '[a-z]*' AND length(terrain) <= 20),
   name TEXT CHECK (name IS NULL OR length(name) BETWEEN 1 AND 40),
   description TEXT CHECK (description IS NULL OR length(description) BETWEEN 1 AND 280),
   owner_player_id TEXT,

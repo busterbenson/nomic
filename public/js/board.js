@@ -70,7 +70,7 @@ export function createSvgBoard(container, { onSelect } = {}) {
     last = board;
     centers.clear();
     svg.replaceChildren();
-    const S = board.size, benched = board.pieces.filter((p) => !p.at);
+    const benched = board.pieces.filter((p) => !p.at);
     let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
     for (const t of board.tiles) for (const [dx, dy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
       for (const z of [-SLAB_DEPTH, 1]) {
@@ -111,8 +111,8 @@ export function createSvgBoard(container, { onSelect } = {}) {
     // faint edge labels: A-H along the south edge, 1-8 along the west edge, and the selected tile's name
     const lab = (txt, a, b, extra = {}) => { const t = el("text", { x: a, y: -b, "text-anchor": "middle", "font-size": 0.42, fill: theme.label || "currentColor", opacity: 0.55, "pointer-events": "none", ...extra }, g); t.textContent = txt; };
     const colName = (x) => board.tiles.find((t) => t.x === x && t.label)?.label.replace(/[0-9]+$/, "");
-    for (let x = 0; x < S; x++) { const [a, b] = project(x, -0.95, 0); lab(colName(x) || "", a, b - 0.2); }
-    for (let y = 0; y < S; y++) { const [a, b] = project(-0.95, y, 0); lab(String(y + 1), a - 0.15, b - 0.1); }
+    for (let x = 0; x < board.width; x++) { const [a, b] = project(x, -0.95, 0); lab(colName(x) || "", a, b - 0.2); }
+    for (let y = 0; y < board.height; y++) { const [a, b] = project(-0.95, y, 0); lab(String(y + 1), a - 0.15, b - 0.1); }
     if (selected) { const t = board.tiles.find((u) => u.x === selected.x && u.y === selected.y); const c = centers.get(`${selected.x},${selected.y}`); if (t && c) lab(t.label, c[0], c[1] + 0.9, { "font-size": 0.38, opacity: 1, "font-weight": "bold" }); }
   }
   const mq = matchMedia("(prefers-color-scheme: dark)");

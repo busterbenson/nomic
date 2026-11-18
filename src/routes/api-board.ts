@@ -1,6 +1,7 @@
 // GET /<slug>/api/board: the hex map and the pieces on it. PUBLIC: no emails, no ids.
 import { ensureTiles, loadTiles } from "../lib/board";
 import { coordLabel } from "../lib/geometry.js";
+import { getSettings } from "../lib/settings.js";
 import { Ctx, colorInfo, json } from "../lib/util";
 
 const parseProps = (s: string) => {
@@ -25,9 +26,9 @@ export const get = async ({ env, data }: Ctx) => {
     if (!prev || String(t.claimed_at) > String(prev.claimed_at)) last.set(t.owner_player_id, t);
   }
   return json({
-    // The starting island occupies x 0..size-1, y 0..size-1 on an endless grid; only land has a row.
-    size: g.size,
-    columns: g.size, rows: g.size,
+    // The starting island occupies x 0..width-1, y 0..height-1 on an endless grid; only land has a row.
+    settings: getSettings(g.settings), // the board's rules as data: public, like the rules text
+    width: getSettings(g.settings)["board.island"].width, height: getSettings(g.settings)["board.island"].height,
     game: { slug: g.slug, status: g.status, turn: g.turn, round: g.round },
     tiles: tiles.map((t) => {
       const o = t.owner_player_id ? byId.get(t.owner_player_id) : null;

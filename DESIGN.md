@@ -99,17 +99,36 @@ broke down because the model lost track of which rules were in effect.)
 The world is an **infinite isometric grid of square tiles**, with signed integer
 coordinates `(x, y)`: x runs east, y runs north. Only **land** exists as data: a
 `tiles` row per land tile; everything else is open sea (drawn as a faint grid that
-fades out). A new game starts with an **island** of side 8 (`--size`, 4 to 16) on
+fades out). A new game starts with an **island** 8 tiles wide and 8 tall (`--size`, 4 to 16) on
 x 0..7, y 0..7, with each corner bitten off so it reads as an island, which leaves
 54 to 58 land tiles.
+
+**Every number of the board is a setting, not code.** `games.settings` is a JSON object
+(validated; `src/lib/settings.js` holds the defaults and the validators) and
+`scripts/create-game.sh` writes the defaults into the new game's row. The code that makes
+the island, takes a move or pays the harvest reads them from there. A passed rule changes a
+value (or adds a terrain kind), not code. `templates/RULES.md` rules 207 to 212 state each
+setting in plain words and end with the setting they control in brackets, e.g. `[setting:
+board.island]`; a test keeps the rules and the settings identical.
+
+| Setting | Default | Controls |
+|---|---|---|
+| `board.island` | `{width: 8, height: 8}` | the starting island's size |
+| `board.erosion` | `{corner_tiles: 2, max_bays: 2}` | how much of the corners and sides is bitten off |
+| `board.terrain` | meadow, 25% other: water (inside), sand (coast), stone, forest, in clumps | the terrain kinds, their share, and where each may go. A rule may add a kind |
+| `board.land_bounds` | `{min_x: 0, min_y: 0, max_x: null, max_y: null}` | where land may exist (the default limit: x and y at least 0) |
+| `turn.actions` | `{claim: true, describe: true}` | the moves a player may make instead of proposing |
+| `turn.actions_per_turn` | `1` | how many such moves a turn holds; the last one ends the turn |
+| `harvest` | `{points_per_tile: 1, when: "end_of_round"}` | points per owned tile, and when (`end_of_round` for everyone, or `end_of_turn` for the player who just moved) |
 
 - **Names.** Tiles are named like chess squares: x is a letter (A..Z, then AA, AB,
   ...) and y + 1 is the number, so `C4` is x 2, y 3 and `AA12` is x 26, y 11. The
   conversion is `coordLabel` / `parseLabel` in `src/lib/geometry.js`.
 - **Land is only at x >= 0 and y >= 0 for now.** That is a default, not a law: the
-  schema allows any signed coordinates, and `landAllowed` in `src/lib/geometry.js` is
-  the one place that says where land may exist. A rule may lift it (the island could
-  grow west and south) with a code change to that function.
+  schema allows any signed coordinates, and the `board.land_bounds` setting (read by
+  `landAllowed`) says where land may exist. A rule may lift it (the island could
+  grow west and south) by changing that setting. *Nothing creates new land yet*; a rule
+  that does will use `landAllowed`.
 - **Adjacency** is the four orthogonal neighbours; the diagonals are available
   separately (`neighbors`, `diagonals`) for rules that want them. The geometry is one
   file, so a different grid is a different `geometry.js` (plus the projection in
@@ -127,8 +146,9 @@ x 0..7, y 0..7, with each corner bitten off so it reads as an island, which leav
 - **Moves the site carries out itself** (`POST /<slug>/api/action`, no referee):
   claim an unowned land tile, or name and describe a tile you own, by label
   (`{"kind":"claim","label":"C4"}`). Only on your turn, only while the game is
-  `playing`. A move completes the turn; when the turn wraps past the last player the
-  round ends and every player harvests 1 point per tile owned. Proposals are still
+  `playing`. A move completes the turn (or uses one of its `turn.actions_per_turn`
+  moves); when the turn wraps past the last player the round ends and every player
+  harvests `harvest.points_per_tile` per tile owned (by default 1). Proposals are still
   recorded and wait for the referee, and do not advance the turn; a player who
   proposed this turn cannot also act on it.
 - **Look.** Isometric (2:1 dimetric), one fixed angle, no rotation; pan, zoom and

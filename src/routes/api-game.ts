@@ -35,7 +35,6 @@ export const get = async ({ env, data }: Ctx) => {
       round: g.round,
       winning_score: g.winning_score,
       max_players: g.max_players,
-      size: g.size,
     },
     players,
     events,
