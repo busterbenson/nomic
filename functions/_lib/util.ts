@@ -109,12 +109,13 @@ export const validSlug = (s: unknown): s is string =>
 // A game's rules come from a public GitHub repo. Shapes are checked before any
 // fetch so a bad row can never make the server request an arbitrary URL.
 const SEG = /^[A-Za-z0-9._-]+$/;
+const plain = (p: string) => SEG.test(p) && p !== "." && !p.includes(".."); // no "." or ".." segments
 export const validRepo = (s: unknown): s is string =>
-  typeof s === "string" && s.split("/").length === 2 && s.split("/").every((p) => SEG.test(p) && p !== "." && p !== ".." && !p.includes(".."));
+  typeof s === "string" && s.split("/").length === 2 && s.split("/").every(plain);
 export const validRulesPath = (s: unknown): s is string =>
-  typeof s === "string" && s.length <= 200 && !s.startsWith("/") && s.split("/").every((p) => SEG.test(p) && !p.includes(".."));
+  typeof s === "string" && s.length <= 200 && !s.startsWith("/") && s.split("/").every(plain);
 export const validRef = (s: unknown): s is string =>
-  typeof s === "string" && s.length <= 100 && !s.startsWith("/") && !s.endsWith("/") && s.split("/").every((p) => SEG.test(p) && !p.includes(".."));
+  typeof s === "string" && s.length <= 100 && !s.startsWith("/") && !s.endsWith("/") && s.split("/").every(plain);
 
 export const gameBase = (game: { slug: string }) => `/${game.slug}`;
 

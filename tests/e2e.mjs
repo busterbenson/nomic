@@ -330,6 +330,8 @@ try {
   for (const p of ["/api/game", "/rules", "/admin/", "/join/ABCDEFGH", "/auth/verify", "/assets/", "/static/", "/www/", "/mail/", "/help/", "/about/", "/Bad_Slug/", "/UPPER/", "/a/", "/-lead/", "/trail-/", "/x".repeat(1) + "y".repeat(41) + "/"]) {
     check(`reserved or malformed slug ${p.slice(0, 20)} is 404`, (await client(A).get(p)).status === 404);
   }
+  check("an encoded slug and a trailing slash on a sub-route route the same way as the plain form",
+    (await client(A).get("/on%65/")).status === 404 && (await client(A).get("/one/api/game/")).status === 200 && (await client(A).get("/one/auth/verify/?token=x")).status === 400);
   const ghost = await client(A).get("/nope/");
   check("an unknown slug is a friendly 404 page that lists no game", ghost.status === 404 && ghost.text.includes("no game at this address") && !ghost.text.includes("Game One"));
   const ghostApi = await client(A).get("/nope/api/game");
@@ -346,7 +348,7 @@ try {
   check("create-game refuses malformed slugs", await allRefuse(["a", "Bad_Slug", "UPPER", "-x-", "has space", "x".repeat(41), "dots.in"], (slug) => ({ slug }), /slug must/));
   check("create-game refuses a duplicate slug", await refuses({ slug: "one" }, /already exists/));
   check("create-game refuses a bad repo shape", await allRefuse(["nope", "../x", "a/b/c", "http://x/y", "a/..", "a b/c"], (repo) => ({ slug: "bad-repo", repo }), /owner\/name/));
-  check("create-game refuses a bad rules path", await allRefuse(["../../etc/passwd", "/abs", "a/../b"], (rulesPath) => ({ slug: "bad-path", rulesPath }), /rules-path/));
+  check("create-game refuses a bad rules path", await allRefuse(["../../etc/passwd", "/abs", "a/../b", "./RULES.md", "a/./b"], (rulesPath) => ({ slug: "bad-path", rulesPath }), /rules-path/));
   check("create-game refuses a repo whose RULES.md is not publicly readable", await refuses({ slug: "private-one", repo: "busterbenson/not-there" }, /cannot read/));
   check("and inserted nothing", d1(state, "SELECT COUNT(*) AS n FROM games")[0].n === gamesBefore);
   check("create-game requires slug, name and repo", (() => { try { execFileSync(ROOT + "/scripts/create-game.sh", ["--slug", "zz"], { encoding: "utf8", stdio: "pipe" }); return false; } catch (e) { return /required/.test(String(e.stderr)); } })());
@@ -370,7 +372,7 @@ try {
   check("when the repo cannot be read the answer is 502 with a plain message", rf.status === 502 && /unavailable/i.test(rf.text) && !rf.text.includes("boom"), rf.text);
   check("the board and its API still work then", (await client(A).get("/flaky/")).status === 200 && (await client(A).get("/flaky/api/game")).status === 200);
   const callsBefore = JSON.stringify(stub.calls);
-  const shapes = [["repo", "../../etc"], ["repo", "http://evil.test/x"], ["repo", "a/b/c"], ["rules_path", "../secret"], ["rules_path", "/abs"], ["rules_ref", "../x"]];
+  const shapes = [["repo", "../../etc"], ["repo", "http://evil.test/x"], ["repo", "a/b/c"], ["rules_path", "../secret"], ["rules_path", "/abs"], ["rules_path", "a/./b"], ["rules_ref", "../x"], ["rules_ref", "."]];
   const shapeResults = [];
   for (const [col, bad] of shapes) {
     d1(state, `UPDATE games SET repo = 'busterbenson/game-shape', rules_path = 'RULES.md', rules_ref = 'main' WHERE slug = 'shape'`);

@@ -119,7 +119,7 @@ only; no token), caches it for 60 seconds, and returns it as `text/markdown`. If
 GitHub cannot be reached it answers 502 with a plain message and the board shows
 "Rules unavailable right now" instead of breaking. The repo, path and ref are
 shape-checked before every fetch. `RULES_BASE_URL` replaces the host (the tests
-use it; never set it in production).
+use it; never set it in production). The 60-second cache only works on a custom domain (the Cache API does nothing on `*.pages.dev`), so there every board load fetches from GitHub.
 
 ## Email
 
