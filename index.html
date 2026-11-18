@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nomic</title>
+<style>
+  :root {
+    --bg: #f6f1e7; --ink: #1f1b16; --muted: #6d6458; --line: #d8cfbf;
+    --card: #fffaf0; --track: #e9e0cf; --accent: #c47f2c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17140f; --ink: #efe7da; --muted: #a69a88; --line: #3a332a;
+      --card: #201c16; --track: #2c261e; --accent: #e0a050;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.5 Georgia, "Iowan Old Style", serif;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 2.2rem; margin: 0; letter-spacing: 0.02em; }
+  h2 { font-size: 1.1rem; text-transform: uppercase; letter-spacing: 0.12em;
+       color: var(--muted); margin: 40px 0 12px; font-weight: normal; }
+  .sub { color: var(--muted); margin: 4px 0 0; }
+  .now { margin-top: 16px; padding: 12px 14px; background: var(--card);
+         border-left: 3px solid var(--accent); }
+  /* the track: one lane per player, marker placed by score */
+  .lane { position: relative; height: 40px; margin: 6px 0;
+          background: var(--track); border-radius: 20px; }
+  .lane .marker { position: absolute; top: 50%; transform: translate(-50%, -50%);
+                  font-size: 26px; transition: left 0.6s ease; }
+  .lane .finish { position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+                  color: var(--muted); font-size: 0.8rem; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: left; }
+  th { color: var(--muted); font-weight: normal; font-size: 0.85rem; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.current td { font-weight: bold; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+         margin-right: 6px; vertical-align: middle; }
+  #rules h1 { display: none; }
+  #rules h2 { margin-top: 24px; }
+  #rules p, #rules li { max-width: 65ch; }
+  #rules code { font-size: 0.9em; background: var(--track); padding: 1px 4px; border-radius: 3px; }
+  .log li { color: var(--muted); }
+  .log li b { color: var(--ink); font-weight: normal; }
+  footer { margin-top: 48px; color: var(--muted); font-size: 0.85rem; }
+  a { color: var(--accent); }
+  .err { color: #b5452f; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Nomic</h1>
+  <p class="sub" id="game-name">A game where changing the rules is a move.</p>
+  <div class="now" id="now">Loading the board…</div>
+
+  <h2>The track</h2>
+  <div id="track"></div>
+
+  <h2>Scores</h2>
+  <table>
+    <thead><tr><th>Player</th><th></th><th style="text-align:right">Points</th></tr></thead>
+    <tbody id="scores"></tbody>
+  </table>
+
+  <h2>What happened</h2>
+  <ul class="log" id="log"></ul>
+
+  <h2>The rules in effect</h2>
+  <div id="rules">Loading…</div>
+
+  <footer>
+    The rules, the board and this page all live in
+    <a href="https://github.com/busterbenson/nomic">github.com/busterbenson/nomic</a>.
+    Every passed proposal is a commit.
+  </footer>
+</main>
+
+<script>
+  // Everything on this page is drawn from two files in the repo: game.json
+  // (players, scores, whose turn) and RULES.md (the rules). The referee
+  // updates those files; this page only reads them.
+
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+
+  // Just enough markdown for RULES.md: headings, paragraphs, lists, bold, code.
+  function renderMarkdown(md) {
+    const inline = s => esc(s)
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/`([^`]+)`/g, "<code>$1</code>");
+    const out = [];
+    let para = [], list = [];
+    const flushPara = () => {
+      if (para.length) { out.push("<p>" + inline(para.join(" ")) + "</p>"); para = []; }
+    };
+    const flushList = () => {
+      if (list.length) { out.push("<ul>" + list.map(i => "<li>" + inline(i) + "</li>").join("") + "</ul>"); list = []; }
+    };
+    const flush = () => { flushPara(); flushList(); };
+    for (const raw of md.split("\n")) {
+      const line = raw.trimEnd();
+      let m;
+      if ((m = line.match(/^(#{1,3}) (.*)$/))) {
+        flush();
+        out.push(`<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`);
+      } else if ((m = line.match(/^\s*[-*] (.*)$/))) {
+        flushPara();               // a list ends the paragraph before it
+        list.push(m[1]);
+      } else if (!line.trim()) {
+        flush();
+      } else if (list.length && /^\s+/.test(raw)) {
+        list[list.length - 1] += " " + line.trim();   // wrapped list item
+      } else {
+        flushList();
+        para.push(line.trim());
+      }
+    }
+    flush();
+    return out.join("\n");
+  }
+
+  async function load() {
+    const opts = { cache: "no-store" };
+    let game;
+    try {
+      game = await (await fetch("game.json", opts)).json();
+    } catch (e) {
+      document.getElementById("now").innerHTML = '<span class="err">Could not load game.json.</span>';
+      return;
+    }
+
+    const players = game.players || [];
+    const target = Number(game.winning_score) || 100;
+    // Nobody is "to play" until the game has started.
+    const current = game.status === "setup" ? null : (players[game.turn] || null);
+
+    document.getElementById("game-name").textContent = game.game || "Nomic";
+    const status = game.status === "setup"
+      ? "Setting up. Waiting for players to take their seats."
+      : `Round ${game.round}. ${current ? esc(current.marker + " " + current.name) + "'s turn." : ""}`;
+    document.getElementById("now").innerHTML = status +
+      ` First to <strong>${target}</strong> points wins (for now).`;
+
+    // Track: one lane per player. Clamp so a marker never leaves its lane.
+    document.getElementById("track").innerHTML = players.map(p => {
+      const pct = Math.max(0, Math.min(1, (Number(p.score) || 0) / target));
+      return `<div class="lane" title="${esc(p.name)}: ${esc(p.score)} points">
+        <span class="marker" style="left: calc(20px + ${pct} * (100% - 70px))">${esc(p.marker)}</span>
+        <span class="finish">${target}</span>
+      </div>`;
+    }).join("");
+
+    // Scoreboard, highest first; ties keep turn order.
+    const ranked = players.map((p, i) => ({ ...p, i }))
+      .sort((a, b) => (b.score - a.score) || (a.i - b.i));
+    document.getElementById("scores").innerHTML = ranked.map(p => `
+      <tr class="${current && p.id === current.id ? "current" : ""}">
+        <td><span class="dot" style="background:${/^#[0-9a-f]{3,8}$/i.test(p.color) ? p.color : "#888"}"></span>${esc(p.marker)} ${esc(p.name)}</td>
+        <td>${current && p.id === current.id ? "to play" : ""}</td>
+        <td class="num">${esc(p.score)}</td>
+      </tr>`).join("");
+
+    document.getElementById("log").innerHTML = (game.log || []).slice().reverse()
+      .map(e => `<li><b>${esc(e.when)}</b> · ${esc(e.text)}</li>`).join("");
+
+    try {
+      const md = await (await fetch("RULES.md", opts)).text();
+      document.getElementById("rules").innerHTML = renderMarkdown(md);
+    } catch (e) {
+      document.getElementById("rules").innerHTML = '<span class="err">Could not load RULES.md.</span>';
+    }
+  }
+  load();
+</script>
+</body>
+</html>
