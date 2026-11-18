@@ -75,3 +75,4 @@ input[type=email], input[type=text] { font: inherit; padding: 8px 10px; color: v
 .markers input:focus-visible + span { outline: 2px solid var(--accent); }
 .markers input:disabled + span { opacity: 0.3; cursor: not-allowed; }
 .dev { font-size: 0.8rem; color: var(--muted); overflow-wrap: anywhere; }
+.badge[hidden] { display: none; }

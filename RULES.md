@@ -12,10 +12,10 @@ Core rules (1xx) are harder to change than ordinary rules (2xx). See 104.
 **101. Follow the rules.** Every player, and the referee, must follow the rules
 in this file as they stand on `main`.
 
-**102. Players.** The players are the people listed in `game.json`. Adding or
+**102. Players.** The players are the people who have taken a seat, as shown on the board. Adding or
 removing a player takes a passed proposal.
 
-**103. Turns.** Players take turns in the order listed in `game.json`. On your
+**103. Turns.** Players take turns in the order of their seats on the board. On your
 turn you write one prompt. The referee reads it and either:
 - drafts it as a **proposal** to change the rules or the site, or
 - carries it out as an **action**, if a rule allows that action.

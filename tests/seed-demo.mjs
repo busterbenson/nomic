@@ -13,14 +13,17 @@ let srv;
 try {
   migrate(state);
   const g = createGame(state, { name: "Nomic, game 1" });
+  // A second, still-open game for the join page screenshot; dated old so it is not the current game.
+  const open = createGame(state, { name: "Nomic, game 2" });
+  d1(state, "UPDATE games SET created_at = '2000-01-01T00:00:00.000Z' WHERE name = 'Nomic, game 2'");
   srv = await startServer(state, 8793, ["DEV_MODE=1"]);
   const ada = await join(srv.base, g.code, { email: "ada@example.com", name: "Ada", marker: MARKERS[0] });
   await join(srv.base, g.code, { email: "bo@example.com", name: "Bo", marker: MARKERS[1] });
   d1(state, "UPDATE players SET score = 30 WHERE marker = '" + MARKERS[0] + "'");
   d1(state, "UPDATE players SET score = 55 WHERE marker = '" + MARKERS[1] + "'");
-  d1(state, "UPDATE games SET status = 'playing', round = 1, turn = 1");
+  d1(state, "UPDATE games SET status = 'playing', round = 1, turn = 1 WHERE name = 'Nomic, game 1'");
   const cookie = ada.cookie.split("=")[1];
-  execFileSync("/usr/local/bin/python3", [ROOT + "/tests/screenshot.py", srv.base, out, cookie, g.code], { stdio: "inherit", timeout: 120000 });
+  execFileSync("/usr/local/bin/python3", [ROOT + "/tests/screenshot.py", srv.base, out, cookie, open.code], { stdio: "inherit", timeout: 120000 });
 } finally {
   await srv?.stop();
   try { rmSync(state, { recursive: true, force: true }); } catch {}

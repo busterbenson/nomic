@@ -11,7 +11,9 @@ with sync_playwright() as p:
         page = ctx.new_page()
         page.goto(base + "/")
         page.wait_for_selector("#scores tr")
-        page.wait_for_selector("#badge:not([hidden])")
+        page.wait_for_selector("#bell")
+        if w < 500:  # opening the panel marks everything read, so only the first shot has a badge
+            page.wait_for_selector("#badge:not([hidden])")
         page.screenshot(path=f"{out}/board-{name}.png", full_page=True)
         sw = page.evaluate("document.documentElement.scrollWidth")
         print(f"{name}: scrollWidth={sw} viewport={w} sideways_scroll={sw > w}")
