@@ -2,7 +2,7 @@
 import { ensureTiles, loadTiles } from "../lib/board";
 import { coordLabel } from "../lib/geometry.js";
 import { getSettings } from "../lib/settings.js";
-import { Ctx, colorInfo, json } from "../lib/util";
+import { Ctx, colorOf, json } from "../lib/util";
 
 const parseProps = (s: string) => {
   try { const v = JSON.parse(s); return v && typeof v === "object" && !Array.isArray(v) ? v : {}; } catch { return {}; }
@@ -34,12 +34,12 @@ export const get = async ({ env, data }: Ctx) => {
       const o = t.owner_player_id ? byId.get(t.owner_player_id) : null;
       return {
         x: t.x, y: t.y, label: coordLabel(t.x, t.y), terrain: t.terrain, name: t.name, description: t.description,
-        owner: o ? { name: o.display_name, color: colorInfo(o.color) } : null,
+        owner: o ? { name: o.display_name, color: colorOf(o.color) } : null,
         props: parseProps(t.props),
       };
     }),
     pieces: players.map((p) => ({
-      name: p.display_name, color: colorInfo(p.color), score: p.score, turn_order: p.turn_order,
+      name: p.display_name, color: colorOf(p.color), score: p.score, turn_order: p.turn_order,
       tiles: counts.get(p.id) ?? 0,
       at: last.has(p.id) ? { x: last.get(p.id).x, y: last.get(p.id).y, label: coordLabel(last.get(p.id).x, last.get(p.id).y) } : null,
     })),

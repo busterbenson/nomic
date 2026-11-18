@@ -125,6 +125,7 @@
   let BOARD = null, SEL = null, VIEW = null;   // the last /api/board, the selected tile {x,y}, the drawn board
   const hex = c => (c && /^#[0-9a-f]{6}$/i.test(c.hex) ? c.hex : "#888");
   const who = (name, c) => `${name} (${c ? c.name : "?"})`;
+  const safeWord = s => (/^[a-z][a-z0-9_-]*$/.test(s) ? s : "x");
   const terrainName = t => (t || "").replace(/^./, c => c.toUpperCase());
   
   const when = iso => String(iso || "").slice(0, 10);
@@ -212,7 +213,9 @@
     const mine = ME && ME.player && ME.player.turn_order === game.turn;
     const taken = turns.find(t => t.turn_index === game.turn);
     let html = "";
-    if (mine && !taken) {
+    if (mine && !taken && game.moves > 0) {
+      html = `<strong>Your turn.</strong> You have moved on the board. Make your next move: tap a tile.`;
+    } else if (mine && !taken) {
       html = `<strong>Your turn.</strong> Do one of two things. <strong>Act on the board:</strong> tap a tile to claim it, or to name and describe one of yours. That ends your turn. Or <strong>propose:</strong> write one prompt for Chalant (the referee): a rule change, or something the rules let you do.
         <form class="stack" id="turn-form" style="margin-top:10px; max-width:none">
           <textarea name="prompt" rows="4" maxlength="2000" required aria-label="Your prompt"></textarea>
@@ -314,7 +317,7 @@
     const props = Object.entries(t.props || {});
     const move = myMove();
     const mine = !!(t.owner && ME && ME.player && t.owner.color.key === ME.player.color.key);
-    let html = `<h3><span class="swatch" style="background:var(--terrain-${t.terrain}, #aaa)"></span>${esc(terrainName(t.terrain))} <small>${esc(t.label)}</small></h3>
+    let html = `<h3><span class="swatch" style="background:var(--terrain-${safeWord(t.terrain)}, #aaa)"></span>${esc(terrainName(t.terrain))} <small>${esc(t.label)}</small></h3>
       <p class="tile-name">${t.name ? esc(t.name) : '<span class="sub">Unnamed</span>'}</p>
       ${t.description ? `<p class="tile-desc">${esc(t.description)}</p>` : ""}
       <p class="tile-owner">${t.owner ? `<span class="dot" style="background:${hex(t.owner.color)}"></span>${esc(who(t.owner.name, t.owner.color))}` : '<span class="sub">Nobody owns this tile.</span>'}</p>`;

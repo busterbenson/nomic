@@ -1,5 +1,5 @@
 // PUBLIC. Never include emails, player ids or the join code.
-import { Ctx, colorInfo, json } from "../lib/util";
+import { Ctx, colorOf, json } from "../lib/util";
 
 export const get = async ({ env, data }: Ctx) => {
   const g = data.game!;
@@ -7,7 +7,7 @@ export const get = async ({ env, data }: Ctx) => {
     await env.DB.prepare(
       "SELECT display_name AS name, color, score, turn_order, is_host FROM players WHERE game_id = ? ORDER BY turn_order",
     ).bind(g.id).all()
-  ).results.map((p: any) => ({ ...p, color: colorInfo(p.color), is_host: !!p.is_host }));
+  ).results.map((p: any) => ({ ...p, color: colorOf(p.color), is_host: !!p.is_host }));
   const events = (
     await env.DB.prepare("SELECT kind, text, created_at FROM events WHERE game_id = ? ORDER BY id DESC LIMIT 50")
       .bind(g.id)
@@ -33,6 +33,7 @@ export const get = async ({ env, data }: Ctx) => {
       status: g.status,
       turn: g.turn,
       round: g.round,
+      moves: g.moves,
       winning_score: g.winning_score,
       max_players: g.max_players,
     },

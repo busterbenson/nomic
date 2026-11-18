@@ -85,6 +85,10 @@ with sync_playwright() as p:
                 page.mouse.click(bx["x"] + 6, bx["y"] + 6); page.wait_for_timeout(150)
                 check(f"board-{name}-{scheme}: tapping open sea clears the selection", "Tap a tile" in page.inner_text("#tile-panel"))
                 click_tile(page, 2, 3)
+            if scheme == "light":
+                click_tile(page, 3, 4)   # D5: its name is HTML on purpose
+                check(f"board-{name}-{scheme}: a tile name containing HTML is shown as text, never as markup", "<b>Reed</b>" in page.inner_text("#tile-panel") and page.locator("#tile-panel b").count() == 0 and "<b>Reed</b>" in page.inner_text("#log") and page.locator("#log b").count() == page.locator("#log li").count())
+                click_tile(page, 2, 3)
             check(f"board-{name}-{scheme}: no page errors", not errors, str(errors))
             sideways(page, w, f"board-{name}-{scheme}")
             if w < 500 and scheme == "light":

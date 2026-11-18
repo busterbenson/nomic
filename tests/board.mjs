@@ -331,6 +331,21 @@ try {
   await post(sb, { kind: "describe", label: "E4", name: "Ebb", description: "Low." }, "sett");
   check("0 points per tile means no harvest and no harvest log line", (await sgame()).events.filter((e) => e.kind === "harvest").length === 2 && (await sgame()).game.round === 2);
 
+  console.log("hardening");
+  check("settings named __proto__ or constructor are ignored, not thrown on", (() => { try { const s = getSettings(JSON.parse('{"__proto__":{"x":1},"constructor":{"y":2},"toString":3,"harvest":{"points_per_tile":4,"when":"end_of_turn"}}')); return s.harvest.points_per_tile === 4 && validateSettings(JSON.parse('{"__proto__":1}')).length > 0; } catch { return false; } })());
+  d1(state, `INSERT INTO games (id, slug, name, repo, join_code, status, settings, seed, created_at) VALUES ('99999999-2222-3333-4444-555555555555','void','Void','a/b','VVVV2222','setup','{"board.land_bounds":{"min_x":100,"min_y":0,"max_x":null,"max_y":null}}',5,'2026-01-01T00:00:00Z')`);
+  const none = await client(A).get("/void/api/board");
+  check("land bounds that leave no land give an empty board, not an error", none.status === 200 && none.data.tiles.length === 0 && none.data.pieces.length === 0);
+  d1(state, "UPDATE games SET settings = '{\"turn.actions_per_turn\": 1}', status = 'playing', round = 1, turn = 0, moves = 0 WHERE slug = 'sett'");
+  d1(state, "DELETE FROM turns WHERE game_id = (SELECT id FROM games WHERE slug='sett')");
+  d1(state, "UPDATE tiles SET owner_player_id = NULL, claimed_at = NULL, name = NULL, description = NULL WHERE game_id = (SELECT id FROM games WHERE slug='sett')");
+  const [rc, rp] = await Promise.all([post(sa, { kind: "claim", label: "C4" }, "sett"), sa.post("/sett/api/turn", { prompt: "A proposal racing a move." })]);
+  const sgr = await sgame();
+  const proposals = d1(state, "SELECT COUNT(*) AS n FROM turns WHERE game_id = (SELECT id FROM games WHERE slug='sett')")[0].n;
+  check("a claim and a proposal sent together: exactly one lands, and a proposal never sits beside a completed move",
+    [rc.status, rp.status].filter((x) => x === 200).length === 1 && ((rc.status === 200 && proposals === 0 && sgr.game.turn === 1) || (rp.status === 200 && proposals === 1 && sgr.game.turn === 0)), `${rc.status} ${rp.status} turn=${sgr.game.turn} proposals=${proposals}`);
+  check("/api/game reports how many moves the current turn has used", typeof sgr.game.moves === "number");
+
   console.log("static files");
   const js = await client(A).get("/js/board.js");
   check("the board's script is served as JavaScript", js.status === 200 && /javascript/.test(js.headers.get("content-type")), js.status + " " + js.headers.get("content-type"));

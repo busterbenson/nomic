@@ -79,9 +79,9 @@ function exactly(v, keys) {
 export function validateSettings(s) {
   if (!isObj(s)) return ["settings must be an object"];
   const errors = [];
-  for (const k of Object.keys(s)) if (!(k in VALIDATORS)) errors.push(`unknown setting ${k}`);
+  for (const k of Object.keys(s)) if (!Object.hasOwn(VALIDATORS, k)) errors.push(`unknown setting ${k}`);
   for (const k of Object.keys(VALIDATORS)) {
-    if (!(k in s)) { errors.push(`missing setting ${k}`); continue; }
+    if (!Object.hasOwn(s, k)) { errors.push(`missing setting ${k}`); continue; }
     const e = VALIDATORS[k](s[k]);
     if (e) errors.push(`${k}: ${e}`);
   }
@@ -97,7 +97,7 @@ export function getSettings(stored) {
   if (!isObj(over)) over = {};
   const out = structuredClone(DEFAULT_SETTINGS);
   for (const [k, v] of Object.entries(over)) {
-    if (!(k in VALIDATORS)) continue;
+    if (!Object.hasOwn(VALIDATORS, k)) continue;
     const merged = isObj(v) && isObj(DEFAULT_SETTINGS[k]) ? { ...DEFAULT_SETTINGS[k], ...v } : v;
     if (!VALIDATORS[k](merged)) out[k] = merged;
   }

@@ -10,7 +10,8 @@ export async function ensureTiles(env: Env, game: { id: string; settings: string
   const row: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM tiles WHERE game_id = ?").bind(game.id).first();
   if (row?.n > 0) return;
   // INSERT OR IGNORE: two requests seeding at once cannot clash.
-  await env.DB.batch(tileInsertSql(game.id, game.seed, getSettings(game.settings), nowIso()).map((sql: string) => env.DB.prepare(sql)));
+  const sql: string[] = tileInsertSql(game.id, game.seed, getSettings(game.settings), nowIso());
+  if (sql.length) await env.DB.batch(sql.map((q) => env.DB.prepare(q)));
 }
 
 export type TileRow = {

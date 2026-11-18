@@ -37,6 +37,8 @@ export const PALETTE = [
 ] as const;
 export const MAX_SEATS = PALETTE.length;
 export const colorInfo = (key: unknown) => PALETTE.find((c) => c.key === key) ?? null;
+// For replies: a row with an unknown color key (should not exist) still draws, in grey.
+export const colorOf = (key: unknown) => colorInfo(key) ?? { key: String(key), name: String(key), hex: "#888888" };
 // How a player is named in the log, emails and notifications: "Ana (Teal)".
 export const who = (name: string, colorKey: string) => `${name} (${colorInfo(colorKey)?.name ?? colorKey})`;
 

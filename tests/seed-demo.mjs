@@ -30,7 +30,7 @@ try {
   await mv(ada, { kind: "describe", label: "C4", name: "Hearth Hill", description: "A low hill where the first fire was lit. Everyone passes through it eventually." });
   await mv(bo, { kind: "claim", label: "E6" });
   await mv(ada, { kind: "claim", label: "C5" });
-  await mv(bo, { kind: "describe", label: "D5", name: "The Reed Pond", description: "Shallow and loud with frogs." });
+  await mv(bo, { kind: "describe", label: "D5", name: "The <b>Reed</b> Pond", description: "Shallow and loud with frogs." });
   d1(state, `UPDATE tiles SET props = '{"fertility":2,"haunted":true}' WHERE game_id = (SELECT id FROM games WHERE slug='first') AND x = 2 AND y = 3`);
   const cookie = [...ada.jar].find(([k]) => k === "s|/first")[1];
   // async: a blocked event loop would stop the rules stub answering the Worker, and the board would say "Rules unavailable"
