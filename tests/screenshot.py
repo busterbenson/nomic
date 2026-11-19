@@ -110,11 +110,13 @@ with sync_playwright() as p:
     check("desktop: a tile two steps away offers no Move button", page.query_selector("#move-btn") is None, page.inner_text("#tile-panel"))
     click_tile(page, 1, -1)  # diagonal step
     check("desktop: a diagonal neighbour offers Move here", page.query_selector("#move-btn") is not None, page.inner_text("#tile-panel"))
+    page.fill("#turn-form textarea", "Draft: make the sea saltier.")
     click_tile(page, 3, 0)
     page.click("#move-btn"); page.wait_for_function("!document.getElementById('act-note').hidden && document.getElementById('act-note').textContent.indexOf('Moved') === 0")
     page.wait_for_timeout(500)
     n_after = tile_count(page)
     check("desktop: moving to the island's edge charted new tiles beyond it (64 -> more)", n_after > 64, str(n_after))
+    check("desktop: an unsent proposal draft survives the move", page.input_value("#turn-form textarea") == "Draft: make the sea saltier.")
     check("desktop: the turn is NOT over: the propose form is still there, and a second move is not offered", page.locator("#turn-form").count() == 1 and "You have moved this turn" in page.inner_text("#turn-box"), page.inner_text("#turn-box"))
     page.mouse.move(2, 2)
     far = page.evaluate("window.__board.screenPos(5, 0)")

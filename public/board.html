@@ -231,7 +231,11 @@
     } else {
       html = `<strong>${esc(who(current.name, current.color))}</strong> is playing.`;
     }
+    // an unsent prompt survives a redraw (a move refreshes the page's state while the player is still writing)
+    const draft = box.querySelector('textarea[name=prompt]') ? box.querySelector('textarea[name=prompt]').value : "";
     box.innerHTML = html;
+    const ta = box.querySelector('textarea[name=prompt]');
+    if (ta && draft) ta.value = draft;
     box.hidden = false;
     drawPanel();
     const form = $("turn-form");
