@@ -19,6 +19,9 @@ export const DEFAULT_SETTINGS = {
   "board.chart_radius": 2,
   // How far a piece may move in one move, in tiles.
   "turn.move_distance": 1,
+  // Whether players may connect an AI client to the game's MCP server (/<slug>/mcp). The server reads this on
+  // every request and refuses with a plain message when it is false.
+  mcp_enabled: true,
 };
 
 const isInt = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
@@ -31,6 +34,7 @@ const VALIDATORS = {
   "board.island": (v) => (exactly(v, ["width", "height"]) || (!evenInt(v.width, 4, 16) || !evenInt(v.height, 4, 16) ? "width and height must be even whole numbers from 4 to 16" : null)),
   "board.chart_radius": (v) => (isInt(v, 1, 5) ? null : "must be a whole number from 1 to 5"),
   "turn.move_distance": (v) => (isInt(v, 1, 5) ? null : "must be a whole number from 1 to 5"),
+  mcp_enabled: (v) => (typeof v === "boolean" ? null : "must be true or false"),
 };
 function exactly(v, keys) {
   if (!isObj(v)) return "must be an object";

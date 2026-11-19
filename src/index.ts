@@ -8,7 +8,9 @@
 //     ctx.data.game. An unknown, malformed or reserved slug is a 404 before any handler runs.
 //  3. POSTs must be application/json (the CSRF guard that goes with SameSite=Lax),
 //     except the /<slug>/auth/verify form post, which checks Origin instead.
-//  4. Security headers on every response.
+//  4. The game's MCP server and its OAuth sign-in: /<slug>/mcp, /<slug>/oauth/{authorize,token,register}, and the
+//     two discovery documents under /.well-known/ (they name the game in the path).
+//  5. Security headers on every response.
 import { notFoundPage } from "./lib/pages";
 import { Ctx, Env, json, validSlug } from "./lib/util";
 import * as landing from "./routes/landing";
@@ -25,8 +27,14 @@ import * as apiBoard from "./routes/api-board";
 import * as apiAction from "./routes/api-action";
 import * as apiNotifications from "./routes/api-notifications";
 import * as apiNotificationsRead from "./routes/api-notifications-read";
+import * as mcp from "./routes/mcp";
+import * as oauthAuthorize from "./routes/oauth-authorize";
+import * as oauthMeta from "./routes/oauth-meta";
+import * as oauthRegister from "./routes/oauth-register";
+import * as oauthToken from "./routes/oauth-token";
+import { preflight, withCors } from "./lib/oauth";
 
-const SUBROUTES = new Set(["api", "join", "auth"]);
+const SUBROUTES = new Set(["api", "join", "auth", "mcp", "oauth", ".well-known"]);
 
 type Handler = (ctx: Ctx) => Promise<Response>;
 type Methods = { get?: Handler; post?: Handler };
@@ -49,6 +57,9 @@ const secure = (res: Response) => {
 
 const notFound = () => new Response("Not found", { status: 404 });
 
+// The OAuth endpoints the browser-based clients call (authorize is a page, not one of them).
+const OAUTH: Record<string, Methods> = { token: oauthToken, register: oauthRegister };
+
 // A route that does not answer this method is simply not found (as before).
 const run = (m: Methods | undefined, method: string, ctx: Ctx): Promise<Response> | Response => {
   const h = method === "GET" || method === "HEAD" ? m?.get : method === "POST" ? m?.post : undefined;
@@ -62,6 +73,18 @@ async function route(request: Request, env: Env, execCtx: ExecutionContext): Pro
   const segs = path.split("/").slice(1); // "/a/b/" -> ["a","b",""]
   if (segs.length > 1 && segs[segs.length - 1] === "") segs.pop();
 
+  // Discovery documents: /.well-known/oauth-protected-resource/<slug>/mcp and /.well-known/oauth-authorization-server/<slug>
+  const wk = /^\/\.well-known\/(oauth-protected-resource|oauth-authorization-server)\/([^/]+)(\/mcp)?$/.exec(path);
+  if (wk && (method === "GET" || method === "HEAD" || method === "OPTIONS")) {
+    if (method === "OPTIONS") return preflight();
+    const wkSlug = wk[2];
+    if (!validSlug(wkSlug) || (wk[1] === "oauth-protected-resource") !== !!wk[3]) return notFound();
+    const g = await env.DB.prepare("SELECT * FROM games WHERE slug = ?").bind(wkSlug).first();
+    if (!g) return withCors(json({ error: "There is no game at this address." }, 404));
+    const ctx: Ctx = { request, env, waitUntil: (p) => execCtx.waitUntil(p), params: {}, data: { game: g } };
+    return wk[1] === "oauth-protected-resource" ? oauthMeta.protectedResource(ctx) : oauthMeta.authorizationServer(ctx);
+  }
+
   const isRoot = path === "/";
   const isCss = path === "/site.css" || path === "/theme.css";
   // The board's own scripts and the vendored three.js: one flat folder each, plain file names only.
@@ -74,7 +97,10 @@ async function route(request: Request, env: Env, execCtx: ExecutionContext): Pro
   // /auth/verify is the one POST that is a browser form post (the "Continue"
   // button); it is guarded by an Origin check inside the handler instead.
   const isVerify = isGame && sub === "auth" && segs[2] === "verify" && segs.length === 3;
-  if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS" && !isVerify) {
+  // The two OAuth endpoints that take a form post: the consent page (Origin-checked like verify) and the token
+  // endpoint (OAuth defines it as form-encoded; no cookie is read there, so there is nothing for CSRF to ride on).
+  const isOauthForm = isGame && sub === "oauth" && segs.length === 3 && (segs[2] === "authorize" || segs[2] === "token");
+  if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS" && !isVerify && !isOauthForm) {
     const type = (request.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
     if (type !== "application/json") return json({ error: "Send application/json." }, 415);
   }
@@ -106,6 +132,14 @@ async function route(request: Request, env: Env, execCtx: ExecutionContext): Pro
     return run(joinPage, method, ctx);
   }
   if (sub === "auth" && isVerify) return run(verify, method, ctx);
+  if (sub === "mcp" && segs.length === 2) return mcp.handle(ctx);
+  if (sub === "oauth" && segs.length === 3) {
+    const name = segs[2];
+    if (name === "authorize") return run(oauthAuthorize, method, ctx);
+    if (!Object.hasOwn(OAUTH, name)) return notFound();
+    return method === "OPTIONS" ? preflight() : run(OAUTH[name], method, ctx);
+  }
+  if (sub === ".well-known" && segs.length === 3 && segs[2] === "oauth-authorization-server") return method === "OPTIONS" ? preflight() : run({ get: oauthMeta.authorizationServer }, method, ctx);
   if (sub === "api" && segs.length === 3) return run(API[segs[2]] && Object.hasOwn(API, segs[2]) ? API[segs[2]] : undefined, method, ctx);
   if (sub === "api" && segs.length === 4 && segs[2] === "notifications" && segs[3] === "read") return run(apiNotificationsRead, method, ctx);
   return notFound();

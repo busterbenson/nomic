@@ -15,6 +15,7 @@ import { chartAroundStatements, ensureTiles } from "../lib/board";
 import { SHARED_TILES } from "../lib/board-rules.js";
 import { parseLabel, tileLabel, validCoord, withinSteps } from "../lib/geometry.js";
 import { getSettings } from "../lib/settings.js";
+import { turnBlock } from "../lib/turn";
 import { Ctx, json, nowIso, readJson, who } from "../lib/util";
 
 export const post = async (ctx: Ctx) => {
@@ -35,10 +36,9 @@ export const post = async (ctx: Ctx) => {
   } else ({ x, y, z = 0 } = body);
   if (!validCoord(x, y, z)) return json({ error: "Name a tile by its label (like 3N 2E) or by integer x and y." }, 400);
 
-  if (game.status !== "playing") return json({ error: "The game has not started, so there are no turns yet." }, 409);
-  if (player.turn_order !== game.turn) return json({ error: "It is not your turn." }, 403);
+  const blocked = turnBlock(game, player, "move");
+  if (blocked) return json({ error: blocked.error }, blocked.status);
   const turnKey = `${game.round}:${game.turn}`;
-  if (game.last_move === turnKey) return json({ error: "You already moved this turn." }, 409);
 
   await ensureTiles(env, game);
   const me: any = await env.DB.prepare("SELECT x, y, z FROM players WHERE game_id = ? AND id = ?").bind(game.id, player.id).first();

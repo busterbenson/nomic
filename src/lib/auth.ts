@@ -29,8 +29,16 @@ export async function createSession(env: Env, game: { id: string; slug: string }
 
 export type Player = { id: string; email: string; display_name: string; color: string; score: number; turn_order: number; is_host: number };
 
+// The MCP server calls the web routes' own handlers with an internal Request. The player its OAuth token
+// belongs to is attached to THAT Request object here, and getPlayer honours it. A WeakMap keyed on the object
+// cannot be set from outside the Worker, so a bearer token is NOT accepted by the web API itself.
+const actingPlayers = new WeakMap<Request, Player>();
+export const actAs = (request: Request, player: Player) => actingPlayers.set(request, player);
+
 // The logged-in player of THIS game, or null.
 export async function getPlayer(env: Env, request: Request, game: { id: string }): Promise<Player | null> {
+  const acting = actingPlayers.get(request);
+  if (acting) return acting;
   const id = readCookie(request, COOKIE);
   if (!id) return null;
   return await env.DB.prepare(

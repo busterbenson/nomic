@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, copyFileSync, writeFileSync, rmSync, readFileSync as readText } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as pjoin } from "node:path";
-import { ROOT, COLORS, client, createGame, d1, finish, join, migrate, newState, startRulesStub, startServer } from "./lib.mjs";
+import { ROOT, COLORS, authorizeQuery, client, connect, consent, createGame, d1, exchange, finish, form, join, mcp, migrate, newPkce, newState, registerClient, sha256Hex, startRulesStub, startServer, tool } from "./lib.mjs";
 import { chartOffsets, chartedAround, coordLabel, diagonals, islandCoords, tileLabel, neighbors, parseLabel, validCoord, withinSteps, xLabel, yLabel, zLabel } from "../src/lib/geometry.js";
 import { DEFAULT_SETTINGS, getSettings, settingsForSize, spawnSpots, validateSettings } from "../src/lib/settings.js";
 import { DIAGONAL_MOVES, SHARED_TILES } from "../src/lib/board-rules.js";
@@ -106,7 +106,7 @@ console.log("migration 0002");
 
 // ---------------------------------------------------------------- settings
 console.log("settings");
-check("the default settings are valid; they are the seat limit, the island size, the chart radius and the move distance, nothing else", validateSettings(DEFAULT_SETTINGS).length === 0 && validateSettings(settingsForSize(16, 12)).length === 0 && J(Object.keys(DEFAULT_SETTINGS)) === '["max_players","board.island","board.chart_radius","turn.move_distance"]' && DEFAULT_SETTINGS.max_players === 8 && DEFAULT_SETTINGS["board.island"].width === 8 && DEFAULT_SETTINGS["board.chart_radius"] === 2 && DEFAULT_SETTINGS["turn.move_distance"] === 1);
+check("the default settings are valid; they are the seat limit, the island size, the chart radius, the move distance and whether MCP is on, nothing else", validateSettings(DEFAULT_SETTINGS).length === 0 && validateSettings(settingsForSize(16, 12)).length === 0 && J(Object.keys(DEFAULT_SETTINGS)) === '["max_players","board.island","board.chart_radius","turn.move_distance","mcp_enabled"]' && DEFAULT_SETTINGS.max_players === 8 && DEFAULT_SETTINGS["board.island"].width === 8 && DEFAULT_SETTINGS["board.chart_radius"] === 2 && DEFAULT_SETTINGS["turn.move_distance"] === 1 && DEFAULT_SETTINGS.mcp_enabled === true);
 const bad = (k, v) => validateSettings({ ...DEFAULT_SETTINGS, [k]: v }).length > 0;
 check("seats must fit the island: max_players above the spawn spots is refused (8x8 radius 2 leaves 16; 6x6 leaves 4; radius 3 on 8x8 leaves 4)", spawnSpots(8, 8, 2) === 16 && spawnSpots(6, 6, 2) === 4 && spawnSpots(8, 8, 3) === 4 && spawnSpots(4, 4, 2) === 0 && validateSettings(settingsForSize(6, 6)).length === 1 && /spawn spots/.test(validateSettings(settingsForSize(6, 6))[0]) && validateSettings(settingsForSize(6, 6, 4)).length === 0 && validateSettings({ ...DEFAULT_SETTINGS, max_players: 5, "board.chart_radius": 3 }).length === 1 && validateSettings({ ...DEFAULT_SETTINGS, max_players: 4, "board.chart_radius": 3 }).length === 0);
 check("bad values are refused: odd or tiny sizes, radii, distances, extra keys", bad("board.island", { width: 3, height: 8 }) && bad("board.island", { width: 7, height: 8 }) && bad("board.island", { width: 8 }) && bad("board.island", { width: 8, height: 8, depth: 1 }) && bad("board.chart_radius", 0) && bad("board.chart_radius", 2.5) && bad("max_players", 0) && bad("max_players", 9) && bad("max_players", 2.5) && bad("turn.move_distance", 0) && bad("turn.move_distance", "1") && validateSettings({ ...DEFAULT_SETTINGS, mystery: 1 }).length > 0);
@@ -118,10 +118,12 @@ const named = [...rulesText.matchAll(/\[setting: ([^\]]+)\]/g)].flatMap((m) => m
 const inRules = new Set(named), inCode = new Set(Object.keys(DEFAULT_SETTINGS));
 check("every [setting: x] named in templates/RULES.md exists in the default settings", named.length > 0 && [...inRules].every((n) => inCode.has(n)), [...inRules].filter((n) => !inCode.has(n)).join());
 check("and every default setting is named in templates/RULES.md", [...inCode].every((n) => inRules.has(n)), [...inCode].filter((n) => !inRules.has(n)).join());
-check("the rules keep 201 to 206 and replace the old 207 to 212 with a Board and a Turn section (plus the player limit)", ["201.", "202.", "203.", "204.", "205.", "206.", "207. The Board.", "208. The Turn.", "209. Players."].every((h) => rulesText.includes("**" + h)) && !/\*\*(210|211|212)\./.test(rulesText) && !/claim|harvest|terrain|meadow|forest|owner/i.test(rulesText.slice(rulesText.indexOf("**207."))));
+check("the rules keep 201 to 206 and replace the old 207 to 212 with a Board and a Turn section (plus the player limit and the AI-client rule)", ["201.", "202.", "203.", "204.", "205.", "206.", "207. The Board.", "208. The Turn.", "209. Players.", "210. AI clients."].every((h) => rulesText.includes("**" + h)) && !/\*\*(211|212)\./.test(rulesText) && !/claim|harvest|terrain|meadow|forest|owner/i.test(rulesText.slice(rulesText.indexOf("**207."))));
 const wrapped = rulesText.replace(/\s+/g, " ");
 const must = ["is infinite", "charted or uncharted", "8x8 charted island centered on the origin", "3N 2E", "no zero row or column", "5x5 square with its four corners cut off", "random unoccupied charted tile at least 2.5 tiles from any uncharted tile", "visible to everyone", "propose one rule change", "diagonals included", "at most once per turn", "no other piece stands on", "seats at most 8 players"];
 check("the rules say what Buster decided: infinite grid, charted/uncharted, 8x8 centered island, 3N 2E, no zero, 5x5 minus corners, random unoccupied start 2.5 from uncharted, visible to everyone, propose and move, diagonals, once per turn, 8 players", must.every((w) => wrapped.includes(w)), must.filter((w) => !wrapped.includes(w)).join(" | "));
+check("mcp_enabled is a boolean setting, true by default: anything else is refused, and a game that stores nothing for it has MCP on", !bad("mcp_enabled", false) && !bad("mcp_enabled", true) && bad("mcp_enabled", "yes") && bad("mcp_enabled", 1) && bad("mcp_enabled", null) && getSettings({}).mcp_enabled === true && getSettings({ max_players: 4 }).mcp_enabled === true && getSettings({ mcp_enabled: false }).mcp_enabled === false && getSettings('{"mcp_enabled":false}').mcp_enabled === false && getSettings({ mcp_enabled: "no" }).mcp_enabled === true);
+check("the rule that enables MCP is 210 in the template and names the setting (the sync checks above keep the two in step)", wrapped.includes("**210. AI clients.** A player may connect an AI client to this game and take their own turns through it. [setting: mcp_enabled]") && inRules.has("mcp_enabled") && inCode.has("mcp_enabled"));
 
 // ---------------------------------------------------------------- the running site
 const state = newState();
@@ -327,6 +329,196 @@ try {
   check("a cut-short island is completed the next time the board is read (6x4 again, 24 tiles); a full one is left alone", tilesOf("old").length === 21 && (await client(A).get("/old/api/board")).data.tiles.length === 24 && tilesOf("old").length === 24 && (await client(A).get("/old/api/board")).data.tiles.length === 24);
   const pg = (await client(A).get("/hex/api/game")).data.game;
   check("/api/game and /api/board report `moved` (a boolean), not a move counter", typeof pg.moved === "boolean" && !("moves" in pg) && typeof (await client(A).get("/hex/api/board")).data.game.moved === "boolean" && !("moves" in (await client(A).get("/hex/api/board")).data.game));
+
+  // ---------------------------------------------------------------- the game's MCP server
+  console.log("mcp server");
+  const SITE = "http://hex.test"; // the server's SITE_URL: the Origin the consent form must come from, and the issuer
+  const mg = await createGame(state, { slug: "pilot", name: "Pilot game", max: 2, ...R });
+  const mia = await join(A, "pilot", mg.code, { email: "mia@example.com", name: "Mia", color: "teal" });
+  const max = await join(A, "pilot", mg.code, { email: "max@example.com", name: "Max", color: "cobalt" });
+  setTurn("pilot"); setPos("pilot", 0, 0, 0); setPos("pilot", 1, 3, 3);
+  const noLeak = (t) => !/@example\.com/.test(t);
+
+  console.log("  discovery");
+  const prm = await client(A).get("/.well-known/oauth-protected-resource/pilot/mcp");
+  check("the protected-resource document names this game's MCP address and its own sign-in server", prm.status === 200 && prm.data.resource === `${SITE}/pilot/mcp` && J(prm.data.authorization_servers) === J([`${SITE}/pilot`]), prm.text);
+  const asm = await client(A).get("/.well-known/oauth-authorization-server/pilot");
+  check("the authorization-server document: code + refresh grants, PKCE S256 only, public clients, endpoints under the game",
+    asm.status === 200 && asm.data.issuer === `${SITE}/pilot` && asm.data.authorization_endpoint === `${SITE}/pilot/oauth/authorize` && asm.data.token_endpoint === `${SITE}/pilot/oauth/token` && asm.data.registration_endpoint === `${SITE}/pilot/oauth/register` &&
+    J(asm.data.code_challenge_methods_supported) === '["S256"]' && J(asm.data.token_endpoint_auth_methods_supported) === '["none"]' && J(asm.data.grant_types_supported) === '["authorization_code","refresh_token"]', asm.text);
+  check("it is also served under the issuer, and an unknown game or a wrong shape is a 404", (await client(A).get("/pilot/.well-known/oauth-authorization-server")).data?.issuer === `${SITE}/pilot` && (await client(A).get("/.well-known/oauth-authorization-server/nope")).status === 404 && (await client(A).get("/.well-known/oauth-protected-resource/pilot")).status === 404 && (await client(A).get("/.well-known/oauth-authorization-server/pilot/mcp")).status === 404);
+  const pre = await fetch(`${A}/pilot/mcp`, { method: "OPTIONS", headers: { origin: "https://agent.example", "access-control-request-method": "POST" } });
+  check("a browser client's preflight is answered (204, CORS), for the MCP address and the token endpoint", pre.status === 204 && pre.headers.get("access-control-allow-origin") === "*" && /authorization/.test(pre.headers.get("access-control-allow-headers")) && (await fetch(`${A}/pilot/oauth/token`, { method: "OPTIONS" })).status === 204);
+
+  console.log("  who may connect");
+  const none = await mcp(A, "pilot", null, "tools/list", {});
+  check("no token: 401, with a WWW-Authenticate that points at the protected-resource document", none.status === 401 && none.headers.get("www-authenticate") === `Bearer resource_metadata="${SITE}/.well-known/oauth-protected-resource/pilot/mcp"` && /Sign in/.test(none.data.error.message), none.text);
+  check("a made-up token is refused (401)", (await mcp(A, "pilot", "x".repeat(43), "tools/list", {})).status === 401 && (await mcp(A, "pilot", "short", "tools/list", {})).status === 401);
+  check("MCP only answers POST (405 otherwise): there is no stream to open and no session to end", (await client(A).get("/pilot/mcp")).status === 405 && (await client(A).req("DELETE", "/pilot/mcp")).status === 415);
+  const reg = (body) => fetch(`${A}/pilot/oauth/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const regBad = async (b) => { const r = await reg(b); return r.status === 400 ? (await r.json()).error : r.status; };
+  check("registration refuses return addresses that are not https or localhost http, scripts, fragments, none, too many; and any client that wants a secret",
+    (await regBad({ redirect_uris: ["http://evil.example/cb"] })) === "invalid_redirect_uri" && (await regBad({ redirect_uris: ["javascript:alert(1)"] })) === "invalid_redirect_uri" && (await regBad({ redirect_uris: ["https://a.example/cb#x"] })) === "invalid_redirect_uri" &&
+    (await regBad({ redirect_uris: [] })) === "invalid_redirect_uri" && (await regBad({})) === "invalid_redirect_uri" && (await regBad({ redirect_uris: Array(6).fill("https://a.example/cb") })) === "invalid_redirect_uri" &&
+    (await regBad({ redirect_uris: ["https://a.example/cb"], token_endpoint_auth_method: "client_secret_basic" })) === "invalid_client_metadata" && (await regBad({ redirect_uris: ["https://a.example/cb"], client_name: "   " })) === "invalid_client_metadata");
+  const loop = await reg({ client_name: "Local app", redirect_uris: ["http://127.0.0.1:5555/cb", "https://a.example/cb"] });
+  check("a loopback http address and an https one are accepted (201), as a public client", loop.status === 201 && (await loop.json()).token_endpoint_auth_method === "none");
+  const cid = await registerClient(A, "pilot");
+  const pk = newPkce();
+  const authUrl = (o = {}, c = cid, p = pk, r = "https://agent.example/cb") => `/pilot/oauth/authorize?${authorizeQuery(c, p, r, o)}`;
+  const web = client(A);
+  const unreg = await web.get(authUrl({}, cid, pk, "https://evil.example/cb"));
+  check("a return address the client did not register is a page, never a redirect (400)", unreg.status === 400 && !unreg.headers.get("location") && /did not register|not one this app registered/.test(unreg.text));
+  check("an unknown client is a page too; so is a client registered on another game", (await web.get(authUrl({}, "nope"))).status === 400 && (await web.get(`/one/oauth/authorize?${authorizeQuery(cid, pk)}`)).status !== 200);
+  const plain = await web.get(authUrl({ code_challenge_method: "plain" }));
+  check("PKCE plain is refused: back to the client with invalid_request", plain.status === 303 && new URL(plain.headers.get("location")).searchParams.get("error") === "invalid_request" && new URL(plain.headers.get("location")).searchParams.get("state") === "st-1");
+  check("so is a response type other than code", new URL((await web.get(authUrl({ response_type: "token" }))).headers.get("location")).searchParams.get("error") === "unsupported_response_type");
+  const wrongRes = await web.get(authUrl({ resource: "https://other.example/mcp" }));
+  check("a resource that is not this game's MCP address is refused (invalid_target); this game's own is accepted", new URL(wrongRes.headers.get("location")).searchParams.get("error") === "invalid_target" && (await web.get(authUrl({ resource: `${SITE}/pilot/mcp` }))).status === 200);
+  const login = await web.get(authUrl());
+  check("signed out, the authorize page asks for an email and offers no Allow button", login.status === 200 && /Email me a log-in link/.test(login.text) && !/>Allow</.test(login.text));
+  const fields = (o = {}) => ({ ...Object.fromEntries(new URLSearchParams(authorizeQuery(cid, pk))), ...o });
+  const stranger = await web.form("/pilot/oauth/authorize", fields({ step: "login", email: "stranger@example.com" }), { origin: SITE });
+  const decoy = /href="([^"]+auth\/verify[^"]+)"/.exec(stranger.text)?.[1];
+  check("an address with no seat gets the same page as one that has (and a decoy link)", stranger.status === 200 && /If that address has a seat/.test(stranger.text) && !!decoy);
+  const dv = await finish(client(A), decoy);
+  check("the decoy link gives no session and no redirect: it is the expired-link page", dv.status === 400 && !dv.headers.getSetCookie().length);
+  const noSess = await web.form("/pilot/oauth/authorize", fields({ step: "decide", decision: "allow" }), { origin: SITE });
+  check("without a session, 'Allow' gives no code: it goes back to the authorize page", noSess.status === 303 && new URL(noSess.headers.get("location"), SITE).pathname === "/pilot/oauth/authorize" && !/code=/.test(noSess.headers.get("location")));
+  check("the consent form must come from the site itself (403 with a foreign or no Origin)", (await mia.form("/pilot/oauth/authorize", fields({ step: "decide", decision: "allow" }), { origin: "http://evil.example" })).status === 403 && (await mia.form("/pilot/oauth/authorize", fields({ step: "decide", decision: "allow" }))).status === 403 && d1(state, "SELECT COUNT(*) AS n FROM oauth_codes")[0].n === 0);
+
+  console.log("  signing in through the game's magic link");
+  const maxOut = client(A);
+  const lg = await maxOut.form("/pilot/oauth/authorize", fields({ step: "login", email: "MAX@example.com" }), { origin: SITE });
+  const lgLink = /href="([^"]+auth\/verify[^"]+)"/.exec(lg.text)?.[1];
+  const nextSaved = d1(state, "SELECT next FROM login_tokens WHERE next IS NOT NULL ORDER BY created_at DESC LIMIT 1")[0]?.next;
+  check("Max asks for a link: the same page, and the link remembers the authorize page it came from", lg.status === 200 && !!lgLink && /^\/pilot\/oauth\/authorize\?/.test(nextSaved || "") && new URLSearchParams(nextSaved.split("?")[1]).get("client_id") === cid);
+  const lv = await finish(maxOut, lgLink);
+  check("clicking Continue signs him in and sends him back to the consent page (not the board)", lv.status === 303 && lv.headers.get("location") === nextSaved && lv.headers.getSetCookie().some((c) => /^s=/.test(c)), lv.headers.get("location"));
+  const cp = await maxOut.get(lv.headers.get("location"));
+  check("the consent page says who is asking and as whom, with Allow and Deny", cp.status === 200 && /Test Agent \(agent\.example\) wants to play as Max/.test(cp.text) && />Allow</.test(cp.text) && />Deny</.test(cp.text), cp.text.slice(-500));
+  const deny = await consent(A, "pilot", maxOut, cid, pk, undefined, "deny", SITE);
+  check("Deny goes back to the client with access_denied and its state, and stores no code", deny.status === 303 && deny.headers.get("location") === "https://agent.example/cb?error=access_denied&state=st-1" && d1(state, "SELECT COUNT(*) AS n FROM oauth_codes")[0].n === 0, deny.headers.get("location"));
+  const allow = await consent(A, "pilot", maxOut, cid, pk, undefined, "allow", SITE);
+  const aloc = new URL(allow.headers.get("location"));
+  check("Allow goes back with a one-time code and the state; only a hash of the code is stored", allow.status === 303 && aloc.origin + aloc.pathname === "https://agent.example/cb" && aloc.searchParams.get("state") === "st-1" && !!aloc.searchParams.get("code") && d1(state, "SELECT code_hash FROM oauth_codes").every((r) => /^[0-9a-f]{64}$/.test(r.code_hash) && r.code_hash !== aloc.searchParams.get("code")));
+  const code = aloc.searchParams.get("code");
+  const wrongV = await exchange(A, "pilot", cid, code, newPkce().verifier);
+  check("a wrong PKCE verifier is refused (invalid_grant) and burns the code", wrongV.status === 400 && wrongV.data.error === "invalid_grant" && (await exchange(A, "pilot", cid, code, pk.verifier)).status === 400);
+  const code2 = new URL((await consent(A, "pilot", maxOut, cid, pk, undefined, "allow", SITE)).headers.get("location")).searchParams.get("code");
+  check("a code does not work with another return address", (await exchange(A, "pilot", cid, code2, pk.verifier, "https://agent.example/other")).status === 400);
+  const code3 = new URL((await consent(A, "pilot", maxOut, cid, pk, undefined, "allow", SITE)).headers.get("location")).searchParams.get("code");
+  const otherClient = await registerClient(A, "pilot", "Other Agent");
+  check("a code does not work for another client", (await exchange(A, "pilot", otherClient, code3, pk.verifier)).status === 400);
+  // (a code is claimed before it is checked, so each refusal above spent its code: a fresh one for the good exchange)
+  const code4 = new URL((await consent(A, "pilot", maxOut, cid, pk, undefined, "allow", SITE)).headers.get("location")).searchParams.get("code");
+  const good = await exchange(A, "pilot", cid, code4, pk.verifier);
+  check("the right code and verifier give an access token (1 hour) and a refresh token; only hashes are stored", good.status === 200 && good.data.token_type === "Bearer" && good.data.expires_in === 3600 && !!good.data.access_token && !!good.data.refresh_token && d1(state, "SELECT token_hash FROM oauth_tokens").every((r) => /^[0-9a-f]{64}$/.test(r.token_hash)) && d1(state, `SELECT COUNT(*) AS n FROM oauth_tokens WHERE token_hash = '${good.data.access_token}'`)[0].n === 0);
+  check("the same code cannot be used twice", (await exchange(A, "pilot", cid, code4, pk.verifier)).status === 400);
+  check("a client of another game is not known here (401 invalid_client)", (await exchange(A, "prop", cid, code4, pk.verifier)).status === 401);
+  const tokMax = good.data.access_token;
+
+  // Mia is already signed in on the board: consent is one click.
+  const mt = await connect(A, "pilot", mia, SITE);
+  const tokMia = mt.access_token;
+  check("a player already signed in on the board connects in one step", !!tokMia && tokMia !== tokMax);
+
+  console.log("  the tools");
+  const init = await mcp(A, "pilot", tokMia, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } });
+  check("initialize answers, naming the game and the player", init.status === 200 && init.data.result.serverInfo.name === "promptocracy-pilot" && /Pilot game as Mia/.test(init.data.result.instructions), init.text);
+  const list = await mcp(A, "pilot", tokMia, "tools/list", {});
+  check("the tools are read_rules, read_board, my_state, propose, move: no voting, no catch-all action yet", J(list.data.result.tools.map((t) => t.name).sort()) === J(["move", "my_state", "propose", "read_board", "read_rules"]), list.text);
+  check("the read tools say they only read", ["read_rules", "read_board", "my_state"].every((n) => list.data.result.tools.find((t) => t.name === n).annotations.readOnlyHint === true) && list.data.result.tools.find((t) => t.name === "propose").annotations.readOnlyHint === false);
+  const rules = await tool(A, "pilot", tokMia, "read_rules");
+  check("read_rules returns what /api/rules returns", !rules.isError && rules.text === (await client(A).get("/pilot/api/rules")).text && rules.text === "# Rules\n", rules.text);
+  const board = await tool(A, "pilot", tokMia, "read_board");
+  check("read_board returns what /api/board returns, with no emails", !board.isError && J(JSON.parse(board.text)) === J((await client(A).get("/pilot/api/board")).data) && noLeak(board.text));
+  const st = await tool(A, "pilot", tokMia, "my_state");
+  const s1 = JSON.parse(st.text);
+  const b1 = (await client(A).get("/pilot/api/board")).data;
+  check("my_state: who I am, whose turn it is, where my piece stands, what I can do now",
+    s1.you.name === "Mia" && s1.you.seat === 0 && s1.you.color === "Teal" && s1.you.score === 0 && s1.you.is_host === true && J(s1.you.at) === J(b1.pieces[0].at) && s1.game.status === "playing" && s1.game.round === 1 && s1.game.turn === 0 && s1.whose_turn.name === "Mia" && s1.your_turn === true && J(s1.you_can) === '{"propose":{"allowed":true},"move":{"allowed":true}}' && noLeak(st.text), st.text);
+  const s2 = JSON.parse((await tool(A, "pilot", tokMax, "my_state")).text);
+  const webOut = await max.post("/pilot/api/turn", { prompt: "Hello" });
+  const webOutMove = await max.post("/pilot/api/action", { kind: "move", x: 3, y: 2 });
+  check("out of turn: Max's my_state says so, with the web routes' own reasons", s2.you.name === "Max" && s2.your_turn === false && s2.whose_turn.name === "Mia" && s2.you_can.propose.reason === webOut.data.error && s2.you_can.move.reason === webOutMove.data.error && webOut.status === 403 && webOutMove.status === 403, J(s2.you_can));
+  const outP = await tool(A, "pilot", tokMax, "propose", { prompt: "Hello" });
+  const outM = await tool(A, "pilot", tokMax, "move", { x: 3, y: 2 });
+  check("and propose or move out of turn fail with the web's error, as an MCP tool error", outP.isError && outP.text === webOut.data.error && outM.isError && outM.text === webOutMove.data.error);
+  const emptyP = await tool(A, "pilot", tokMia, "propose", { prompt: "   " });
+  const webEmpty = await mia.post("/pilot/api/turn", { prompt: "   " });
+  check("an empty prompt goes through the same validation as the web: same error, nothing recorded", emptyP.isError && emptyP.text === webEmpty.data.error && webEmpty.status === 400 && d1(state, `SELECT COUNT(*) AS n FROM turns WHERE game_id = '${gidOf("pilot")}'`)[0].n === 0);
+  const tooLong = await tool(A, "pilot", tokMia, "propose", { prompt: "x".repeat(2001) });
+  check("so is one over 2000 characters", tooLong.isError && tooLong.text === webEmpty.data.error);
+  const farM = await tool(A, "pilot", tokMia, "move", { x: 3, y: 0 });
+  const webFar = await mia.post("/pilot/api/action", { kind: "move", x: 3, y: 0 });
+  check("a move out of range: the same error as the web, and the piece stays", farM.isError && farM.text === webFar.data.error && webFar.status === 400 && posOf("pilot", 0).x === 0);
+  check("a move with no tile named: the web's error", (await tool(A, "pilot", tokMia, "move", {})).text === (await mia.post("/pilot/api/action", { kind: "move" })).data.error);
+  const badLabel = await tool(A, "pilot", tokMia, "move", { label: "0N 1E" });
+  check("a label with a zero row is refused with the web's error", badLabel.isError && badLabel.text === (await mia.post("/pilot/api/action", { kind: "move", label: "0N 1E" })).data.error);
+  const eventsBefore = (await client(A).get("/pilot/api/game")).data.events.length;
+  const prop1 = await tool(A, "pilot", tokMia, "propose", { prompt: "Cats may vote." });
+  const turnRow = d1(state, `SELECT prompt, status, round, turn_index FROM turns WHERE game_id = '${gidOf("pilot")}'`);
+  const gm = (await client(A).get("/pilot/api/game")).data;
+  check("propose records the turn exactly as the web does: a submitted row, the log line, the same reply, the turn does not advance",
+    !prop1.isError && J(JSON.parse(prop1.text)) === J({ ok: true, status: "submitted", message: "Turn recorded. Waiting for Chalant (the moderator)." }) && turnRow.length === 1 && turnRow[0].prompt === "Cats may vote." && turnRow[0].status === "submitted" && turnRow[0].round === 1 && turnRow[0].turn_index === 0 &&
+    gm.events.length === eventsBefore + 1 && gm.events[0].kind === "turn_submitted" && gm.events[0].text === "Mia (Teal) took their turn." && gm.game.turn === 0 && gm.turn_status === "submitted");
+  const prop2 = await tool(A, "pilot", tokMia, "propose", { prompt: "Again." });
+  const webTwice = await mia.post("/pilot/api/turn", { prompt: "Again." });
+  check("a second proposal in the round is refused with the web's error", prop2.isError && prop2.text === webTwice.data.error && webTwice.status === 409 && d1(state, `SELECT COUNT(*) AS n FROM turns WHERE game_id = '${gidOf("pilot")}'`)[0].n === 1);
+  const s3 = JSON.parse((await tool(A, "pilot", tokMia, "my_state")).text);
+  check("my_state now says I have proposed and may still move", s3.you_can.propose.allowed === false && s3.you_can.propose.reason === webTwice.data.error && s3.you_can.move.allowed === true);
+  const mv = await tool(A, "pilot", tokMia, "move", { label: "1N 2E" });
+  const mvData = JSON.parse(mv.text);
+  const gm2 = (await client(A).get("/pilot/api/game")).data;
+  check("move goes through the web's rules: the piece moves, the log line is the web's, the reply is the web's, the turn does not end",
+    !mv.isError && mvData.ok === true && mvData.kind === "move" && mvData.at.label === "1N 2E 1U" && posOf("pilot", 0).x === 1 && posOf("pilot", 0).y === 0 && gm2.events[0].text === "Mia (Teal) moved to 1N 2E 1U." && gm2.game.turn === 0 && gm2.game.moved === true);
+  const mvB = await tool(A, "pilot", tokMia, "move", { x: 2, y: 0 });
+  const webMv2 = await mia.post("/pilot/api/action", { kind: "move", x: 2, y: 0 });
+  check("a second move in the turn is refused with the web's error", mvB.isError && mvB.text === webMv2.data.error && webMv2.status === 409 && posOf("pilot", 0).x === 1);
+  const s4 = JSON.parse((await tool(A, "pilot", tokMia, "my_state")).text);
+  check("my_state agrees: nothing left to do this turn, and the piece is where the move put it", s4.you_can.move.allowed === false && s4.you_can.move.reason === webMv2.data.error && s4.you.at.x === 1 && s4.you.at.label === "1N 2E 1U");
+  const bad2 = await tool(A, "pilot", tokMia, "no_such_tool");
+  check("an unknown tool is an error, not a crash", bad2.rpc.status === 200 && (bad2.rpc.data.error || bad2.rpc.data.result?.isError));
+  const sessionsBefore = d1(state, "SELECT COUNT(*) AS n FROM sessions")[0].n;
+  const viaWeb = await fetch(`${A}/pilot/api/turn`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${tokMax}` }, body: JSON.stringify({ prompt: "sneaky" }) });
+  check("the OAuth token works on /mcp only: the web API still wants a session cookie (401), and no session was created", viaWeb.status === 401 && (await fetch(`${A}/pilot/api/me`, { headers: { authorization: `Bearer ${tokMax}` } })).status === 401 && d1(state, "SELECT COUNT(*) AS n FROM sessions")[0].n === sessionsBefore);
+
+  console.log("  tokens");
+  check("a token for this game does not work on another game", (await mcp(A, "prop", tokMia, "tools/list", {})).status === 401 && (await mcp(A, "nope", tokMia, "tools/list", {})).status === 404);
+  check("a refresh token is not an access token", (await mcp(A, "pilot", mt.refresh_token, "tools/list", {})).status === 401);
+  const rf = await form(A, "/pilot/oauth/token", { grant_type: "refresh_token", client_id: mt.clientId, refresh_token: mt.refresh_token });
+  const rfd = await rf.json();
+  check("a refresh token gives a new pair, and the new access token works", rf.status === 200 && rfd.access_token !== tokMia && rfd.refresh_token !== mt.refresh_token && (await mcp(A, "pilot", rfd.access_token, "tools/list", {})).status === 200);
+  check("the old refresh token is spent (single use); another client cannot use one either", (await form(A, "/pilot/oauth/token", { grant_type: "refresh_token", client_id: mt.clientId, refresh_token: mt.refresh_token })).status === 400 && (await form(A, "/pilot/oauth/token", { grant_type: "refresh_token", client_id: cid, refresh_token: rfd.refresh_token })).status === 400);
+  check("an unsupported grant is refused", (await (await form(A, "/pilot/oauth/token", { grant_type: "password", client_id: cid })).json()).error === "unsupported_grant_type");
+  d1(state, `UPDATE oauth_tokens SET expires_at = '2000-01-01T00:00:00.000Z' WHERE token_hash = '${sha256Hex(rfd.access_token)}'`);
+  check("an expired access token is refused (401)", (await mcp(A, "pilot", rfd.access_token, "tools/list", {})).status === 401);
+  // A log-in link may carry `next`, but only this game's own consent page is honoured: the server checks it again.
+  const nextOf = async (n) => { const tk = "tok-" + Math.random().toString(36).slice(2) + "-padding-padding"; d1(state, `INSERT INTO login_tokens (token_hash, game_id, email, purpose, created_at, expires_at, next) VALUES ('${sha256Hex(tk)}', '${gidOf("pilot")}', 'max@example.com', 'login', '2026-01-01T00:00:00Z', '2099-01-01T00:00:00Z', ${n === null ? "NULL" : `'${n}'`})`); return (await finish(client(A), `${SITE}/pilot/auth/verify?token=${tk}`)).headers.get("location"); };
+  check("a log-in link's `next` is honoured only for this game's consent page: anything else lands on the board as before",
+    (await nextOf("/pilot/oauth/authorize?a=1")) === "/pilot/oauth/authorize?a=1" && (await nextOf(null)) === "/pilot/?notice=welcome-back" && (await nextOf("https://evil.example/")) === "/pilot/?notice=welcome-back" &&
+    (await nextOf("//evil.example/pilot/oauth/authorize")) === "/pilot/?notice=welcome-back" && (await nextOf("/pilot/api/me")) === "/pilot/?notice=welcome-back" && (await nextOf("/other/oauth/authorize?a=1")) === "/pilot/?notice=welcome-back");
+
+  console.log("  the rules switch it off");
+  const setMcp = (on) => d1(state, `UPDATE games SET settings = '{"mcp_enabled":${on}}' WHERE slug = 'pilot'`);
+  setMcp(false);
+  const offCall = await tool(A, "pilot", tokMia, "my_state");
+  check("with mcp_enabled false, a connected player's call is refused (403) with a plain message that the rules disable MCP", offCall.status === 403 && /rules of this game currently disable MCP/.test(offCall.rpc.data.error.message) && !offCall.rpc.data.result, offCall.rpc.text);
+  check("the rules decide first: with no token it is the same 403 message, not a 401 that would start a sign-in", (await mcp(A, "pilot", null, "tools/list", {})).status === 403);
+  const offAuth = await web.get(authUrl());
+  const offTok = await form(A, "/pilot/oauth/token", { grant_type: "refresh_token", client_id: cid, refresh_token: "x" });
+  check("sign-in is closed too: authorize, token and registration refuse with the message; so does discovery",
+    offAuth.status === 403 && /disable MCP/.test(offAuth.text) && offTok.status === 403 && /disable MCP/.test((await offTok.json()).error_description) && (await reg({ redirect_uris: ["https://a.example/cb"] })).status === 403 &&
+    (await client(A).get("/.well-known/oauth-protected-resource/pilot/mcp")).status === 403 && (await client(A).get("/.well-known/oauth-authorization-server/pilot")).status === 403 &&
+    (await mia.form("/pilot/oauth/authorize", fields({ step: "decide", decision: "allow" }), { origin: SITE })).status === 403);
+  check("the web game is unaffected: the board still reads, and another game's MCP still answers", (await client(A).get("/pilot/api/board")).status === 200 && (await mia.get("/pilot/api/me")).status === 200 && (await client(A).get("/.well-known/oauth-authorization-server/prop")).status === 200);
+  setMcp(true);
+  check("switching it back on takes effect at once: the same token works again, with the game's state intact", (await tool(A, "pilot", tokMia, "my_state")).isError === false && JSON.parse((await tool(A, "pilot", tokMia, "my_state")).text).you.at.x === 1);
+  setMcp("true");
+  check("a stored value that is not a boolean falls back to the default (on)", (await mcp(A, "pilot", tokMia, "tools/list", {})).status === 200);
+  d1(state, `UPDATE games SET settings = '{}' WHERE slug = 'pilot'`);
+  check("and so does a game that stores no value for it", (await mcp(A, "pilot", tokMia, "tools/list", {})).status === 200);
 
   console.log("static files");
   const js = await client(A).get("/js/board.js");
