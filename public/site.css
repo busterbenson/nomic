@@ -76,7 +76,7 @@ mark{background:color-mix(in srgb,var(--accent) 28%,transparent);color:inherit;b
 .seatchip .dots .dot{width:14px;height:14px;margin-right:-4px}
 .picker{display:grid;gap:14px}
 .pv{display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:center;padding:10px 14px;background:var(--surface);border:1px solid var(--line);border-radius:14px}
-.pv svg{width:120px;height:auto;display:block}
+.pv>svg{width:120px;height:auto;display:block}
 .pv .pname{font-weight:700;overflow-wrap:anywhere}
 .pv .pmeta{font-family:var(--font-mono);font-size:.68rem;color:var(--ink-muted)}
 .opts{display:grid;gap:8px}
@@ -85,7 +85,7 @@ mark{background:color-mix(in srgb,var(--accent) 28%,transparent);color:inherit;b
 .opt{display:block;position:relative}
 .opt input{position:absolute;opacity:0;pointer-events:none}
 .opt .face{display:grid;justify-items:center;align-content:center;gap:2px;padding:8px 4px;min-height:56px;text-align:center;border:1.5px solid var(--line);border-radius:12px;background:var(--surface);cursor:pointer;font-size:.74rem;line-height:1.2;overflow-wrap:anywhere}
-.opt .face svg{width:44px;height:48px;display:block}
+.opt .thumb>svg{width:44px;height:48px;display:block}
 .opt input:checked+.face{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent)}
 .opt input:focus-visible+.face{outline:3px solid var(--accent);outline-offset:2px}
 .opt input:disabled+.face{opacity:.5;cursor:not-allowed;border-style:dashed;background:transparent}
@@ -143,7 +143,7 @@ mark{background:color-mix(in srgb,var(--accent) 28%,transparent);color:inherit;b
 .players{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
 .players li{display:grid;grid-template-columns:34px 1fr auto;gap:8px;align-items:center;padding:7px 0;border-top:1px solid var(--line);font-size:.92rem}
 .players li:first-child{border-top:0}
-.players li svg{width:34px;height:36px;display:block}
+.players li>svg{width:34px;height:36px;display:block}
 .players li b{font-family:var(--font-mono);font-size:.8rem}
 .players li.now{font-weight:700}
 .players .st{display:block;font-family:var(--font-mono);font-size:.58rem;color:var(--ink-muted);font-weight:400}
@@ -221,7 +221,7 @@ mark{background:color-mix(in srgb,var(--accent) 28%,transparent);color:inherit;b
   .players{flex-direction:row;flex-wrap:wrap;gap:6px}
   .players li{border:1px solid var(--line);border-radius:999px;padding:3px 10px 3px 4px;display:flex;gap:6px;background:var(--surface);font-size:.8rem}
   .players li .st{display:none}
-  .players li svg{width:26px;height:28px}
+  .players li>svg{width:26px;height:28px}
   .rb{grid-template-columns:1fr}
   .rail{display:none}
   .toolbar .jump{display:inline-flex}

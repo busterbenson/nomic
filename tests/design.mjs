@@ -34,6 +34,8 @@ check("a rule before any block is reported, not lost silently", parseRules("### 
 const prose = parseRules("## 100. Core [u]\nProse before any rule.\n\n### 101 One\n**101.1**\n**101.2** Second.\n");
 check("prose between a block heading and its first rule is reported (it is not shown), and a clause with no text is still a clause", prose.warnings.length === 1 && /Line 2: Text under block 100 comes before its first rule/.test(prose.warnings[0]) && prose.byNum["101"].clauses.map((c) => c.num).join() === "101.1,101.2" && prose.byNum["101.2"].paras[0].s === "Second.", J(prose.warnings));
 check("search highlights words in the text but never inside a tag or an HTML entity (a query 'amp' leaves &amp; alone)", hl("An <b>ample</b> &amp; Tom&#39;s", "amp") === "An <b><mark>amp</mark>le</b> &amp; Tom&#39;s" && hl("a &lt; b", "lt") === "a &lt; b" && hl("plain", "") === "plain");
+const wrap = parseRules("## 100. Core [u]\n### 101 One\n- A proposal needs votes\n  from every player.\n- Or not.\nAfter.\n");
+check("an indented line continues the list item above it, in order, not a paragraph before the list", J(wrap.byNum["101"].paras) === J([{ t: "ul", items: ["A proposal needs votes from every player.", "Or not."] }, { t: "p", s: "After." }]), J(wrap.byNum["101"].paras));
 check("a file in the older format (no blocks) has no sections, so the page falls back to plain markdown", parseRules("# Rules\n\n## Core rules\n\n**101. Follow.** text\n").sections.length === 0 && /<h2>Core rules<\/h2>/.test(renderMarkdown("# Rules\n\n## Core rules\n\n**101. Follow.** text\n")));
 
 console.log("the starter rules renumbered");
@@ -76,6 +78,8 @@ check("lavender is the moderator and UI accent: deep #6B50A4 on light, pale #B7A
 check("the display face is Kyrios first, then Grenze Gotisch", /--font-display: "Kyrios", "AT Kyrios", "Grenze Gotisch"/.test(css));
 check("every color token has a dark value (the page is never half dark)", ["--sea", "--surface", "--line", "--ink", "--ink-muted", "--accent", "--on-accent", "--land", "--outline"].every((t) => new RegExp(t + ":").test(dark)));
 check("the board's size rule applies to the board svg only, not to the svg each piece is drawn in (a piece keeps its own width and height)", /\.board-wrap>svg\s*\{[^}]*width:100%/.test(read("public/site.css")) && !/\.board-wrap\s+svg\s*\{/.test(read("public/site.css")));
+const sizing = read("public/site.css");
+check("no size rule reaches an svg through a descendant selector (each piece is an svg nested in the board, the preview, a thumbnail or a scoreboard icon, and keeps its own width and height)", !/\.(pv|players li|opt \.face|board-wrap) svg\s*\{/.test(sizing) && /\.pv>svg\s*\{/.test(sizing) && /\.opt \.thumb>svg\s*\{/.test(sizing) && /\.players li>svg\s*\{/.test(sizing));
 check("the pages no longer ship the WebGL board: no three.js in public/ or the Worker's routes", !readdirSync(pjoin(ROOT, "public")).includes("vendor") && !/three/i.test(read("src/index.ts")));
 
 console.log(`\n${pass} passed, ${fail} failed`);

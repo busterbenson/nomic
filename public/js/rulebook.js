@@ -61,7 +61,9 @@ export function parseRules(md) {
     }
     if ((m = line.match(/^- (.*)$/))) { if (para.length) { pushPara({ t: "p", s: para.join(" ") }); para = []; } if (!list) startAt = i; (list = list || []).push(m[1]); continue; }
     if (!line) { flush(); continue; }
-    if (!para.length && !list) startAt = i;
+    if (list && !para.length && /^\s+\S/.test(lines[i])) { list[list.length - 1] += " " + line; continue; }   // an indented line continues the list item above
+    if (list) { pushPara({ t: "ul", items: list }); list = null; }   // a plain line after list items ends the list
+    if (!para.length) startAt = i;
     para.push(line);
   }
   flush();
