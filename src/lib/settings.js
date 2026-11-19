@@ -9,7 +9,7 @@
 import { chartOffsets } from "./geometry.js";
 
 export const DEFAULT_SETTINGS = {
-  // How many players a game seats. At most 8: there are eight piece colors, and the starting island has
+  // How many players a game seats. At most 8 (rule 201), and the starting island has
   // 16 spawn spots. This is the ONE seat limit: joining reads it, nothing else caps seats.
   max_players: 8,
   // The starting island, in charted tiles, centred on the origin. Even numbers, so the centre is a seam.

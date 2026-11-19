@@ -11,6 +11,8 @@ import { DEFAULT_SETTINGS, getSettings, settingsForSize, spawnSpots, validateSet
 import { DIAGONAL_MOVES, SHARED_TILES } from "../src/lib/board-rules.js";
 import { PROPOSAL_INSERT_SQL } from "../src/lib/proposal.js";
 
+const PIECES = JSON.parse(readText(pjoin(ROOT, "src/lib/pieces.json"), "utf8"));
+
 let pass = 0, fail = 0;
 const check = (name, ok, detail = "") => {
   if (ok) { pass++; console.log(`  ok    ${name}`); }
@@ -99,6 +101,14 @@ console.log("migration 0002");
     check("tiles have no property columns at all", JSON.stringify(sql("SELECT name FROM pragma_table_info('tiles') ORDER BY cid").map((c) => c.name)) === '["game_id","x","y","z","charted_at"]');
     let dupTile = "ok"; try { sql(`INSERT INTO tiles (game_id, x, y, z, charted_at) VALUES ('g1',0,0,0,'t')`); } catch { dupTile = "refused"; }
     check("a tile exists once per game and place", dupTile === "refused");
+    // migration 0004: a seat's piece shape and the way it faces. Additive: existing seats keep working as pawns.
+    copyFileSync(pjoin(ROOT, "migrations/0003_mcp_oauth.sql"), pjoin(cfgDir, "m/0003_mcp_oauth.sql"));
+    copyFileSync(pjoin(ROOT, "migrations/0004_piece_shape.sql"), pjoin(cfgDir, "m/0004_piece_shape.sql"));
+    run(["d1", "migrations", "apply", "DB"]); // 0003 and 0004 on top of data
+    const after = sql("SELECT id, color, score, shape, mirrored FROM players ORDER BY turn_order");
+    check("migration 0004: every existing seat keeps its id, color and score, and is a pawn facing as drawn", JSON.stringify(after) === JSON.stringify([{ id: "p0", color: "vermilion", score: 0, shape: "pawn", mirrored: 0 }, { id: "p1", color: "saffron", score: 10, shape: "pawn", mirrored: 0 }, { id: "p2", color: "moss", score: 20, shape: "pawn", mirrored: 0 }]), JSON.stringify(after));
+    let badFacing = "ok"; try { sql(`UPDATE players SET mirrored = 2 WHERE id = 'p0'`); } catch { badFacing = "refused"; }
+    check("migration 0004: a piece faces one way or the other, nothing else", badFacing === "refused" && sql("SELECT name, [notnull] FROM pragma_table_info('login_tokens') WHERE name = 'shape'")[0].notnull === 0 && sql("PRAGMA foreign_key_check").length === 0);
   } catch (e) { fail++; console.log("  FAIL  migration harness:", String(e.stdout || "") + String(e.stderr || "") + (e.stack || e)); }
   finally { for (const d of [st, cfgDir]) { try { rmSync(d, { recursive: true, force: true }); } catch {} } }
 }
@@ -118,12 +128,15 @@ const named = [...rulesText.matchAll(/\[setting: ([^\]]+)\]/g)].flatMap((m) => m
 const inRules = new Set(named), inCode = new Set(Object.keys(DEFAULT_SETTINGS));
 check("every [setting: x] named in templates/RULES.md exists in the default settings", named.length > 0 && [...inRules].every((n) => inCode.has(n)), [...inRules].filter((n) => !inCode.has(n)).join());
 check("and every default setting is named in templates/RULES.md", [...inCode].every((n) => inRules.has(n)), [...inCode].filter((n) => !inRules.has(n)).join());
-check("the rules keep 201 to 206 and replace the old 207 to 212 with a Board and a Turn section (plus the player limit and the AI-client rule)", ["201.", "202.", "203.", "204.", "205.", "206.", "207. The Board.", "208. The Turn.", "209. Players.", "210. AI clients."].every((h) => rulesText.includes("**" + h)) && !/\*\*(211|212)\./.test(rulesText) && !/claim|harvest|terrain|meadow|forest|owner/i.test(rulesText.slice(rulesText.indexOf("**207."))));
+check("the starter rules are the old rules renumbered into hundreds blocks (100 Core, 200 Seats and turns, 300 Proposals and rulings, 400 Points and winning, 500 The board), with no rule from the later parts (days, voting by ballot, hearts and monsters, making things)",
+  ["## 100. Core rules [unanimous]", "## 200. Seats and turns [majority]", "## 300. Proposals and rulings [majority]", "## 400. Points and winning [majority]", "## 500. The board [majority]"].every((h) => rulesText.includes(h)) &&
+  ["101 Follow the rules", "102 Players", "103 Turns", "104 Voting", "105 The moderator", "201 Seats", "202 Your turn", "203 Time", "204 AI clients", "301 Overruling the moderator", "302 The board is part of the game", "401 Points", "402 Winning", "403 Paradox", "501 The grid", "502 Coordinates", "503 The island", "504 Moving and charting", "505 New players"].every((h) => rulesText.includes("### " + h + "\n")) &&
+  !/^## (600|700)\./m.test(rulesText) && !/claim|harvest|terrain|meadow|forest|owner|heart|monster|catalog/i.test(rulesText.slice(rulesText.indexOf("## 500."))));
 const wrapped = rulesText.replace(/\s+/g, " ");
 const must = ["is infinite", "charted or uncharted", "8x8 charted island centered on the origin", "3N 2E", "no zero row or column", "5x5 square with its four corners cut off", "random unoccupied charted tile at least 2.5 tiles from any uncharted tile", "visible to everyone", "propose one rule change", "diagonals included", "at most once per turn", "no other piece stands on", "seats at most 8 players"];
 check("the rules say what Buster decided: infinite grid, charted/uncharted, 8x8 centered island, 3N 2E, no zero, 5x5 minus corners, random unoccupied start 2.5 from uncharted, visible to everyone, propose and move, diagonals, once per turn, 8 players", must.every((w) => wrapped.includes(w)), must.filter((w) => !wrapped.includes(w)).join(" | "));
 check("mcp_enabled is a boolean setting, true by default: anything else is refused, and a game that stores nothing for it has MCP on", !bad("mcp_enabled", false) && !bad("mcp_enabled", true) && bad("mcp_enabled", "yes") && bad("mcp_enabled", 1) && bad("mcp_enabled", null) && getSettings({}).mcp_enabled === true && getSettings({ max_players: 4 }).mcp_enabled === true && getSettings({ mcp_enabled: false }).mcp_enabled === false && getSettings('{"mcp_enabled":false}').mcp_enabled === false && getSettings({ mcp_enabled: "no" }).mcp_enabled === true);
-check("the rule that enables MCP is 210 in the template and names the setting (the sync checks above keep the two in step)", wrapped.includes("**210. AI clients.** A player may connect an AI client to this game and take their own turns through it. [setting: mcp_enabled]") && inRules.has("mcp_enabled") && inCode.has("mcp_enabled"));
+check("the rule that enables MCP is 204 in the template and names the setting (the sync checks above keep the two in step)", wrapped.includes("### 204 AI clients A player may connect an AI client to this game and take their own turns through it. [setting: mcp_enabled]") && inRules.has("mcp_enabled") && inCode.has("mcp_enabled"));
 
 // ---------------------------------------------------------------- the running site
 const state = newState();
@@ -158,28 +171,33 @@ try {
   check("create-game refuses an island size that is not an even number from 4 to 16", refused === "yes yes yes yes yes ", refused);
   let nine = "";
   try { await createGame(state, { slug: "nine", max: 9, ...R }); nine = "created"; } catch { nine = "refused"; }
-  check("create-game refuses more than 8 players (there are 8 colors)", nine === "refused");
+  check("create-game refuses more than 8 players (a game seats at most 8)", nine === "refused");
 
   console.log("piece colors and spawning");
   const page = await client(A).get(`/hex/join/${g.code}`);
-  check("the join page offers all 8 colors as pieces, with their names", page.status === 200 && (page.text.match(/name="color"/g) || []).length === 8 && ["Vermilion", "Saffron", "Moss", "Teal", "Cobalt", "Violet", "Rose", "Graphite"].every((n) => page.text.includes(`<b>${n}</b>`)) && !page.text.includes('name="marker"'));
+  check("the join page offers every player color of the palette by name (16, from one data file) and none of the monster-only colors", page.status === 200 && (page.text.match(/name="color"/g) || []).length === PIECES.colors.length && PIECES.colors.length === 16 && PIECES.colors.every((c) => page.text.includes(`<span class="nm">${c.name}</span>`)) && !/Bog|Wraith|Hex pink/.test(page.text) && !page.text.includes('name="marker"'));
+  check("and nine shapes: the eight traced pieces and the pawn", (page.text.match(/name="shape"/g) || []).length === 9 && ["Lantern keeper", "Frog", "Robot", "Balloon", "Diver", "Wizard", "Crow", "Astronaut", "Pawn"].every((n) => page.text.includes(`<span class="nm">${n}</span>`)));
   const ana = await join(A, "hex", g.code, { email: "ana@example.com", name: "Ana", color: "teal" });
   const page2 = await client(A).get(`/hex/join/${g.code}`);
-  check("a color someone took is shown as taken and cannot be picked", /value="teal"[^>]*disabled/.test(page2.text) && !/value="cobalt"[^>]*disabled/.test(page2.text) && page2.text.includes("<i>taken</i>"));
+  check("a color someone took is shown as taken and cannot be picked", /value="teal"[^>]*disabled/.test(page2.text) && !/value="cobalt"[^>]*disabled/.test(page2.text) && page2.text.includes("<small>Ana</small>"));
   const dupe = await client(A).post("/hex/api/join", { code: g.code, email: "x@example.com", name: "X", color: "teal" });
   check("joining with a taken color is refused (409)", dupe.status === 409 && /color/i.test(dupe.data.error), dupe.text);
-  check("an unknown color is refused (400), and so is the old marker field", (await client(A).post("/hex/api/join", { code: g.code, email: "y@example.com", name: "Y", color: "puce" })).status === 400 && (await client(A).post("/hex/api/join", { code: g.code, email: "y@example.com", name: "Y", marker: "x" })).status === 400);
-  const bo = await join(A, "hex", g.code, { email: "bo@example.com", name: "Bo", color: "cobalt" });
-  const cy = await join(A, "hex", g.code, { email: "cy@example.com", name: "Cy", color: "rose" });
-  const full = await client(A).post("/hex/api/join", { code: g.code, email: "d@example.com", name: "D", color: "moss" });
+  check("an unknown color is refused (400), and so is a color from the first palette that is no longer offered, a monster-only color, and the old marker field", (await client(A).post("/hex/api/join", { code: g.code, email: "y@example.com", name: "Y", color: "saffron" })).status === 400 && (await client(A).post("/hex/api/join", { code: g.code, email: "y@example.com", name: "Y", color: "bog" })).status === 400 && (await client(A).post("/hex/api/join", { code: g.code, email: "y@example.com", name: "Y", color: "wraith" })).status === 400 && (await client(A).post("/hex/api/join", { code: g.code, email: "y@example.com", name: "Y", color: "puce" })).status === 400 && (await client(A).post("/hex/api/join", { code: g.code, email: "y@example.com", name: "Y", marker: "x" })).status === 400 && (await client(A).post("/hex/api/join", { code: g.code, email: "y@example.com", name: "Y", color: "orchid", shape: "dragon" })).status === 400);
+  const bo = await join(A, "hex", g.code, { email: "bo@example.com", name: "Bo", color: "cobalt", shape: "frog" });
+  const cy = await join(A, "hex", g.code, { email: "cy@example.com", name: "Cy", color: "orchid" });
+  const full = await client(A).post("/hex/api/join", { code: g.code, email: "d@example.com", name: "D", color: "indigo" });
   check("max_players 3 is honoured", full.status === 409 && /full/i.test(full.data.error), full.text);
   await new Promise((r) => setTimeout(r, 800)); // emails are sent after the reply
   const outbox = d1(state, "SELECT subject, body FROM outbox").map((o) => o.subject + o.body).join("\n");
-  check("the log and emails name players as 'Ana (Teal)'", outbox.includes("You'll play as Teal.") && outbox.includes("Players so far (1 of 3): Ana (Teal).") && outbox.includes("Bo (Cobalt) joined the game.") && (await client(A).get("/hex/api/game")).data.events.some((e) => e.text === "Cy (Rose) took a seat."), outbox.slice(0, 300));
+  check("the log and emails name players as 'Ana (Teal)'", outbox.includes("You'll play as Teal.") && outbox.includes("Players so far (1 of 3): Ana (Teal).") && outbox.includes("Bo (Cobalt) joined the game.") && (await client(A).get("/hex/api/game")).data.events.some((e) => e.text === "Cy (Orchid) took a seat."), outbox.slice(0, 300));
   const me = await ana.get("/hex/api/me");
-  check("/api/me carries the claimed color", me.data.player.color.key === "teal" && me.data.player.color.name === "Teal" && /^#[0-9a-f]{6}$/.test(me.data.player.color.hex) && !("marker" in me.data.player));
+  check("/api/me carries the claimed color", me.data.player.color.key === "teal" && me.data.player.color.name === "Teal" && /^#[0-9a-f]{6}$/i.test(me.data.player.color.hex) && !("marker" in me.data.player));
   const game = (await client(A).get("/hex/api/game")).data;
-  check("/api/game players carry colors, not markers", game.players.every((p) => p.color?.key && !("marker" in p)) && game.players.map((p) => p.color.key).join() === "teal,cobalt,rose");
+  check("/api/game players carry colors, not markers", game.players.every((p) => p.color?.key && !("marker" in p)) && game.players.map((p) => p.color.key).join() === "teal,cobalt,orchid");
+  const bd = (await client(A).get("/hex/api/board")).data;
+  check("shapes: Ana joined without naming one and is a pawn, Bo chose the frog; /api/me, /api/game and /api/board carry each piece's shape, and none starts mirrored", me.data.player.shape === "pawn" && game.players.map((p) => p.shape).join() === "pawn,frog,pawn" && bd.pieces.map((p) => p.shape).join() === "pawn,frog,pawn" && bd.pieces.every((p) => p.mirrored === false) && !JSON.stringify([game, bd]).includes("@"));
+  check("the color object carries what the piece is drawn from: key, name, main (hex), shade, tint, deep", ["key", "name", "hex", "shade", "tint", "deep"].every((k) => typeof me.data.player.color[k] === "string") && me.data.player.color.hex === PIECES.colors.find((c) => c.key === "teal").main);
+  check("a seat from the first palette (a color no longer offered) still draws, in its own color", (() => { d1(state, `UPDATE players SET color = 'saffron' WHERE game_id = '${gidOf("hex")}' AND turn_order = 2`); return true; })() && (await client(A).get("/hex/api/board")).data.pieces[2].color.name === "Saffron" && (await client(A).get("/hex/api/board")).data.pieces[2].color.hex === "#e8b200" && (() => { d1(state, `UPDATE players SET color = 'orchid' WHERE game_id = '${gidOf("hex")}' AND turn_order = 2`); return true; })());
   const inner = new Set(islandCoords(8, 8).filter(([x, y]) => x >= -2 && x <= 1 && y >= -2 && y <= 1).map((c) => c[0] + "," + c[1]));
   const ps = playersOf("hex");
   check("the island leaves exactly 16 spawn spots (the inner 4x4, every tile whose whole chart shape is charted); each piece stands on one, on the ground, and no two share", inner.size === 16 && ps.length === 3 && ps.every((p) => p.z === 0 && inner.has(p.x + "," + p.y)) && new Set(ps.map((p) => p.x + "," + p.y)).size === 3, J(ps));
@@ -196,7 +214,7 @@ try {
   await join(A, "last", last.code, { email: "l0@example.com", name: "L0", color: "teal" });
   const lc1 = client(A), lc2 = client(A);
   const lj1 = await lc1.post("/last/api/join", { code: last.code, email: "l1@example.com", name: "L1", color: "cobalt" });
-  const lj2 = await lc2.post("/last/api/join", { code: last.code, email: "l2@example.com", name: "L2", color: "rose" });
+  const lj2 = await lc2.post("/last/api/join", { code: last.code, email: "l2@example.com", name: "L2", color: "orchid" });
   const [lv1, lv2] = await Promise.all([finish(lc1, lj1.data.dev_link), finish(lc2, lj2.data.dev_link)]);
   const lloc = [lv1, lv2].map((v) => v.headers.get("location"));
   check("two people finishing for the last seat at once: exactly one gets it, the other is told the join failed", playersOf("last").length === 2 && lloc.filter((l) => l.includes("notice=joined")).length === 1 && lloc.filter((l) => l.includes("notice=join-failed")).length === 1, lloc.join());
@@ -216,7 +234,7 @@ try {
   const one = await createGame(state, { slug: "one", max: 4, size: 6, ...R });
   d1(state, `UPDATE games SET settings = '{"board.island":{"width":6,"height":6},"max_players":5}' WHERE slug = 'one'`);
   for (let i = 0; i < 4; i++) await join(A, "one", one.code, { email: `o${i}@example.com`, name: `O${i}`, color: COLORS[i] });
-  const oc = client(A), oj = await oc.post("/one/api/join", { code: one.code, email: "o9@example.com", name: "O9", color: "violet" });
+  const oc = client(A), oj = await oc.post("/one/api/join", { code: one.code, email: "o9@example.com", name: "O9", color: "sky" });
   const ov = await finish(oc, oj.data.dev_link);
   check("all 4 spawn spots are occupied (two pieces cannot share): the 5th join fails with the no-room notice, and the first four stood on four different tiles", playersOf("one").length === 4 && new Set(playersOf("one").map((q) => q.x + "," + q.y)).size === 4 && ov.status === 303 && ov.headers.get("location") === "/one/?notice=no-room", ov.headers.get("location"));
 
@@ -251,7 +269,7 @@ try {
   check("and a proposal does not advance the turn", (await gameOf()).turn === 0);
   // the other order: propose first, then move
   const pa = await join(A, "prop", prop.code, { email: "pa@example.com", name: "Pa", color: "vermilion" });
-  const pb = await join(A, "prop", prop.code, { email: "pb@example.com", name: "Pb", color: "graphite" });
+  const pb = await join(A, "prop", prop.code, { email: "pb@example.com", name: "Pb", color: "onyx" });
   setTurn("prop"); setPos("prop", 0, 0, 0); setPos("prop", 1, 1, 0);
   const prp2 = await pa.post("/prop/api/turn", { prompt: "Rain, but only on Tuesdays." });
   const mv2 = await post(pa, { kind: "move", x: -1, y: 1 }, "prop");
@@ -268,6 +286,15 @@ try {
   setTurn("hex"); setPos("hex", 0, -1, 0);
   const seam = await post(ana, { kind: "move", label: "1s 1e" });
   check("across both seams in one diagonal step: 1N 1W to 1S 1E, named by label", seam.status === 200 && J([posOf("hex", 0).x, posOf("hex", 0).y]) === "[0,-1]", seam.text);
+  // facing: a piece turns toward the way it moved on screen (right on screen is east minus north)
+  const faceOf = () => d1(state, `SELECT mirrored FROM players WHERE game_id = '${gidOf("hex")}' AND turn_order = 0`)[0].mirrored;
+  check("a move to the right on screen (east, or south) mirrors the piece; the board API says so", faceOf() === 1 && (await client(A).get("/hex/api/board")).data.pieces[0].mirrored === true);
+  setTurn("hex"); setPos("hex", 0, 0, -1);
+  const west = await post(ana, { kind: "move", x: -1, y: -1 });
+  check("a move to the left on screen (west, or north) turns it back", west.status === 200 && faceOf() === 0 && (await client(A).get("/hex/api/board")).data.pieces[0].mirrored === false, west.text);
+  setTurn("hex"); setPos("hex", 0, -1, -1);
+  const north = await post(ana, { kind: "move", x: 0, y: 0 });
+  check("a move straight up the screen (north-east, a pure diagonal) keeps the way the piece faces", north.status === 200 && faceOf() === 0 && (setTurn("hex"), true) && (await post(ana, { kind: "move", x: 1, y: 0 })).status === 200 && faceOf() === 1 && (setTurn("hex"), true) && (await post(ana, { kind: "move", x: 0, y: -1 })).status === 200 && faceOf() === 1, north.text);
   // chart on move
   setTurn("hex"); setPos("hex", 0, 3, 0);
   d1(state, `INSERT INTO tiles (game_id, x, y, z, charted_at) VALUES ('${gidOf("hex")}', 4, 0, 0, 'x')`);
@@ -568,11 +595,21 @@ try {
   d1(state, `UPDATE games SET settings = '{}' WHERE slug = 'pilot'`);
   check("and so does a game that stores no value for it", (await mcp(A, "pilot", tokMia, "tools/list", {})).status === 200);
 
+  console.log("join links made before the design port");
+  {
+    const lg = await createGame(state, { slug: "legacy", ...R });
+    const mk = async (email, color, shapeSql) => { const tk = "tok-" + Math.random().toString(36).slice(2) + "-padding-padding"; d1(state, `INSERT INTO login_tokens (token_hash, game_id, email, purpose, display_name, color, ${shapeSql ? "shape, " : ""}created_at, expires_at) VALUES ('${sha256Hex(tk)}', '${gidOf("legacy")}', '${email}', 'join', 'Old', '${color}', ${shapeSql ? `${shapeSql}, ` : ""}'2026-01-01T00:00:00Z', '2099-01-01T00:00:00Z')`); return (await finish(client(A), `${SITE}/legacy/auth/verify?token=${tk}`)).headers.get("location"); };
+    const l1 = await mk("o1@example.com", "saffron", null), l2 = await mk("o2@example.com", "orchid", "'dragon'"), l3 = await mk("o3@example.com", "jade", "'wizard'");
+    const rows = d1(state, `SELECT email, color, shape FROM players WHERE game_id = '${gidOf("legacy")}' ORDER BY turn_order`);
+    check("a join link made before shapes existed (no shape, and a color of the first palette) still seats the player: a pawn, in the color they asked for", l1 === "/legacy/?notice=joined" && J(rows[0]) === '{"email":"o1@example.com","color":"saffron","shape":"pawn"}', J(rows));
+    check("a link carrying a shape that is not one of the nine seats a pawn, and one carrying a real shape keeps it", l2 === "/legacy/?notice=joined" && rows[1].shape === "pawn" && l3 === "/legacy/?notice=joined" && rows[2].shape === "wizard", J(rows));
+  }
+
   console.log("static files");
   const js = await client(A).get("/js/board.js");
   check("the board's script is served as JavaScript", js.status === 200 && /javascript/.test(js.headers.get("content-type")), js.status + " " + js.headers.get("content-type"));
-  for (const f of ["/js/board-gl.js", "/js/theme.js", "/theme.css", "/vendor/three.module.js", "/vendor/three.core.js"]) check(`${f} is served`, (await client(A).get(f)).status === 200);
-  check("nothing else in public/ is reachable, and no path tricks", (await client(A).get("/vendor/three.LICENSE")).status === 404 && (await client(A).get("/js/nope.js")).status === 404 && (await client(A).get("/js/%2e%2e/board.html")).status === 404 && (await client(A).get("/board.html")).status === 404);
+  for (const f of ["/js/pieces.js", "/js/pieces-data.js", "/js/rulebook.js", "/js/landing.js", "/theme.css"]) check(`${f} is served`, (await client(A).get(f)).status === 200);
+  check("nothing else in public/ is reachable (the old WebGL files and three.js are gone), and no path tricks", (await client(A).get("/vendor/three.module.js")).status === 404 && (await client(A).get("/js/board-gl.js")).status === 404 && (await client(A).get("/js/theme.js")).status === 404 && (await client(A).get("/js/nope.js")).status === 404 && (await client(A).get("/js/%2e%2e/board.html")).status === 404 && (await client(A).get("/board.html")).status === 404);
 } catch (e) {
   fail++;
   console.log("  FAIL  harness error:", e?.stack || e, e?.cause);

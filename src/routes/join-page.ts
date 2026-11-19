@@ -1,66 +1,86 @@
-// GET /<slug>/join/:code serves the join page with the game's name and open seats.
-// The form posts to /<slug>/api/join; the emailed link finishes the join.
+// GET /<slug>/join/:code serves the join page: your name and email, then a shape and a color for your piece.
+// The form posts to /<slug>/api/join; the emailed link finishes the join. The shapes and colors come from the one
+// data file (pieces.json); a color someone already has is unavailable.
 import { page } from "../lib/pages";
-import { Ctx, PALETTE, esc, normCode, seatLimit, seatsTaken } from "../lib/util";
+import { Ctx, PALETTE, SHAPES, colorOf, esc, normCode, seatLimit, seatsTaken } from "../lib/util";
 
 export const get = async ({ env, params, data }: Ctx) => {
   const code = normCode(params.code);
   const game = data.game!;
   const home = `/${esc(game.slug)}/`;
+  const right = `<a class="quiet" href="${home}"><span class="long">Already have a seat? </span>Log in</a>`;
   if (!code || code !== game.join_code) {
-    return page(game.name, `<h1>${esc(game.name)}</h1><div class="now">That code doesn't match this game. Check the link you were sent, or ask whoever invited you.</div>
-      <p><a href="${home}">See the board</a></p>`, 404);
+    return page(game.name, `<h1>${esc(game.name)}</h1><div class="now">That code doesn't match this game.</div>
+      <p><a href="${home}">See the board</a></p>`, 404, { right });
   }
   const taken = await seatsTaken(env, game.id);
-  const takenSet = new Set(taken.map((t) => t.color));
-  const open = seatLimit(game) - taken.length;
-  const closed = game.status !== "setup" || open <= 0;
-  const head = `<h1>${esc(game.name)}</h1><p class="sub">Join this game</p>`;
+  const takenBy = new Map(taken.map((t) => [t.color, t.display_name]));
+  const limit = seatLimit(game);
+  const closed = game.status !== "setup" || taken.length >= limit;
+  const head = `<h1>${esc(game.name)}</h1>`;
   if (closed) {
     return page(game.name, `${head}<div class="now">${game.status !== "setup" ? "This game has already started, so the seats are closed." : "This game is full."}</div>
-      <p><a href="${home}">See the board</a></p>`, 409);
+      <p><a href="${home}">See the board</a></p>`, 409, { right });
   }
-  // A little pawn per colour: round head, tapered body, flat foot. Colour names are
-  // written out as well, so colour is never the only signal.
-  const pawn = (hex: string) =>
-    `<svg viewBox="0 0 40 52" width="40" height="52" aria-hidden="true" focusable="false"><ellipse cx="20" cy="46" rx="15" ry="5" fill="${hex}"/><path d="M11 45 Q15 24 20 24 Q25 24 29 45 Z" fill="${hex}"/><circle cx="20" cy="14" r="9" fill="${hex}"/><path d="M11 45 Q15 24 20 24 Q25 24 29 45 Z M9 45 a15 5 0 0 0 22 0" fill="none" stroke="rgba(0,0,0,.35)" stroke-width="1.5"/></svg>`;
-  const pieces = PALETTE.map(
-    (c) =>
-      `<label class="piece"><input type="radio" name="color" value="${c.key}" required ${takenSet.has(c.key) ? "disabled" : ""}><span>${pawn(c.hex)}<b>${c.name}</b>${takenSet.has(c.key) ? "<i>taken</i>" : ""}</span></label>`,
+  const dots = taken.map((t) => `<span class="dot" style="background:${esc(colorOf(t.color).hex)}"></span>`).join("");
+  const firstFree = PALETTE.find((c) => !takenBy.has(c.key))?.key;
+  const colors = PALETTE.map((c) => {
+    const by = takenBy.get(c.key);
+    return `<label class="opt"><input type="radio" name="color" value="${c.key}" required data-main="${c.main}" data-shade="${c.shade}" data-tint="${c.tint}" data-deep="${c.deep}" data-name="${esc(c.name)}" ${by !== undefined ? "disabled" : ""} ${c.key === firstFree ? "checked" : ""}><span class="face"><span class="swatch" style="background:${c.main}"><b style="background:${c.shade}"></b></span><span class="nm">${esc(c.name)}</span>${by !== undefined ? `<small>${esc(by)}</small>` : ""}</span></label>`;
+  }).join("");
+  const shapes = SHAPES.map(
+    (s, i) => `<label class="opt"><input type="radio" name="shape" value="${s.key}" required ${i === 0 ? "checked" : ""} data-name="${esc(s.name)}"><span class="face"><span class="thumb"></span><span class="nm">${esc(s.name)}</span></span></label>`,
   ).join("");
   return page(
     `Join ${game.name}`,
     `${head}
-<div class="now">${open} of ${seatLimit(game)} seats open. Pick a piece color, and we'll email you a link to finish joining.</div>
-<h2>Take a seat</h2>
+<span class="seatchip"><span class="dots">${dots}</span>${taken.length} of ${limit} seats taken</span>
 <form class="stack" id="f">
-  <label>Your name<input type="text" name="name" maxlength="40" required autocomplete="nickname"></label>
-  <label>Your email<input type="email" name="email" required autocomplete="email"></label>
-  <fieldset class="pieces"><legend>Your piece</legend><div class="markers">${pieces}</div></fieldset>
-  <button class="primary" type="submit">Email me the link</button>
+  <label class="field"><span>Your name</span><input type="text" name="name" maxlength="40" required autocomplete="nickname"></label>
+  <label class="field"><span>Your email</span><input type="email" name="email" required autocomplete="email"></label>
+  <div class="picker">
+    <div class="pv"><svg id="pv" viewBox="-40 -64 80 84" role="img" aria-label="Your piece"></svg><div><div class="pname" id="pvname">Your name</div><div class="pmeta" id="pvmeta"></div></div></div>
+    <fieldset><legend>Your shape</legend><div class="opts shapes">${shapes}</div></fieldset>
+    <fieldset><legend>Your color</legend><div class="opts colors">${colors}</div></fieldset>
+  </div>
+  <button class="btn" type="submit">Take a seat</button>
   <div id="msg" role="status"></div>
 </form>
-<p class="sub">Your email is used to log you in and to send game notifications. It is never shown on the board.</p>
-<p><a href="${home}">See the board</a></p>
-<script>
+<script type="module">
+import { ensureDefs, pieceSVG, tileSVG } from "/js/pieces.js";
+ensureDefs();
 const code = ${JSON.stringify(code).replace(/</g, "\\u003c")};
-document.getElementById("f").addEventListener("submit", async (e) => {
+const f = document.getElementById("f");
+const colorOf = () => { const i = f.querySelector('input[name=color]:checked'); return i ? { key: i.value, name: i.dataset.name, main: i.dataset.main, shade: i.dataset.shade, tint: i.dataset.tint, deep: i.dataset.deep } : null; };
+const shapeOf = () => f.querySelector('input[name=shape]:checked');
+function draw() {
+  const c = colorOf(), s = shapeOf();
+  const fallback = { main: "#888888", shade: "#5c5c5c", tint: "#c2c2c2", deep: "#444444" };
+  for (const t of f.querySelectorAll('input[name=shape]')) t.parentNode.querySelector(".thumb").innerHTML = '<svg viewBox="-24 -46 48 52" aria-hidden="true">' + pieceSVG({ shape: t.value, color: c || fallback, scale: 1, clip: false }) + '</svg>';
+  document.getElementById("pv").innerHTML = '<g>' + tileSVG() + '</g><g>' + pieceSVG({ shape: s.value, color: c || fallback, scale: 1.5 }) + '</g>';
+  const n = f.elements.name.value.trim(), pn = document.getElementById("pvname");
+  pn.textContent = n || "Your name"; pn.style.opacity = n ? 1 : .55;
+  document.getElementById("pvmeta").textContent = (c ? c.name : "") + " \\u00b7 " + s.dataset.name;
+}
+f.addEventListener("change", draw); f.elements.name.addEventListener("input", draw); draw();
+f.addEventListener("submit", async (e) => {
   e.preventDefault();
-  const f = new FormData(e.target), msg = document.getElementById("msg");
-  msg.textContent = "Sending…";
+  const d = new FormData(f), msg = document.getElementById("msg");
+  msg.textContent = "Sending\\u2026";
   try {
     const res = await fetch(${JSON.stringify(`/${game.slug}/api/join`)}, { method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ code, name: f.get("name"), email: f.get("email"), color: f.get("color") }) });
+      body: JSON.stringify({ code, name: d.get("name"), email: d.get("email"), color: d.get("color"), shape: d.get("shape") }) });
     const data = await res.json();
     msg.className = res.ok ? "notice" : "notice err";
     msg.textContent = data.message || data.error || "Something went wrong.";
     if (res.ok) {
-      e.target.querySelector("button").disabled = true;
-      if (data.dev_link) { const p = document.createElement("p"); p.className = "dev";
-        p.append("Dev mode link: "); const a = document.createElement("a"); a.href = data.dev_link; a.textContent = data.dev_link; p.append(a); msg.append(p); }
+      f.querySelector("button[type=submit]").disabled = true;
+      if (data.dev_link) { const p = document.createElement("p"); p.className = "dev"; p.append("Dev mode link: "); const a = document.createElement("a"); a.href = data.dev_link; a.textContent = data.dev_link; p.append(a); msg.append(p); }
     }
   } catch { msg.className = "notice err"; msg.textContent = "Could not reach the server."; }
 });
 </script>`,
+    200,
+    { right },
   );
 };

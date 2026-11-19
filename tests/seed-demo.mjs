@@ -22,7 +22,7 @@ try {
   const ada = await join(srv.base, "first", g.code, { email: "ada@example.com", name: "Ada", color: "teal" });
   await join(srv.base, "first", g.code, { email: "bo@example.com", name: "Bo", color: "vermilion" });
   await join(srv.base, "second", open.code, { email: "cy@example.com", name: "Cy", color: "cobalt" });
-  await join(srv.base, "second", open.code, { email: "dee@example.com", name: "Dee", color: "saffron" });
+  await join(srv.base, "second", open.code, { email: "dee@example.com", name: "Dee", color: "marigold" });
   // in play, Ada's turn; her piece one step inside the island's east edge (x 2; the island is x -4..3), Bo's near the center
   const gid = d1(state, "SELECT id FROM games WHERE slug = 'first'")[0].id;
   d1(state, "UPDATE games SET status = 'playing', round = 1, turn = 0, last_move = '' WHERE slug = 'first'");

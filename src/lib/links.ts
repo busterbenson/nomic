@@ -21,7 +21,7 @@ export async function tooManyLinks(env: Ctx["env"], gameId: string, email: strin
 export async function issueLink(
   ctx: Ctx,
   game: { id: string; slug: string; name: string },
-  t: { email: string; purpose: "join" | "login"; name?: string; color?: string; next?: string; send: boolean; subject: string; intro: string; action: string },
+  t: { email: string; purpose: "join" | "login"; name?: string; color?: string; shape?: string; next?: string; send: boolean; subject: string; intro: string; action: string },
 ): Promise<string | null> {
   const { env, request } = ctx;
   const token = randomToken(32);
@@ -30,14 +30,16 @@ export async function issueLink(
   // cannot all read "under the limit" and each insert a token.
   // `next` (migration 0003) is written only when there is one, so ordinary join and log-in links keep working
   // on a database that has not had that migration yet.
-  const hasNext = t.next !== undefined;
+  // `shape` (migration 0004) is written only for a join link. Unlike `next`, nothing else is guarded: migration 0004 must be applied
+  // before this code is deployed (every player query reads `players.shape`).
+  const hasNext = t.next !== undefined, hasShape = t.shape !== undefined;
   const ins = await env.DB.prepare(
-    `INSERT INTO login_tokens (token_hash, game_id, email, purpose, display_name, color, created_at, expires_at${hasNext ? ", next" : ""})
-     SELECT ?, ?, ?, ?, ?, ?, ?, ?${hasNext ? ", ?" : ""}
+    `INSERT INTO login_tokens (token_hash, game_id, email, purpose, display_name, color, created_at, expires_at${hasNext ? ", next" : ""}${hasShape ? ", shape" : ""})
+     SELECT ?, ?, ?, ?, ?, ?, ?, ?${hasNext ? ", ?" : ""}${hasShape ? ", ?" : ""}
      WHERE (SELECT COUNT(*) FROM login_tokens WHERE game_id = ? AND email = ? AND created_at > ?) < ?
        AND (SELECT COUNT(*) FROM login_tokens WHERE email = ? AND created_at > ?) < ?`,
   )
-    .bind(await sha256Hex(token), game.id, t.email, t.purpose, t.name ?? null, t.color ?? null, nowIso(now), nowIso(now + TOKEN_TTL_MS), ...(hasNext ? [t.next] : []),
+    .bind(await sha256Hex(token), game.id, t.email, t.purpose, t.name ?? null, t.color ?? null, nowIso(now), nowIso(now + TOKEN_TTL_MS), ...(hasNext ? [t.next] : []), ...(hasShape ? [t.shape] : []),
       game.id, t.email, nowIso(now - TOKEN_TTL_MS), MAX_LINKS_PER_WINDOW,
       t.email, nowIso(now - HOUR_MS), MAX_LINKS_PER_EMAIL_HOUR)
     .run();

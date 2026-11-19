@@ -1,0 +1,170 @@
+{
+ "shapes": [
+  {
+   "key": "keeper",
+   "name": "Lantern keeper"
+  },
+  {
+   "key": "frog",
+   "name": "Frog"
+  },
+  {
+   "key": "robot",
+   "name": "Robot"
+  },
+  {
+   "key": "balloon",
+   "name": "Balloon"
+  },
+  {
+   "key": "diver",
+   "name": "Diver"
+  },
+  {
+   "key": "wizard",
+   "name": "Wizard"
+  },
+  {
+   "key": "crow",
+   "name": "Crow"
+  },
+  {
+   "key": "astronaut",
+   "name": "Astronaut"
+  },
+  {
+   "key": "pawn",
+   "name": "Pawn"
+  }
+ ],
+ "colors": [
+  {
+   "key": "jade",
+   "name": "Jade",
+   "main": "#3CD2BA",
+   "shade": "#2CA18E",
+   "tint": "#A8F3E3",
+   "deep": "#2E7B6D"
+  },
+  {
+   "key": "teal",
+   "name": "Teal",
+   "main": "#22817E",
+   "shade": "#135553",
+   "tint": "#73A3A0",
+   "deep": "#0F3433"
+  },
+  {
+   "key": "lagoon",
+   "name": "Lagoon",
+   "main": "#31AEB7",
+   "shade": "#218087",
+   "tint": "#93D1D6",
+   "deep": "#215C61"
+  },
+  {
+   "key": "sky",
+   "name": "Sky",
+   "main": "#55B4F7",
+   "shade": "#2588C6",
+   "tint": "#A6DBFF",
+   "deep": "#266691"
+  },
+  {
+   "key": "cobalt",
+   "name": "Cobalt",
+   "main": "#227FD9",
+   "shade": "#145697",
+   "tint": "#78A8E0",
+   "deep": "#123962"
+  },
+  {
+   "key": "indigo",
+   "name": "Indigo",
+   "main": "#7D8EF5",
+   "shade": "#5561CC",
+   "tint": "#AFBDFC",
+   "deep": "#3B429F"
+  },
+  {
+   "key": "orchid",
+   "name": "Orchid",
+   "main": "#B551A5",
+   "shade": "#87247A",
+   "tint": "#CB8DBE",
+   "deep": "#5B1652"
+  },
+  {
+   "key": "vermilion",
+   "name": "Vermilion",
+   "main": "#D75553",
+   "shade": "#A7262B",
+   "tint": "#E6958F",
+   "deep": "#731B1D"
+  },
+  {
+   "key": "apricot",
+   "name": "Apricot",
+   "main": "#F99D77",
+   "shade": "#DB632B",
+   "tint": "#FFD2BB",
+   "deep": "#A64F27"
+  },
+  {
+   "key": "marigold",
+   "name": "Marigold",
+   "main": "#C88528",
+   "shade": "#92601B",
+   "tint": "#DFB586",
+   "deep": "#67451A"
+  },
+  {
+   "key": "mustard",
+   "name": "Mustard",
+   "main": "#94711F",
+   "shade": "#644C11",
+   "tint": "#B19C71",
+   "deep": "#3F300F"
+  },
+  {
+   "key": "citron",
+   "name": "Citron",
+   "main": "#BCB732",
+   "shade": "#8F8A24",
+   "tint": "#E1DF9B",
+   "deep": "#6C6926"
+  },
+  {
+   "key": "onyx",
+   "name": "Onyx",
+   "main": "#3A3F4A",
+   "shade": "#292C35",
+   "tint": "#6B7280",
+   "deep": "#1A1D24"
+  },
+  {
+   "key": "chalk",
+   "name": "Chalk",
+   "main": "#F7F5EE",
+   "shade": "#C9C6B8",
+   "tint": "#FFFFFF",
+   "deep": "#8E8B7E"
+  },
+  {
+   "key": "umber",
+   "name": "Umber",
+   "main": "#76401B",
+   "shade": "#4B1B00",
+   "tint": "#8F6C57",
+   "deep": "#2A0100"
+  },
+  {
+   "key": "buff",
+   "name": "Buff",
+   "main": "#B4997E",
+   "shade": "#886F57",
+   "tint": "#D5C4B3",
+   "deep": "#67503A"
+  }
+ ]
+}

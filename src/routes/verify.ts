@@ -13,7 +13,7 @@ import { SHARED_TILES } from "../lib/board-rules.js";
 import { notify } from "../lib/notify";
 import { isConsentPath } from "../lib/oauth";
 import { expiredPage, page } from "../lib/pages";
-import { Ctx, colorInfo, esc, nowIso, seatLimit, sha256Hex, siteUrl, who } from "../lib/util";
+import { Ctx, DEFAULT_SHAPE, colorInfo, esc, nowIso, seatLimit, sha256Hex, siteUrl, validShape, who } from "../lib/util";
 
 const back = (slug: string, notice: string, cookie?: string) => {
   const h = new Headers({ location: `/${slug}/?notice=${notice}`, "cache-control": "no-store" });
@@ -88,6 +88,7 @@ export const post = async (ctx: Ctx) => {
 
   // purpose === "join"
   const color = colorInfo(t.color)?.key;
+  const shape = validShape(t.shape) ? t.shape : DEFAULT_SHAPE; // a link made before shapes existed carries none
   if (!color) return back(game.slug, "join-failed");
 
   const existing: any = await env.DB.prepare("SELECT id FROM players WHERE game_id = ? AND email = ?").bind(game.id, t.email).first();
@@ -102,15 +103,15 @@ export const post = async (ctx: Ctx) => {
   let joined = false;
   try {
     const r = await env.DB.prepare(
-      `INSERT INTO players (id, game_id, email, display_name, color, score, turn_order, is_host, joined_at, x, y, z)
-       SELECT ?, g.id, ?, ?, ?, 0,
+      `INSERT INTO players (id, game_id, email, display_name, color, shape, score, turn_order, is_host, joined_at, x, y, z)
+       SELECT ?, g.id, ?, ?, ?, ?, 0,
               (SELECT COUNT(*) FROM players WHERE game_id = g.id),
               (SELECT COUNT(*) = 0 FROM players WHERE game_id = g.id), ?, t.x, t.y, t.z
        FROM games g JOIN tiles t ON t.game_id = g.id AND t.z = 0
        WHERE g.id = ? AND g.status = 'setup' AND (SELECT COUNT(*) FROM players WHERE game_id = g.id) < ?
          ${spawnWhere("t")}
        ORDER BY random() LIMIT 1`,
-    ).bind(playerId, t.email, t.display_name, color, now, game.id, seatLimit(game), ...spawnBinds(game, SHARED_TILES)).run();
+    ).bind(playerId, t.email, t.display_name, color, shape, now, game.id, seatLimit(game), ...spawnBinds(game, SHARED_TILES)).run();
     joined = (r.meta?.changes ?? 0) > 0;
   } catch {
     joined = false; // color taken in the meantime (UNIQUE constraint)

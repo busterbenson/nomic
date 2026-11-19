@@ -18,7 +18,7 @@ First game: public, played by friends. The site is built to host several games
 | Accounts | Who is playing, per game: email, display name, session. No global users | D1 (`players`, `sessions`, `login_tokens`) |
 | Board state | Players, piece colors, scores, whose turn, the log, the tiles | D1 (`games`, `players`, `events`), read through `/<slug>/api/game` |
 | Notifications | In-game and email notices to every player | D1 (`notifications`), sent by `src/lib/notify.ts` |
-| Board | The public page that draws the state above and the game's rules; the board is drawn in WebGL (three.js, vendored) with an SVG fallback | `public/board.html`, `public/js/`, `public/theme.css` (the one file of colors), `public/site.css`, served as Worker static assets |
+| Board | The public page that draws the state above and the game's rules; the board is drawn as SVG from the traced piece shapes; the rules are drawn as a rulebook (hundreds blocks, marks, revisions, search) | `public/board.html`, `public/js/`, `public/theme.css` (the one file of colors), `public/site.css`, served as Worker static assets |
 | Rulings | Every ruling the moderator makes, with the rules it cited | `rulings/` (created by the first ruling) |
 | Moderator | An AI model that drafts proposals and rules on what the rules mean | GitHub Actions + the Claude API (not built yet) |
 
@@ -92,7 +92,7 @@ broke down because the model lost track of which rules were in effect.)
    (points, next turn, a log line), and the board updates. If it fails, the PR is
    closed and the turn moves on.
 5. **Appeal.** Any ruling can be appealed within 24 hours. A majority vote
-   overturns it (rule 201).
+   overturns it (rule 301).
 
 ## The board
 
@@ -125,8 +125,9 @@ settings identical.
   time anything needs a game's board. The center is the 4-tile box `1N 1W, 1N 1E, 1S 1W, 1S 1E`.
 - **Charting** happens in one function, `chartTile` in `src/lib/board.ts`: it inserts a blank row if
   the tile is absent and does nothing otherwise. Later rules that give new tiles some content change it.
-- **Pieces** carry `x, y, z` on the `players` row. Each player claims one of eight piece colors at
-  sign-up. **Spawning** puts a new piece on a random *unoccupied* charted tile whose whole chart shape
+- **Pieces** carry `x, y, z` on the `players` row. Each player claims one of the player colors at
+  sign-up (`players.color`, one per game) and picks a shape (`players.shape`, a pawn when none was named); the piece faces the way it last moved
+  on screen (`players.mirrored`). **Spawning** puts a new piece on a random *unoccupied* charted tile whose whole chart shape
   (the 21 tiles within 2.5 tiles) is already charted, which on the starting island leaves the inner 4x4: 16
   spots. Spawning charts nothing. With no such tile the join fails ("no room on the map yet"). The pick and
   the seat claim are one SQL statement, so two joiners cannot land on one tile.
@@ -136,14 +137,16 @@ settings identical.
   `games.last_move` holds the `round:turn` of the last move, so advancing the turn needs no reset, provided `round` increases whenever `turn` wraps to 0). The move then charts the shape around the
   new position. The decided details live in `src/lib/board-rules.js`, one constant each.
 - **Look.** Isometric (2:1 dimetric), one fixed angle, no rotation; pan, zoom and recenter; every tile is the
-  same blank slab. All colors are CSS tokens in `public/theme.css`, which the WebGL and SVG renderers read too,
-  so a new palette is a one-file change.
+  same blank slab. All colors are CSS tokens in `public/theme.css`; the player colors are data (`src/lib/pieces.json`), so a new
+  palette is a one-file change. Pieces are traced vector shapes recolored per player, their feet on the tile's centre with a contact shadow;
+  a tile's coordinates show only on hover, right-click or long-press.
+- **Rulebook.** `public/js/rulebook.js` parses `RULES.md`: `## 100. Title [unanimous]` is a hundreds block (`[u]` and `[m]` are short for the two marks), `### 101 Title` a rule that may carry its own mark (it overrides its block's), `**101.1**` a clause; file order is reading order. Every rule shows its revision (rev 1 until a passed change raises it). A file in the older format still reads as plain markdown.
 
 ## MCP
 
 A game's MCP server (`/<slug>/mcp`) is an adapter over the web routes, not a second implementation: each tool calls
 the route handler for the same thing, as the signed-in player, so the turn model lives in one place. It exists only
-while the game's `mcp_enabled` setting is true (a rule: 210), checked on every request. Players sign in with OAuth
+while the game's `mcp_enabled` setting is true (a rule: 204), checked on every request. Players sign in with OAuth
 whose authorize step is the game's own magic link. See the README for the endpoints and the flow.
 
 ## What the moderator may and may not do
@@ -160,20 +163,20 @@ code, not in the moderator's instructions:
   because the rule would have to be carried out by code the moderator can't edit.
 - It cites rule numbers for every ruling and writes the ruling down. Later
   rulings must be consistent with earlier ones unless a rule changed in between.
-- When a passed rule changes the site (rule 204), the code change is in the same
+- When a passed rule changes the site (rule 302), the code change is in the same
   PR as the rule text, so players vote on both together.
 
 ## Not decided yet
 
-- **How game-specific site changes load.** Rule 204 lets a passed rule change the
+- **How game-specific site changes load.** Rule 302 lets a passed rule change the
   website, but the platform is shared. One option is a `board/` folder in the game
   repo that the platform loads for that game's board; nothing is decided, and
   until it is, a rule that changes the site means a platform PR from Buster.
 - **Accounts across games.** Per game for now (a deliberate choice). A global
   account may come later; the schema has no global users table to migrate from.
 
-- **Players.** Who. Up to 5 can join with the code (at most 8: there are eight piece colors); the seat count and the
-  color palette are constants today.
+- **Players.** Who. Up to 5 can join with the code (at most 8, rule 201); the seat count is a setting and the
+  player colors are one data file.
 - **Starting a game.** Nothing flips a game from `setup` to `playing` yet; it is a
   manual D1 update (see README). Seats close at that point.
 - **Who the host is.** The first person to join is marked host, which grants

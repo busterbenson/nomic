@@ -4,110 +4,61 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Promptocracy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:ital,wght@0,400;0,600;0,700;1,400&family=Martian+Mono:wdth,wght@87.5..112.5,400..700&family=Grenze+Gotisch:wght@100..900&display=swap">
 <link rel="stylesheet" href="/theme.css">
 <link rel="stylesheet" href="/site.css">
 </head>
-<body class="wide">
-<main>
-  <div class="bar">
-    <h1 id="title">Promptocracy</h1>
-    <div class="who" id="who"></div>
-  </div>
-  <p class="sub" id="game-name"><a href="/">All games</a></p>
-  <div class="notice" id="notice" hidden></div>
-  <div class="panel" id="notes-panel" hidden>
+<body>
+<header class="gamehead">
+  <div class="title"><a href="/">&#9666; promptocracy.us</a><h1 id="title">Promptocracy</h1></div>
+  <div class="right" id="who"></div>
+  <div class="notif" id="notes-panel" hidden>
+    <h3>Notifications</h3>
     <ul class="notes" id="notes"></ul>
   </div>
-  <div class="panel" id="login-panel" hidden>
-    <form class="stack" id="login-form">
-      <label>Email you joined with<input type="email" name="email" required autocomplete="email"></label>
-      <button class="primary" type="submit">Email me a log-in link</button>
-      <div id="login-msg" role="status"></div>
-    </form>
-  </div>
-  <div class="now" id="now">Loading the board…</div>
+</header>
+<div class="banner" id="notice" hidden></div>
+<div class="loginbar" id="login-panel" hidden>
+  <form class="stack" id="login-form">
+    <label class="field"><span>Email you joined with</span><input type="email" name="email" required autocomplete="email"></label>
+    <button class="btn" type="submit">Email me a log-in link</button>
+    <div id="login-msg" role="status"></div>
+  </form>
+</div>
 
-
-  <div class="stage">
+<div class="playtop">
+  <div class="boardcol">
     <div class="board-wrap" id="board-wrap"><noscript>The board needs JavaScript. The tiles are listed below.</noscript></div>
-    <aside class="panel tile-panel" id="tile-panel" aria-live="polite">
-      <p class="sub">Tap a tile to select it. Hover, right-click or long-press a tile to see its coordinates. Drag to pan, scroll or pinch to zoom.</p>
-    </aside>
+    <div class="dock" id="dock" aria-live="polite"></div>
   </div>
-  <div class="notice" id="act-note" role="status" hidden></div>
-  <div class="panel" id="turn-box" hidden></div>
-  <h2 class="sr-only">Tiles</h2>
-  <ul class="sr-only" id="tile-list"></ul>
+  <aside class="side" aria-label="Players">
+    <h3 class="sideh">Players</h3>
+    <ul class="players" id="scores"></ul>
+  </aside>
+</div>
+<h2 class="sr-only">Tiles</h2>
+<ul class="sr-only" id="tile-list"></ul>
 
-  <h2>Scores</h2>
-  <table>
-    <thead><tr><th>Player</th><th></th><th style="text-align:right">Points</th></tr></thead>
-    <tbody id="scores"></tbody>
-  </table>
+<section class="rbwrap" id="rules" aria-label="Rulebook">Loading&hellip;</section>
 
+<section class="log-sec">
   <h2>What happened</h2>
   <ul class="log" id="log"></ul>
+</section>
 
-  <h2>The rules in effect</h2>
-  <div id="rules">Loading…</div>
-
-  <footer>
-    Joining takes a join code: ask whoever invited you for the link.<br>
-    <span id="repo-line">This game's rules live in its own repo.</span>
-    Every passed proposal is a commit.
-  </footer>
-</main>
-
-<script>
-  // One page for every game. The slug is the first path segment; every call goes
-  // to /<slug>/api/... The board is drawn from /api/game (players, scores, whose
-  // turn, the log) and /api/rules (the game's own repo, fetched by the server).
-  // /api/me and /api/notifications say who is looking, when someone is logged in.
+<script type="module">
+  // One page for every game. The slug is the first path segment; every call goes to /<slug>/api/...
+  // The board is drawn from /api/board, the players and the log from /api/game, the rulebook from /api/rules
+  // (the game's own repo, fetched by the server). /api/me and /api/notifications say who is looking.
+  import { ensureDefs, pieceSVG } from "/js/pieces.js";
+  import { mountRulebook } from "/js/rulebook.js";
   const SLUG = location.pathname.split("/")[1] || "";
   const BASE = "/" + SLUG;
 
   const esc = s => String(s).replace(/[&<>"']/g, c => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
   }[c]));
-
-  // Just enough markdown for RULES.md: headings, paragraphs, lists, bold, code.
-  function renderMarkdown(md) {
-    const inline = s => esc(s)
-      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-      .replace(/`([^`]+)`/g, "<code>$1</code>");
-    // The starter template opens with an HTML comment. (Built from pieces: a literal "<!--" inside a script is an HTML-style comment to the JS parser.)
-    md = md.replace(new RegExp("<" + "!--[\\s\\S]*?--" + ">", "g"), "");
-    const out = [];
-    let para = [], list = [];
-    const flushPara = () => {
-      if (para.length) { out.push("<p>" + inline(para.join(" ")) + "</p>"); para = []; }
-    };
-    const flushList = () => {
-      if (list.length) { out.push("<ul>" + list.map(i => "<li>" + inline(i) + "</li>").join("") + "</ul>"); list = []; }
-    };
-    const flush = () => { flushPara(); flushList(); };
-    for (const raw of md.split("\n")) {
-      const line = raw.trimEnd();
-      let m;
-      if ((m = line.match(/^(#{1,3}) (.*)$/))) {
-        flush();
-        out.push(`<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`);
-      } else if ((m = line.match(/^\s*[-*] (.*)$/))) {
-        flushPara();               // a list ends the paragraph before it
-        list.push(m[1]);
-      } else if (!line.trim()) {
-        flush();
-      } else if (list.length && /^\s+/.test(raw)) {
-        list[list.length - 1] += " " + line.trim();   // wrapped list item
-      } else {
-        flushList();
-        para.push(line.trim());
-      }
-    }
-    flush();
-    return out.join("\n");
-  }
-
   const $ = id => document.getElementById(id);
   const NOTICES = {
     "joined": "You're in. Your seat is yours.",
@@ -126,9 +77,9 @@
   let BOARD = null, SEL = null, VIEW = null;   // the last /api/board, the selected tile {x,y}, the drawn board
   const hex = c => (c && /^#[0-9a-f]{6}$/i.test(c.hex) ? c.hex : "#888");
   const who = (name, c) => `${name} (${c ? c.name : "?"})`;
-  const safeWord = s => (/^[a-z][a-z0-9_-]*$/.test(s) ? s : "x");
-  
   const when = iso => String(iso || "").slice(0, 10);
+  ensureDefs();
+  const mini = p => `<svg viewBox="-22 -46 44 50" aria-hidden="true">${pieceSVG({ shape: p.shape, color: p.color, scale: 1, clip: false })}</svg>`;
 
   function showNotice() {
     const n = new URLSearchParams(location.search).get("notice");
@@ -138,19 +89,19 @@
 
   async function loadMe() {
     const me = await api("/api/me");
-    const who = $("who");
+    const who_ = $("who");
     ME = me.ok ? me.data : null;
-    drawTurn();
-    drawPanel();
+    drawDock();
+    if (VIEW && ME && ME.player) VIEW.setMe(ME.player.color.key);
     if (!me.ok) {
-      who.innerHTML = '<button id="login-btn" type="button">Log in</button>';
+      who_.innerHTML = '<button class="btn ghost small" id="login-btn" type="button">Log in</button>';
       $("login-btn").onclick = () => { $("login-panel").hidden = !$("login-panel").hidden; };
       return;
     }
     const p = me.data.player;
-    who.innerHTML = `<span>${p ? `<span class="dot" style="background:${hex(p.color)}"></span>` : ""}${esc(me.data.user.name)}</span>
-      <button class="bell" id="bell" type="button" aria-label="Notifications">🔔<span class="badge" id="badge" hidden>0</span></button>
-      <button id="logout" type="button">Log out</button>`;
+    who_.innerHTML = `<button class="iconbtn" id="bell" type="button" aria-label="Notifications"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4z M10 21h4" style="fill:none;stroke:var(--ink);stroke-width:2;stroke-linejoin:round"/></svg><span class="badge" id="badge" hidden>0</span></button>
+      <span class="me">${p ? `<span class="dot" style="background:${hex(p.color)}"></span>` : ""}<span class="nm">${esc(me.data.user.name)}</span></span>
+      <button class="btn ghost small" id="logout" type="button">Log out</button>`;
     $("logout").onclick = async () => { await api("/api/logout", {}); location.reload(); };
     $("bell").onclick = toggleNotes;
     await loadNotes(false);
@@ -189,54 +140,49 @@
     showNotice();
     loadMe();
     const g = await api("/api/game");
-    if (!g.ok) {
-      $("now").innerHTML = '<span class="err">No game has been set up yet.</span>';
-    } else {
-      drawGame(g.data);
-    }
-    try {
-      const r = await fetch(BASE + "/api/rules");
-      if (!r.ok) throw new Error("rules " + r.status);
-      $("rules").innerHTML = renderMarkdown(await r.text());
-    } catch (e) {
-      $("rules").innerHTML = '<span class="err">Rules unavailable right now. They live in the game\'s repo.</span>';
-    }
+    if (!g.ok) $("dock").innerHTML = '<span class="err">No game has been set up yet.</span>';
+    else drawGame(g.data);
+    // the rulebook shows each rule's settings, so it waits for the board's reply (which carries them)
+    const [rules] = await Promise.all([fetch(BASE + "/api/rules").then(async r => { if (!r.ok) throw new Error("rules " + r.status); return r.text(); }).catch(() => null), boardLoaded]);
+    if (rules === null) { $("rules").innerHTML = '<p class="err" style="padding:20px 28px">Rules unavailable right now. They live in the game\'s repo.</p>'; return; }
+    mountRulebook($("rules"), rules, { settings: (BOARD && BOARD.settings) || {} });
+    const repo = DATA && DATA.game && DATA.game.repo;
+    const head = $("rules").querySelector(".rbhead");
+    if (head && /^[\w.-]+\/[\w.-]+$/.test(repo || "")) head.insertAdjacentHTML("beforeend", `<a class="mono" href="https://github.com/${esc(repo)}">github.com/${esc(repo)}</a>`);
   }
 
-  // The turn box: a form for the player whose turn it is, otherwise who is playing.
-  function drawTurn() {
-    const box = $("turn-box");
-    if (!DATA || DATA.game.status !== "playing") { box.hidden = true; return; }
+  // The dock under the board: where the game stands, the selected tile, and (on your turn) the turn form.
+  function drawDock() {
+    const box = $("dock");
+    if (!DATA) return;
     const { game, players, turns } = DATA;
-    const current = players[game.turn];
-    if (!current) { box.hidden = true; return; }
-    const mine = ME && ME.player && ME.player.turn_order === game.turn;
-    const taken = turns.find(t => t.turn_index === game.turn);
+    const current = game.status === "setup" ? null : (players[game.turn] || null);
+    const mine = ME && ME.player && current && ME.player.turn_order === game.turn;
+    const taken = current ? turns.find(t => t.turn_index === game.turn) : null;
     const moved = !!game.moved;
-    const moveLine = moved ? "You have moved this turn." : "You may also move your piece one space: tap a tile next to it, then Move here.";
-    let html = "";
-    if (mine && !taken) {
-      html = `<strong>Your turn.</strong> You may propose one rule change: write one prompt for Chalant (the moderator). ${moveLine}
-        <form class="stack" id="turn-form" style="margin-top:10px; max-width:none">
+    document.title = game.name || "Promptocracy";
+    $("title").textContent = game.name || "Promptocracy";
+    let html = game.status === "setup"
+      ? `<p><strong>Setting up.</strong> ${players.length} of ${game.max_players} seats taken.</p>`
+      : `<p><strong>Round ${game.round}.</strong> ${current ? esc(who(current.name, current.color)) + "'s turn." : ""}</p>`;
+    const moveLine = moved ? "You have moved this turn." : "";
+    if (game.status === "playing" && current) {
+      if (mine && !taken) {
+        html += `<form id="turn-form"><p><strong>Your turn.</strong> ${moveLine}</p>
           <textarea name="prompt" rows="4" maxlength="2000" required aria-label="Your prompt"></textarea>
-          <button class="primary" type="submit">Submit my turn</button>
-          <div id="turn-msg" role="status"></div>
-        </form>`;
-    } else if (mine) {
-      html = `<strong>Your turn.</strong> Your prompt is in: waiting for Chalant (the moderator). ${moveLine}
-        <blockquote class="prompt">${esc(taken.prompt)}</blockquote>`;
-    } else if (taken) {
-      html = `<strong>${esc(who(current.name, current.color))}</strong> took their turn. Waiting for Chalant (the moderator).
-        <blockquote class="prompt">${esc(taken.prompt)}</blockquote>`;
-    } else {
-      html = `<strong>${esc(who(current.name, current.color))}</strong> is playing.`;
+          <div><button class="btn" type="submit">Submit my turn</button></div>
+          <div id="turn-msg" role="status"></div></form>`;
+      } else if (mine) {
+        html += `<p><strong>Your turn.</strong> Your prompt is in: waiting for Chalant (the moderator). ${moveLine}</p><blockquote>${esc(taken.prompt)}</blockquote>`;
+      } else if (taken) {
+        html += `<p><strong>${esc(who(current.name, current.color))}</strong> took their turn. Waiting for Chalant (the moderator).</p><blockquote>${esc(taken.prompt)}</blockquote>`;
+      }
     }
     // an unsent prompt survives a redraw (a move refreshes the page's state while the player is still writing)
-    const draft = box.querySelector('textarea[name=prompt]') ? box.querySelector('textarea[name=prompt]').value : "";
-    box.innerHTML = html;
-    const ta = box.querySelector('textarea[name=prompt]');
+    const old = box.querySelector("textarea[name=prompt]"), draft = old ? old.value : "";
+    box.innerHTML = html + '<div id="tile-panel"></div>';
+    const ta = box.querySelector("textarea[name=prompt]");
     if (ta && draft) ta.value = draft;
-    box.hidden = false;
     drawPanel();
     const form = $("turn-form");
     if (form) form.addEventListener("submit", async e => {
@@ -247,55 +193,30 @@
       if (r.ok) { await refresh(); loadNotes(false); return; }
       msg.className = "notice err";
       msg.textContent = (r.data && r.data.error) || "Something went wrong.";
-      if (r.status === 409 || r.status === 403) { const g = await api("/api/game"); if (g.ok) { const t = msg.textContent; drawGame(g.data); const m = $("turn-msg"); if (m) m.textContent = t; } }
+      if (r.status === 409 || r.status === 403) { const g = await api("/api/game"); if (g.ok) { const t = msg.textContent; drawGame(g.data); const m = $("turn-msg"); if (m) { m.className = "notice err"; m.textContent = t; } } }
     });
   }
 
   function drawGame(data) {
     DATA = data;
-    drawTurn();
-    drawPanel();
-    const game = data.game;
-    // Players come ordered by turn_order; their color identifies them.
-    const players = data.players || [];
-    const target = Number(game.winning_score) || 100;
-    // Nobody is "to play" until the game has started.
+    const game = data.game, players = data.players || [];
     const current = game.status === "setup" ? null : (players[game.turn] || null);
-    const open = game.max_players - players.length;
-
-    document.title = (game.name || "Promptocracy");
-    $("title").textContent = game.name || "Promptocracy";
-    if (/^[\w.-]+\/[\w.-]+$/.test(game.repo || "")) {
-      $("repo-line").innerHTML = `The rules live in <a href="https://github.com/${esc(game.repo)}">github.com/${esc(game.repo)}</a>.`;
-    }
-    const status = game.status === "setup"
-      ? `Setting up. ${players.length} of ${game.max_players} seats taken.`
-      : `Round ${game.round}. ${current ? esc(who(current.name, current.color)) + "'s turn." : ""}`;
-    $("now").innerHTML = status +
-      ` First to <strong>${target}</strong> points wins (for now).`;
-
     // Scoreboard, highest first; ties keep turn order.
-    const ranked = players.map((p, i) => ({ ...p, i }))
-      .sort((a, b) => (b.score - a.score) || (a.i - b.i));
-    $("scores").innerHTML = ranked.map(p => `
-      <tr class="${current && p.color.key === current.color.key ? "current" : ""}">
-        <td><span class="dot" style="background:${hex(p.color)}"></span>${esc(p.name)} <span class="sub">${esc(p.color.name)}</span></td>
-        <td>${current && p.color.key === current.color.key ? "to play" : ""}</td>
-        <td class="num">${esc(p.score)}</td>
-      </tr>`).join("");
-
+    const ranked = players.map((p, i) => ({ ...p, i })).sort((a, b) => (b.score - a.score) || (a.i - b.i));
+    $("scores").innerHTML = ranked.map(p => {
+      const now = current && p.color.key === current.color.key;
+      return `<li class="${now ? "now" : ""}">${mini(p)}<span>${esc(p.name)}${ME && ME.player && ME.player.color.key === p.color.key ? " (you)" : ""}<span class="st">${esc(p.color.name)}${now ? " · to play" : ""}</span></span><b>${esc(p.score)}</b></li>`;
+    }).join("");
     // The API sends the newest first.
-    $("log").innerHTML = (data.events || [])
-      .map(e => `<li><b>${esc(when(e.created_at))}</b> · ${esc(e.text)}</li>`).join("");
+    $("log").innerHTML = (data.events || []).map(e => `<li><b>${esc(when(e.created_at))}</b> · ${esc(e.text)}</li>`).join("");
+    drawDock();
   }
 
   // ---- the board ------------------------------------------------------------
   // Tiles are blank: charted or not. Coordinates are not shown here; the board shows them on hover,
-  // right-click and long-press. (The screen reader list below the board does name every tile.)
+  // right-click and long-press. (The screen reader list names every tile.)
   const tileAt = (q, r) => BOARD && BOARD.tiles.find(t => t.x === q && t.y === r && t.z === 0);
   const piecesAt = t => (BOARD ? BOARD.pieces.filter(p => p.at.x === t.x && p.at.y === t.y && p.at.z === t.z) : []);
-
-  // Where my piece stands, and whether it may move to tile t.
   const myPiece = () => (BOARD && ME && ME.player ? BOARD.pieces.find(p => p.color.key === ME.player.color.key) : null);
   function canMoveTo(t) {
     const me = myPiece(), R = BOARD && BOARD.rules;
@@ -319,18 +240,17 @@
 
   function drawPanel() {
     const box = $("tile-panel");
+    if (!box) return;
     const t = SEL && tileAt(SEL.x, SEL.y);
-    if (!t) { box.innerHTML = '<p class="sub">Tap a tile to select it. Hover, right-click or long-press a tile to see its coordinates. Drag to pan, scroll or pinch to zoom.</p>'; return; }
+    if (!t) { box.innerHTML = ""; return; }
     const here = piecesAt(t);
     const move = myMove();
     let html = `<h3>A charted tile</h3>
-      <p class="tile-owner">${here.length ? here.map(p => `<span class="dot" style="background:${hex(p.color)}"></span>${esc(who(p.name, p.color))} is here`).join("<br>") : '<span class="sub">Nobody is here.</span>'}</p>`;
+      <p>${here.length ? here.map(p => `<span class="dot" style="background:${hex(p.color)}"></span> ${esc(who(p.name, p.color))} is here`).join("<br>") : '<span class="muted">Nobody is here.</span>'}</p>`;
     if (move.ok && canMoveTo(t)) {
-      html += `<button class="primary" id="move-btn" type="button">Move here</button><div id="act-msg" role="status"></div>`;
-    } else if (move.ok) {
-      html += `<p class="sub">Your move: pick a tile next to your piece.</p>`;
-    } else if (move.why) {
-      html += `<p class="sub">${esc(move.why)}</p>`;
+      html += `<div><button class="btn" id="move-btn" type="button">Move here</button></div><div id="act-msg" role="status"></div>`;
+    } else if (!move.ok && move.why) {
+      html += `<p class="muted">${esc(move.why)}</p>`;
     }
     box.innerHTML = html;
     const mv = $("move-btn");
@@ -343,9 +263,6 @@
     const r = await api("/api/action", body);
     if (r.ok) {
       await refresh();
-      const n = $("act-note");
-      n.textContent = "Moved. You may still propose a rule change this turn.";
-      n.hidden = false;
       return;
     }
     msg.className = "notice err";
@@ -355,7 +272,6 @@
   }
 
   function select(q, r) {
-    $("act-note").hidden = true;
     SEL = q == null ? null : { x: q, y: r };
     if (VIEW) VIEW.select(q, r);
     drawPanel();
@@ -363,7 +279,7 @@
 
   function drawBoard(b) {
     BOARD = b;
-    if (VIEW) VIEW.setData(b);
+    if (VIEW) VIEW.setData(b, ME && ME.player ? ME.player.color.key : null);
     $("tile-list").innerHTML = b.tiles.filter(t => t.z === 0).map(t => `<li><button type="button" data-x="${t.x}" data-y="${t.y}">${esc("Tile " + t.label + (piecesAt(t).length ? ", " + piecesAt(t).map(p => who(p.name, p.color)).join(", ") : ""))}</button></li>`).join("");
     drawPanel();
   }
@@ -385,17 +301,15 @@
       const { createBoard } = await import("/js/board.js");
       VIEW = await createBoard(wrap, { onSelect: select });
       window.__board = VIEW;   // handle for the browser tests
-      if (BOARD) VIEW.setData(BOARD);
+      if (BOARD) VIEW.setData(BOARD, ME && ME.player ? ME.player.color.key : null);
       if (SEL) VIEW.select(SEL.x, SEL.y);
     } catch (e) {
-      wrap.innerHTML = '<p class="sub" style="padding:12px">The board could not be drawn. The tiles are listed below.</p>';
+      console.error(e);
+      wrap.innerHTML = '<p class="muted" style="padding:12px">The board could not be drawn. The tiles are listed below.</p>';
     }
   }
-  async function loadBoard() {
-    const b = await api("/api/board");
-    if (b.ok) drawBoard(b.data);
-  }
-  initBoard(); loadBoard();
+  const boardLoaded = api("/api/board").then(b => { if (b.ok) drawBoard(b.data); });
+  initBoard();
   load();
 </script>
 </body>

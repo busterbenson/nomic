@@ -6,7 +6,7 @@
 # Options:
 #   --rules-path PATH    rules file in that repo (default RULES.md)
 #   --rules-ref REF      branch or tag (default main)
-#   --max-players N      1-8, default 8: the game's max_players setting (one seat per piece color)
+#   --max-players N      1-8, default 8: the game's max_players setting (at most 8 seats)
 #   --size N             side of the starting island, even, 4-16 (default 8: an 8x8 island, 4W..4E by 4N..4S).
 #                        Every other board setting is written to the game's row at its default (src/lib/settings.js).
 #   --winning-score N    default 100
@@ -44,7 +44,7 @@ seg='[A-Za-z0-9._-]+'
 [[ "$rpath" =~ ^$seg(/$seg)*$ ]] && [[ "$rpath" != *..* ]] && [[ "/$rpath/" != */./* ]] || die "--rules-path must be a plain relative path with no '..'"
 [[ "$ref" =~ ^$seg(/$seg)*$ ]] && [[ "$ref" != *..* ]] && [[ "/$ref/" != */./* ]] || die "--rules-ref must be a branch or tag name"
 [[ "$max$win$size" =~ ^[0-9]+$ ]] || die "--max-players, --winning-score and --size must be numbers"
-[ "$max" -ge 1 ] && [ "$max" -le 8 ] || die "--max-players must be 1 to 8 (there are eight piece colors)"
+[ "$max" -ge 1 ] && [ "$max" -le 8 ] || die "--max-players must be 1 to 8 (a game seats at most 8)"
 [ "$size" -ge 4 ] && [ "$size" -le 16 ] && [ $((size % 2)) -eq 0 ] || die "--size must be an even number from 4 to 16"
 [ "${#name}" -le 80 ] || die "--name is too long"
 

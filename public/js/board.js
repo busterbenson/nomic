@@ -1,162 +1,207 @@
-// The board, drawn two ways from the same data (GET /<slug>/api/board):
-//   WebGL (three.js, in board-gl.js) when the browser has it, and a flat SVG map when it does not.
-// Both are an ISOMETRIC view of blank square tiles at one fixed angle (2:1 dimetric), looking north-east
-// from the south-west: x (east) runs up and to the right, y (north) up and to the left. Coordinates are NOT
-// drawn by default: a tile's name ("3N 2E") shows on hover (mouse), on right-click, and on long-press (touch).
-// Both renderers give the same small interface, so board.html does not care which it got:
+// The board: an isometric view of blank square tiles on an endless sea, drawn as SVG from GET /<slug>/api/board.
+// One fixed angle (azimuth 45, elevation ~42): x (east) runs up and to the right, y (north) up and to the left.
+// A charted tile is a blank slab; the faint grid is the endless sea; a ring of dashed fog marks what is uncharted.
+// Pieces are the players' traced shapes in their colors, their feet on the tile's centre with a contact shadow, mirrored
+// toward the way they last moved. Coordinates are NOT drawn: a tile's name ("3N 2E") shows on hover (mouse), on
+// right-click, and on long-press (touch). The interface board.html uses:
 //   const b = await createBoard(container, { onSelect(x, y) })   // onSelect(null, null) = tapped the sea
-//   b.mode                'webgl' | 'svg'
-//   b.setData(board)      redraw from an /api/board reply
-//   b.select(x, y)        highlight a tile (null clears)
-//   b.screenPos(x, y)     page coordinates of a tile's centre (tests use this to click it)
-//   b.recenter()          back to the whole charted area in view (WebGL pans and zooms; the SVG is always whole)
-//   b.refreshTheme()      re-read /theme.css (the colors changed, e.g. dark mode)
-import { readTheme, shade } from "/js/theme.js";
+//   b.setData(board, meKey)   redraw from an /api/board reply (meKey: the color key of the person looking)
+//   b.select(x, y)            highlight a tile (null clears)
+//   b.screenPos(x, y)         page coordinates of a tile's centre (tests use this to click it)
+//   b.recenter(meKey)         back to the whole island, or onto the viewer's piece
+import { HW, HH, DEPTH, ensureDefs, pieceSVG } from "/js/pieces.js";
 
-export const HALF = 0.48;                 // half the side of a tile, leaving a thin gap between tiles
-export const ELEV_DEG = 30;               // 2:1 dimetric: a square reads as a diamond twice as wide as tall
-export const SLAB = 0.28;                 // every tile is the same blank slab
-export const SLAB_DEPTH = 0.35;           // slabs run this far below the sea so the board has an edge
 export const LONG_PRESS_MS = 500;
-const COS = Math.cos((ELEV_DEG * Math.PI) / 180), SIN = Math.sin((ELEV_DEG * Math.PI) / 180);
-const R2 = Math.SQRT1_2;
-// The one place a tile coordinate becomes a place on screen (SVG; the WebGL camera does the same).
-// right = (x - y) / sqrt2, up = (x + y) / sqrt2 * sin(e) + z * cos(e), z = height above the sea.
-export const project = (x, y, z = 0) => [(x - y) * R2, (x + y) * R2 * SIN + z * COS];
-
-export function hasWebGL() {
-  try {
-    const c = document.createElement("canvas");
-    return !!(window.WebGLRenderingContext && (c.getContext("webgl2") || c.getContext("webgl")));
-  } catch { return false; }
-}
-
-// The coordinate tag shared by both renderers: one small label for the hovered tile (mouse) and one for a
-// tile pinned by right-click or long-press. `labelOf(key)` -> "3N 2E" | undefined; `posOf(key)` -> {x, y}
-// in container pixels (the tag sits above that point) | null. Call update() whenever tiles move on screen.
-export function makeTagger(container, labelOf, posOf) {
-  const overlay = container.querySelector(".board-tags") || Object.assign(document.createElement("div"), { className: "board-tags" });
-  if (!overlay.parentNode) container.appendChild(overlay);
-  const mk = (cls) => { const d = document.createElement("div"); d.className = cls; d.hidden = true; overlay.appendChild(d); return d; };
-  const els = { hover: mk("tag hover"), pin: mk("tag pin") };
-  const keys = { hover: null, pin: null };
-  const update = () => {
-    for (const k of ["hover", "pin"]) {
-      const key = keys[k], p = key && posOf(key), lab = key && labelOf(key);
-      if (!p || !lab || (k === "hover" && keys.pin && keys.pin.x === key.x && keys.pin.y === key.y)) { els[k].hidden = true; continue; }
-      els[k].textContent = lab; els[k].hidden = false;
-      els[k].style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px) translate(-50%, -100%)`;
-    }
-  };
-  return {
-    hover(key) { keys.hover = key; update(); },
-    pin(key) { keys.pin = key; update(); },
-    update,
-    destroy() { overlay.remove(); },
-  };
-}
-
-export async function createBoard(container, handlers) {
-  if (hasWebGL()) {
-    try {
-      const m = await import("/js/board-gl.js");
-      return m.createGLBoard(container, handlers);
-    } catch (e) {
-      console.warn("WebGL board unavailable, drawing the flat map instead:", e);
-      container.replaceChildren();
-    }
+const f1 = (n) => n.toFixed(1);
+const P = (wx, wy) => [(wx - wy) * HW, -(wx + wy) * HH];       // a point on the ground plane -> the drawing
+const pts = (a) => a.map((p) => f1(p[0]) + "," + f1(p[1])).join(" ");
+const dn = (p, d) => [p[0], p[1] + d];
+const top = (x, y) => [P(x, y), P(x + 1, y), P(x + 1, y + 1), P(x, y + 1)];
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const K = (x, y) => x + "," + y;
+const ring = (charted, r) => {
+  const out = new Set();
+  for (const k of charted) {
+    const [x, y] = k.split(",").map(Number);
+    for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) if (!charted.has(K(x + dx, y + dy))) out.add(K(x + dx, y + dy));
   }
-  return createSvgBoard(container, handlers);
-}
-
-const NS = "http://www.w3.org/2000/svg";
-const el = (name, attrs = {}, parent) => {
-  const n = document.createElementNS(NS, name);
-  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
-  if (parent) parent.appendChild(n);
-  return n;
+  return out;
 };
-const pts = (list) => list.map(([a, b]) => `${a.toFixed(3)},${(-b).toFixed(3)}`).join(" ");
+const bbox = (keys) => {
+  let a = 1e9, b = 1e9, c = -1e9, d = -1e9;
+  for (const k of keys) { const [x, y] = k.split(",").map(Number); for (const p of top(x, y)) { a = Math.min(a, p[0]); b = Math.min(b, p[1]); c = Math.max(c, p[0]); d = Math.max(d, p[1] + DEPTH); } }
+  return { x: a, y: b, w: c - a, h: d - b };
+};
 
-function pawn(parent, sx, sy, hex, ink, scale = 1) {
-  const g = el("g", { transform: `translate(${sx} ${-sy}) scale(${scale})`, "pointer-events": "none" }, parent);
-  el("ellipse", { cx: 0, cy: 0.03, rx: 0.3, ry: 0.12, fill: ink, opacity: "0.55" }, g);
-  el("path", { d: "M-0.22 0 Q-0.13 -0.5 0 -0.5 Q0.13 -0.5 0.22 0 Z", fill: hex, stroke: ink, "stroke-width": "0.04" }, g);
-  el("circle", { cx: 0, cy: -0.64, r: 0.18, fill: hex, stroke: ink, "stroke-width": "0.04" }, g);
+// The whole scene as markup. `sel` is the selected tile; `me` the color key of the viewer. Used by the board and the landing page.
+export function sceneSVG(board, { sel = null, me = null, id = "b", showFog = true } = {}) {
+  const tiles = board.tiles.filter((t) => t.z === 0);
+  const charted = new Set(tiles.map((t) => K(t.x, t.y)));
+  const fog = showFog ? ring(charted, 2) : new Set(), fog1 = showFog ? ring(charted, 1) : new Set();
+  let s = `<defs><radialGradient id="${id}-g" cx="50%" cy="50%" r="50%"><stop offset=".35" stop-color="#fff"/><stop offset="1" stop-color="#000"/></radialGradient>
+<mask id="${id}-m" maskUnits="userSpaceOnUse" x="-900" y="-700" width="1800" height="1400"><rect x="-900" y="-700" width="1800" height="1400" fill="url(#${id}-g)"/></mask>
+<pattern id="${id}-h" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(30)"><rect width="6" height="6" style="fill:var(--fog)"/><line x1="0" y1="0" x2="0" y2="6" style="stroke:var(--line);stroke-width:1.3"/></pattern></defs>`;
+  let g = "";
+  const R = 18;
+  for (let k = -R; k <= R; k++) {
+    const a = dn(P(k, -R), DEPTH), b = dn(P(k, R), DEPTH), c = dn(P(-R, k), DEPTH), e = dn(P(R, k), DEPTH);
+    g += `M${f1(a[0])} ${f1(a[1])}L${f1(b[0])} ${f1(b[1])}M${f1(c[0])} ${f1(c[1])}L${f1(e[0])} ${f1(e[1])}`;
+  }
+  s += `<path class="sea-grid" d="${g}" mask="url(#${id}-m)"/>`;
+  for (const k of fog) {
+    const [x, y] = k.split(",").map(Number);
+    s += `<polygon class="fog" points="${pts(top(x, y).map((p) => dn(p, DEPTH)))}" style="fill:url(#${id}-h);opacity:${fog1.has(k) ? 1 : .45}"/>`;
+  }
+  for (const k of charted) {
+    const [x, y] = k.split(",").map(Number), c = P(x + .5, y + .5);
+    s += `<polygon class="foam" points="${pts(top(x, y).map((p) => [c[0] + (p[0] - c[0]) * 1.32, c[1] + (p[1] - c[1]) * 1.32 + DEPTH]))}"/>`;
+  }
+  // land, back to front
+  for (const t of [...tiles].sort((a, b) => (b.x + b.y) - (a.x + a.y))) {
+    const { x, y } = t, q = top(x, y);
+    if (!charted.has(K(x - 1, y))) { const f = [q[3], q[0], dn(q[0], DEPTH), dn(q[3], DEPTH)]; s += `<polygon class="face" points="${pts(f)}"/><polygon class="s1" points="${pts(f)}"/>`; }
+    if (!charted.has(K(x, y - 1))) { const f = [q[0], q[1], dn(q[1], DEPTH), dn(q[0], DEPTH)]; s += `<polygon class="face" points="${pts(f)}"/><polygon class="s2" points="${pts(f)}"/>`; }
+    s += `<polygon class="top" data-x="${x}" data-y="${y}" points="${pts(q)}"/>`;
+  }
+  if (fog.size) {
+    const list = [...fog].map((k) => k.split(",").map(Number));
+    const far = (fx, fy) => list.reduce((m, p) => (fx * p[0] + fy * p[1] > fx * m[0] + fy * m[1] ? p : m), list[0]);
+    for (const [fx, fy] of [[1, 1], [-1, -1]]) { const p = far(fx, fy), c = dn(P(p[0] + .5, p[1] + .5), DEPTH + 4); s += `<text class="uncharted" x="${f1(c[0])}" y="${f1(c[1])}" text-anchor="middle">UNCHARTED</text>`; }
+  }
+  const inset = (x, y, k) => { const c = P(x + .5, y + .5); return pts(top(x, y).map((v) => [c[0] + (v[0] - c[0]) * k, c[1] + (v[1] - c[1]) * k])); };
+  const pieces = board.pieces.filter((p) => p.at.z === 0).sort((a, b) => (b.at.x + b.at.y) - (a.at.x + a.at.y));
+  for (const p of pieces) s += `<polygon class="rim" points="${inset(p.at.x, p.at.y, .86)}" style="stroke:${esc(p.color.hex)}"/>`;
+  if (sel) s += `<polygon class="selected" points="${inset(sel.x, sel.y, .94)}"/>`;
+  s += `<polygon class="hover" id="${id}-hov" points=""/>`;
+  for (const p of pieces) {
+    const c = P(p.at.x + .5, p.at.y + .5);
+    s += `<g class="piece" data-piece="${esc(p.color.key)}" transform="translate(${f1(c[0])},${f1(c[1])})">${pieceSVG({ shape: p.shape, color: p.color, mirrored: !!p.mirrored })}</g>`;
+    if (me && p.color.key === me) {
+      const label = `${p.name} · you`, w = label.length * 6.6 + 16;
+      s += `<g class="nametag"><rect x="${f1(c[0] - w / 2)}" y="${f1(c[1] - 64)}" width="${f1(w)}" height="16" rx="8"/><text x="${f1(c[0])}" y="${f1(c[1] - 52.5)}" text-anchor="middle">${esc(label)}</text></g>`;
+    }
+  }
+  return { markup: s, box: bbox(new Set([...charted, ...ring(charted, 1)])), tiles };
 }
 
-export function createSvgBoard(container, { onSelect } = {}) {
+export async function createBoard(container, { onSelect } = {}) {
+  ensureDefs();
   container.dataset.renderer = "svg";
-  const svg = el("svg", { class: "hex-svg", role: "img", "aria-label": "Board (flat map). The same tiles are listed below the board for keyboard and screen reader use." });
-  svg.style.cssText = "width:100%;height:100%;display:block";
-  container.appendChild(svg);
-  let theme = readTheme(), selected = null, last = null;
-  const polys = new Map();
-  const labelOf = (k) => last && last.tiles.find((t) => t.x === k.x && t.y === k.y && t.z === 0)?.label;
-  const posOf = (k) => {
-    const poly = polys.get(`${k.x},${k.y}`);
-    if (!poly) return null;
-    const b = poly.getBoundingClientRect(), c = container.getBoundingClientRect();
-    return { x: b.left + b.width / 2 - c.left, y: b.top - c.top };
-  };
   container.style.position = "relative";
-  const tagger = makeTagger(container, labelOf, posOf);
-  const keyOf = (e) => { const n = e.target.closest?.("polygon[data-x]"); return n ? { x: Number(n.dataset.x), y: Number(n.dataset.y) } : null; };
-  let press = null, longFired = false;
-  svg.addEventListener("pointerover", (e) => { if (e.pointerType === "mouse") tagger.hover(keyOf(e)); });
-  svg.addEventListener("pointerleave", () => tagger.hover(null));
-  svg.addEventListener("contextmenu", (e) => { e.preventDefault(); tagger.pin(keyOf(e)); });
-  svg.addEventListener("pointerdown", (e) => {
-    tagger.pin(null); longFired = false; clearTimeout(press);
-    if (e.pointerType !== "mouse") { const k = keyOf(e); press = setTimeout(() => { longFired = true; tagger.pin(k); }, LONG_PRESS_MS); }
-  });
-  for (const t of ["pointerup", "pointercancel", "pointermove"]) svg.addEventListener(t, () => { if (t !== "pointermove") clearTimeout(press); });
-  svg.addEventListener("click", (e) => { if (longFired) { longFired = false; return; } const k = keyOf(e); onSelect && (k ? onSelect(k.x, k.y) : onSelect(null, null)); });
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "The island: blank square tiles on an endless sea, with the players' pieces. The same tiles are listed below the board for keyboard and screen reader use.");
+  container.appendChild(svg);
+  const tip = Object.assign(document.createElement("div"), { className: "tip", hidden: true });
+  const ctl = document.createElement("div");
+  ctl.className = "board-ctl";
+  ctl.innerHTML = '<button type="button" class="wide" data-ctl="me">My piece</button><button type="button" data-ctl="out" aria-label="Zoom out">−</button><button type="button" data-ctl="in" aria-label="Zoom in">+</button>';
+  container.append(tip, ctl);
 
-  function setData(board) {
-    last = board;
-    polys.clear();
-    svg.replaceChildren();
-    let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
-    for (const t of board.tiles) for (const [dx, dy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
-      for (const z of [-SLAB_DEPTH, 1]) {
-        const [px, py] = project(t.x + dx * HALF, t.y + dy * HALF, z);
-        minX = Math.min(minX, px); maxX = Math.max(maxX, px); minY = Math.min(minY, -py); maxY = Math.max(maxY, -py);
-      }
-    }
-    const pad = 1.0;
-    svg.setAttribute("viewBox", `${minX - pad - 0.8} ${minY - pad} ${maxX - minX + 2 * pad + 1.6} ${maxY - minY + 2 * pad}`);
-    const g = el("g", {}, svg);
-    const order = board.tiles.filter((t) => t.z === 0).sort((a, b) => (b.x + b.y) - (a.x + a.y));
-    for (const t of order) {
-      const base = theme.tile, h = SLAB, x = t.x, y = t.y;
-      const P = (dx, dy, z) => project(x + dx * HALF, y + dy * HALF, z);
-      // the two faces you can see (south and west), then the top
-      el("polygon", { points: pts([P(-1, -1, h), P(1, -1, h), P(1, -1, -SLAB_DEPTH), P(-1, -1, -SLAB_DEPTH)]), fill: shade(base, 0.7) }, g);
-      el("polygon", { points: pts([P(-1, -1, h), P(-1, 1, h), P(-1, 1, -SLAB_DEPTH), P(-1, -1, -SLAB_DEPTH)]), fill: shade(base, 0.82) }, g);
-      const on = selected && selected.x === x && selected.y === y;
-      const top = el("polygon", {
-        points: pts([P(-1, -1, h), P(1, -1, h), P(1, 1, h), P(-1, 1, h)]), fill: base,
-        stroke: on ? theme.select : "rgba(0,0,0,.18)", "stroke-width": on ? 0.09 : 0.02, "stroke-linejoin": "round",
-        "data-x": x, "data-y": y, style: "cursor:pointer",
-      }, g);
-      polys.set(`${x},${y}`, top);
-      if (on) top.parentNode.appendChild(top);
-    }
-    const gp = el("g", {}, svg);
-    for (const p of board.pieces) { const [a, b] = project(p.at.x, p.at.y, SLAB); pawn(gp, a, b - 0.02, p.color.hex, theme.pawnInk, 1.25); }
-    tagger.update();
+  let board = null, sel = null, me = null, labels = new Map();
+  const view = { cx: 0, cy: 0, w: 600 };
+  let fitted = false, touched = false;   // touched: the person panned or zoomed, so the view is theirs
+  const apply = () => {
+    const r = container.clientHeight / Math.max(1, container.clientWidth), h = view.w * r;
+    svg.setAttribute("viewBox", `${f1(view.cx - view.w / 2)} ${f1(view.cy - h / 2)} ${f1(view.w)} ${f1(h)}`);
+  };
+  let box = null;
+  function fit() {
+    if (!box) return;
+    const w = container.clientWidth, h = container.clientHeight;
+    view.cx = box.x + box.w / 2; view.cy = box.y + box.h / 2 - 10;
+    view.w = Math.max(box.w * 1.02, box.h * 1.02 * w / Math.max(1, h));
+    apply();
   }
-  const mq = matchMedia("(prefers-color-scheme: dark)");
-  const onScheme = () => { theme = readTheme(); if (last) setData(last); };
-  mq.addEventListener?.("change", onScheme);
+  function centerOnMe(key) {
+    touched = true;
+    const p = board && board.pieces.find((q) => q.color.key === key);
+    if (!p) return fit();
+    const c = P(p.at.x + .5, p.at.y + .5);
+    view.cx = c[0]; view.cy = c[1] - 10; view.w = Math.min(view.w, HW * 2 * 7.5);
+    apply();
+  }
+  function draw() {
+    if (!board) return;
+    const r = sceneSVG(board, { sel, me, id: "mb" });
+    svg.innerHTML = r.markup;
+    box = r.box;
+    labels = new Map(r.tiles.map((t) => [K(t.x, t.y), t.label]));
+    if (!fitted) { fitted = true; if (container.clientWidth < 600 && me) centerOnMe(me); else fit(); }
+    else if (!touched) fit();
+    else apply();
+  }
+  const tileOf = (el) => {
+    const n = el && el.closest ? el.closest("polygon.top") : null;
+    return n ? { x: Number(n.dataset.x), y: Number(n.dataset.y) } : null;
+  };
+  const showTip = (t, cx, cy) => {
+    const lab = t && labels.get(K(t.x, t.y)), box0 = container.getBoundingClientRect();
+    if (!lab) return hideTip();
+    tip.textContent = lab; tip.hidden = false;
+    tip.style.left = (cx - box0.left) + "px"; tip.style.top = (cy - box0.top) + "px";
+    const hov = svg.querySelector(".hover");
+    if (hov) hov.setAttribute("points", pts(top(t.x, t.y)));
+  };
+  function hideTip() { tip.hidden = true; const hov = svg.querySelector(".hover"); if (hov) hov.setAttribute("points", ""); }
+
+  // pointer: drag to pan, pinch to zoom, hover / right-click / long-press for a tile's name, click to select
+  let down = null, panned = false, press = null, pinned = false, longFired = false;
+  const touches = new Map();
+  let pinch0 = null;
+  svg.addEventListener("pointerdown", (e) => {
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size === 2) { const [a, b] = [...touches.values()]; pinch0 = { d: Math.hypot(a.x - b.x, a.y - b.y), w: view.w }; clearTimeout(press); down = null; return; }
+    down = { x: e.clientX, y: e.clientY, cx: view.cx, cy: view.cy }; panned = false; longFired = false; pinned = false; hideTip();
+    if (e.pointerType !== "mouse") { const t = tileOf(e.target), cx = e.clientX, cy = e.clientY; clearTimeout(press); press = setTimeout(() => { if (t && !panned) { longFired = true; pinned = true; showTip(t, cx, cy); } }, LONG_PRESS_MS); }
+  });
+  svg.addEventListener("pointermove", (e) => {
+    if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch0 && touches.size === 2) { const [a, b] = [...touches.values()]; const d = Math.hypot(a.x - b.x, a.y - b.y); view.w = Math.min(1400, Math.max(220, pinch0.w * pinch0.d / Math.max(1, d))); touched = true; apply(); return; }
+    if (down && (e.buttons || e.pointerType !== "mouse")) {
+      const dx = e.clientX - down.x, dy = e.clientY - down.y;
+      if (Math.hypot(dx, dy) > 5) { panned = true; touched = true; clearTimeout(press); svg.classList.add("dragging"); const k = view.w / Math.max(1, svg.clientWidth); view.cx = down.cx - dx * k; view.cy = down.cy - dy * k; apply(); hideTip(); }
+      return;
+    }
+    if (e.pointerType === "mouse" && !pinned) { const t = tileOf(e.target); t ? showTip(t, e.clientX, e.clientY) : hideTip(); }
+  });
+  const end = (e) => {
+    touches.delete(e.pointerId); if (touches.size < 2) pinch0 = null;
+    clearTimeout(press); svg.classList.remove("dragging");
+    if (down && !panned && !longFired && onSelect) { const t = tileOf(e.target); t ? onSelect(t.x, t.y) : onSelect(null, null); }
+    down = null;
+  };
+  svg.addEventListener("pointerup", end);
+  svg.addEventListener("pointercancel", end);
+  svg.addEventListener("pointerleave", () => { if (!pinned) hideTip(); });
+  svg.addEventListener("contextmenu", (e) => { const t = tileOf(e.target); if (t) { e.preventDefault(); pinned = true; showTip(t, e.clientX, e.clientY); } });
+  // A plain wheel scrolls the page; Ctrl or Cmd + wheel zooms toward the pointer.
+  const zoomAt = (k, cx, cy) => {
+    const r = svg.getBoundingClientRect(), fx = (cx - r.left) / Math.max(1, r.width) - .5, fy = (cy - r.top) / Math.max(1, r.height) - .5, ar = r.height / Math.max(1, r.width);
+    touched = true;
+    const w = Math.min(1400, Math.max(220, view.w * k));
+    view.cx += fx * (view.w - w); view.cy += fy * (view.w - w) * ar; view.w = w; apply();
+  };
+  svg.addEventListener("wheel", (e) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault(); hideTip();
+    zoomAt(Math.exp(Math.max(-25, Math.min(25, e.deltaY * (e.deltaMode === 1 ? 16 : 1))) * .008), e.clientX, e.clientY);
+  }, { passive: false });
+  ctl.addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-ctl]"); if (!b) return;
+    const r = svg.getBoundingClientRect();
+    if (b.dataset.ctl === "me") centerOnMe(me); else zoomAt(b.dataset.ctl === "in" ? 0.75 : 1.33, r.left + r.width / 2, r.top + r.height / 2);
+  });
+  const ro = typeof ResizeObserver === "function" ? new ResizeObserver(() => { if (fitted) (touched ? apply() : fit()); }) : null;
+  ro && ro.observe(container);
+
   return {
     mode: "svg",
-    setData(b) { setData(b); },
-    select(x, y) { selected = x == null ? null : { x, y }; if (last) setData(last); },
-    screenPos(x, y) { const c = polys.get(`${x},${y}`); const b = c?.getBoundingClientRect(); return b ? { x: b.left + b.width / 2, y: b.top + b.height / 2 } : null; },
-    recenter() {},
-    refreshTheme: onScheme,
-    destroy() { mq.removeEventListener?.("change", onScheme); tagger.destroy(); svg.remove(); },
+    setData(b, meKey) { board = b; me = meKey || me; draw(); },
+    setMe(key) { me = key; draw(); },
+    select(x, y) { sel = x == null ? null : { x, y }; draw(); },
+    screenPos(x, y) { const n = svg.querySelector(`polygon.top[data-x="${x}"][data-y="${y}"]`), b = n && n.getBoundingClientRect(); return b ? { x: b.left + b.width / 2, y: b.top + b.height / 2 } : null; },
+    recenter(key) { centerOnMe(key || me); },
+    destroy() { ro && ro.disconnect(); svg.remove(); tip.remove(); ctl.remove(); },
   };
 }
