@@ -139,6 +139,13 @@ settings identical.
   same blank slab. All colors are CSS tokens in `public/theme.css`, which the WebGL and SVG renderers read too,
   so a new palette is a one-file change.
 
+## MCP
+
+A game's MCP server (`/<slug>/mcp`) is an adapter over the web routes, not a second implementation: each tool calls
+the route handler for the same thing, as the signed-in player, so the turn model lives in one place. It exists only
+while the game's `mcp_enabled` setting is true (a rule: 210), checked on every request. Players sign in with OAuth
+whose authorize step is the game's own magic link. See the README for the endpoints and the flow.
+
 ## What the moderator may and may not do
 
 The moderator is the most interesting player at the table and the easiest one to

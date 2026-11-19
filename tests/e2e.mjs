@@ -198,6 +198,11 @@ try {
   console.log("guards");
   const form = await fetch(A + "/one/api/login", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "email=a@b.co" });
   check("POST without application/json is refused (415)", form.status === 415);
+  const asForm = (path) => fetch(A + path, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "a=b" });
+  check("the JSON guard still covers the MCP and registration addresses (415); only the OAuth token and consent form posts are exempt",
+    (await asForm("/one/mcp")).status === 415 && (await asForm("/one/oauth/register")).status === 415 && (await asForm("/one/api/turn")).status === 415 && (await asForm("/one/oauth/token")).status === 401 && (await asForm("/one/oauth/authorize")).status === 403);
+  check("the MCP address and its OAuth paths exist only under a real game and a known name: 404 otherwise", (await client(A).get("/nope/oauth/authorize")).status === 404 && (await client(A).get("/one/oauth/other")).status === 404 && (await client(A).get("/one/oauth/")).status === 404 && (await client(A).get("/one/mcp/extra")).status === 404);
+  check("a new game has MCP on by default: no token gets a 401 that points at sign-in", (await fetch(A + "/one/mcp", { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" }, body: "{}" })).status === 401);
   for (const p of ["/wrangler.toml", "/.dev.vars", "/migrations/0001_init.sql", "/package.json", "/src/index.ts", "/src/lib/util.ts", "/README.md", "/DESIGN.md", "/package-lock.json", "/wrangler.preview-migrations.toml", "/public/site.css", "/public/board.html", "/site.css/", "/board.html/", "/.git/config", "/functions/[slug]/api/join.ts", "/tests/e2e.mjs", "/RULES.md", "/templates/RULES.md", "/board.html", "/board", "/index.html", "/scripts/create-game.sh", "/one/wrangler.toml", "/one/migrations/0001_init.sql", "/one/RULES.md"]) {
     const r = await client(A).get(p);
     check(`${p} is not served`, r.status === 404);

@@ -143,3 +143,64 @@ export async function join(base, slug, code, { email, name, color }, c = client(
 // to the link's own path.
 export const finish = (c, link, headers = {}) =>
   c.form(new URL(link).pathname, { token: new URL(link).searchParams.get("token") }, { origin: new URL(link).origin, ...headers });
+
+// ---- MCP + OAuth helpers -------------------------------------------------------------------------------------
+import { createHash, randomBytes } from "node:crypto";
+const b64u = (buf) => Buffer.from(buf).toString("base64url");
+export const sha256Hex = (s) => createHash("sha256").update(s).digest("hex");
+
+// A JSON-RPC call to /<slug>/mcp. `token` null sends no Authorization header.
+export async function mcp(base, slug, token, method, params, id = 1) {
+  const res = await fetch(`${base}/${slug}/mcp`, {
+    method: "POST", signal: AbortSignal.timeout(20000),
+    headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
+  });
+  const text = await res.text();
+  let data = null; try { data = JSON.parse(text); } catch {}
+  return { status: res.status, headers: res.headers, text, data };
+}
+// tools/call -> { isError, text } (the first text block)
+export async function tool(base, slug, token, name, args = {}) {
+  const r = await mcp(base, slug, token, "tools/call", { name, arguments: args });
+  const res = r.data?.result;
+  return { status: r.status, isError: !!res?.isError, text: res?.content?.[0]?.text ?? r.text, rpc: r };
+}
+
+export const form = (base, path, fields, headers = {}) => fetch(base + path, {
+  method: "POST", redirect: "manual", signal: AbortSignal.timeout(20000),
+  headers: { "content-type": "application/x-www-form-urlencoded", ...headers }, body: new URLSearchParams(fields).toString(),
+});
+
+// Register a client, as an AI app would. Returns the client_id.
+export async function registerClient(base, slug, name = "Test Agent", redirect = "https://agent.example/cb") {
+  const r = await fetch(`${base}/${slug}/oauth/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client_name: name, redirect_uris: [redirect], token_endpoint_auth_method: "none" }) });
+  const data = await r.json();
+  if (r.status !== 201) throw new Error(`register: ${r.status} ${JSON.stringify(data)}`);
+  return data.client_id;
+}
+
+export const newPkce = () => { const verifier = b64u(randomBytes(32)); return { verifier, challenge: b64u(createHash("sha256").update(verifier).digest()) }; };
+export const authorizeQuery = (clientId, pkce, redirect = "https://agent.example/cb", extra = {}) =>
+  new URLSearchParams({ response_type: "code", client_id: clientId, redirect_uri: redirect, code_challenge: pkce.challenge, code_challenge_method: "S256", state: "st-1", ...extra }).toString();
+
+// Everything after the page the person lands on: consent as `c` (a client signed in to the game) and the token exchange.
+export async function consent(base, slug, c, clientId, pkce, redirect = "https://agent.example/cb", decision = "allow", origin = new URL(base).origin) {
+  const q = authorizeQuery(clientId, pkce, redirect);
+  const fields = Object.fromEntries(new URLSearchParams(q)); fields.step = "decide"; fields.decision = decision;
+  return c.form(`/${slug}/oauth/authorize`, fields, { origin });
+}
+export const exchange = async (base, slug, clientId, code, verifier, redirect = "https://agent.example/cb") => {
+  const r = await form(base, `/${slug}/oauth/token`, { grant_type: "authorization_code", client_id: clientId, code, code_verifier: verifier, redirect_uri: redirect });
+  return { status: r.status, data: await r.json().catch(() => null) };
+};
+// The whole flow for a client that is already signed in: register, consent, exchange. Returns the token response.
+export async function connect(base, slug, c, origin) {
+  const clientId = await registerClient(base, slug);
+  const pkce = newPkce();
+  const done = await consent(base, slug, c, clientId, pkce, undefined, undefined, origin);
+  const code = new URL(done.headers.get("location")).searchParams.get("code");
+  const t = await exchange(base, slug, clientId, code, pkce.verifier);
+  if (t.status !== 200) throw new Error(`token: ${t.status} ${JSON.stringify(t.data)}`);
+  return { ...t.data, clientId };
+}

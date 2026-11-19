@@ -11,6 +11,7 @@ import { createSession } from "../lib/auth";
 import { ensureTiles, spawnBinds, spawnWhere } from "../lib/board";
 import { SHARED_TILES } from "../lib/board-rules.js";
 import { notify } from "../lib/notify";
+import { isConsentPath } from "../lib/oauth";
 import { expiredPage, page } from "../lib/pages";
 import { Ctx, colorInfo, esc, nowIso, seatLimit, sha256Hex, siteUrl, who } from "../lib/util";
 
@@ -78,6 +79,10 @@ export const post = async (ctx: Ctx) => {
   if (t.purpose === "login") {
     const player: any = await env.DB.prepare("SELECT id FROM players WHERE game_id = ? AND email = ?").bind(game.id, t.email).first();
     if (!player) return expiredPage(game); // decoy token for an address with no seat here
+    // A log-in that began at the MCP consent page goes back there (its own page only; checked again here).
+    if (t.next && isConsentPath(game.slug, t.next)) {
+      return new Response(null, { status: 303, headers: { location: t.next, "cache-control": "no-store", "set-cookie": await createSession(env, game, player.id) } });
+    }
     return back(game.slug, "welcome-back", await createSession(env, game, player.id));
   }
 

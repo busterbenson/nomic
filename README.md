@@ -18,7 +18,7 @@ board and by email.
 - `src/index.ts`: the Worker and its small hand-written router (no framework)
 - `src/routes/`, `src/lib/`: the page and API handlers, and shared code
 - `public/`: the static files: `board.html` (one board page for every game), `site.css`, `theme.css` (every color), `js/` (the board) and `vendor/` (three.js, pinned, no CDN)
-- `migrations/`: the D1 schema (`0001_init.sql`, `0002_island_board.sql`)
+- `migrations/`: the D1 schema (`0001_init.sql`, `0002_island_board.sql`, `0003_mcp_oauth.sql`)
 - `templates/RULES.md`: the starter ruleset a new game repo begins with
 - `scripts/create-game.sh`: creates a game and prints its join link
 - `tests/`: end-to-end tests and the screenshot script
@@ -35,6 +35,9 @@ board and by email.
 | `/<slug>/api/{game,me,join,login,logout,turn,rules,notifications,notifications/read}` | the game's API |
 | `/<slug>/api/board` | GET, public, never cached: the charted tiles (`x`, `y`, `z`, `label` like `3N 2E 1U`; nothing else) and the pieces (color, score, position), plus the settings and the move rules. No emails, no ids |
 | `/<slug>/api/action` | POST `{kind:"move", x, y}` or `{kind:"move", label:"3N 2E"}`: move your piece one space (diagonals included) onto a charted, unoccupied tile, once per turn, in addition to proposing. It charts the tiles around you |
+| `/<slug>/mcp` | the game's MCP server (Streamable HTTP, POST only, bearer token). See "The MCP server" below |
+| `/<slug>/oauth/{authorize,token,register}` | the OAuth sign-in for MCP clients (authorize is a page; token takes a form post; register takes JSON) |
+| `/.well-known/oauth-protected-resource/<slug>/mcp`, `/.well-known/oauth-authorization-server/<slug>` | the two discovery documents an MCP client reads after its first 401 |
 | `/js/*.js`, `/vendor/*.js`, `/theme.css`, `/site.css` | the board's scripts (three.js 0.186.1, vendored), and the styles |
 
 A slug is 2 to 40 characters of `a-z`, `0-9` and `-`, starting and ending with a
@@ -115,6 +118,29 @@ To start a game by hand (no moderator yet):
 `npx wrangler d1 execute DB --local --command "UPDATE games SET status='playing', round=1, turn=0 WHERE slug='demo'"`
 (add `--remote` against the deployed database).
 Once playing, the player whose turn it is (`games.turn` = their seat number, from 0) sees a "Your turn" box on the board and submits one prompt per round, and may also move their piece once (in either order). Proposing only records the turn; nothing advances `turn` or `round` yet (a move is remembered in `games.last_move` as `round:turn`, so whatever advances the turn must make `round` grow when `turn` wraps).
+
+## The MCP server
+
+Each game has an MCP server at `/<slug>/mcp`, so a player can connect an AI client (Claude, Cursor, the MCP
+Inspector...) and take their turn through it. It is **switched by the rules**: the game's setting `mcp_enabled`
+(default true, named in rule 210 of `templates/RULES.md`) is read from the game's row on every request, and when
+it is false every MCP and OAuth address answers 403 with a plain message that the rules disable MCP. Players change
+it the way they change any rule.
+
+- **Tools**: `read_rules`, `read_board`, `my_state` (who I am, whose turn it is, where my piece stands, what I may
+  do now), `propose` (submit this turn's prompt) and `move`. Each one calls the matching web route's own handler
+  (`api-rules`, `api-board`, `api-me` + `api-game`, `api-turn`, `api-action`) with an internal request made as the
+  player, so validation, guards, log lines and notifications are the web's, and a later change to the turn model
+  reaches MCP with no change in `src/lib/mcp-tools.ts`. The "may I?" guards that `my_state` reports come from the
+  same function the two write routes use (`src/lib/turn.ts`). Voting and a catch-all action are not there yet.
+- **Sign-in is OAuth 2.1** (authorization code + PKCE S256, public clients, dynamic client registration), per game.
+  The authorize page reuses the game's magic link: a player with no session gives their email and gets the usual
+  log-in link, which carries them back to the consent page (`login_tokens.next`, honoured only for that page);
+  one already signed in on the board sees the question at once. Allow gives the client a one-time code (10 minutes);
+  the token endpoint trades it for a 1-hour access token and a 30-day single-use refresh token. Only hashes are
+  stored (`migrations/0003_mcp_oauth.sql`; its tables point at a game's players and clients by composite keys, so the
+  database itself refuses a token that crosses games). A client that registered and was never used is swept after 7 days. The token is accepted at `/<slug>/mcp` only, never by the web API.
+- The server is stateless (no MCP session, no stream), built on `@modelcontextprotocol/sdk` and `zod`.
 
 ## Rules live in each game's repo
 

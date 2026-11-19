@@ -4,6 +4,7 @@
 import { getPlayer } from "../lib/auth";
 import { PROPOSAL_INSERT_SQL } from "../lib/proposal.js";
 import { notify } from "../lib/notify";
+import { turnBlock } from "../lib/turn";
 import { Ctx, json, nowIso, readJson, siteUrl, who } from "../lib/util";
 
 export const post = async (ctx: Ctx) => {
@@ -15,8 +16,8 @@ export const post = async (ctx: Ctx) => {
   const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
   if (!prompt || [...prompt].length > 2000) return json({ error: "Your prompt needs 1 to 2000 characters." }, 400);
 
-  if (game.status !== "playing") return json({ error: "The game has not started, so there are no turns yet." }, 409);
-  if (player.turn_order !== game.turn) return json({ error: "It is not your turn." }, 403);
+  const blocked = turnBlock(game, player, "propose");
+  if (blocked) return json({ error: blocked.error }, blocked.status);
 
   const now = nowIso();
   const name = player.display_name;
