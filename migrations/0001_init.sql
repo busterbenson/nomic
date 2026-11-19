@@ -92,7 +92,7 @@ CREATE TABLE events (
 CREATE INDEX events_game ON events(game_id, id);
 
 -- A turn is one prompt from the player whose turn it is. Today the site only
--- RECORDS turns ('submitted'); the referee and the vote (not built yet) will
+-- RECORDS turns ('submitted'); the moderator and the vote (not built yet) will
 -- move them through drafted -> voting -> passed/failed.
 CREATE TABLE turns (
   id TEXT PRIMARY KEY,
