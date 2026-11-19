@@ -21,7 +21,7 @@ export async function tooManyLinks(env: Ctx["env"], gameId: string, email: strin
 export async function issueLink(
   ctx: Ctx,
   game: { id: string; slug: string; name: string },
-  t: { email: string; purpose: "join" | "login"; name?: string; color?: string; next?: string; send: boolean; subject: string; intro: string },
+  t: { email: string; purpose: "join" | "login"; name?: string; color?: string; next?: string; send: boolean; subject: string; intro: string; action: string },
 ): Promise<string | null> {
   const { env, request } = ctx;
   const token = randomToken(32);
@@ -50,7 +50,7 @@ export async function issueLink(
       sendEmail(env, {
         to: t.email,
         subject: t.subject,
-        text: `${t.intro}\n\nClick the link, then press Continue:\n${link}\n\nThe link works once and expires in 15 minutes. If you did not ask for it, ignore this email.`,
+        text: `${t.intro}\n\n${t.action}, open this link and press Continue:\n${link}\n\nThe link works once and expires in 15 minutes. If you didn't ask for it, you can ignore this email.\n\nChalant\nModerator, ${game.name}`,
       }).catch((e) => console.error("magic link email failed:", e?.message || e)),
     );
   }

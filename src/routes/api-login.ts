@@ -1,7 +1,7 @@
 // Log in to THIS game. An address with no seat here gets the same answer as one that has.
 import { emailMode } from "../lib/email";
 import { issueLink, tooManyLinks } from "../lib/links";
-import { Ctx, json, normEmail, readJson, validEmail } from "../lib/util";
+import { Ctx, json, normEmail, playersLine, readJson, seatLimit, seatsTaken, validEmail } from "../lib/util";
 
 export const post = async (ctx: Ctx) => {
   const { env } = ctx;
@@ -17,7 +17,9 @@ export const post = async (ctx: Ctx) => {
   // real player is emailed, and the response never says which case it was.
   const link = await issueLink(ctx, game, {
     email, purpose: "login", send: !!player,
-    subject: `Your ${game.name} log-in link`, intro: `Click to log in to ${game.name}.`,
+    subject: `Promptocracy: log in to ${game.name}`,
+    intro: `Here's your link to log in to ${game.name}, a game of Promptocracy.\n\n${playersLine(await seatsTaken(env, game.id), seatLimit(game), "Players")}`,
+    action: "To log in",
   });
   if (!link) return json({ error: "Too many links requested. Wait 15 minutes and try again." }, 429);
   const res: any = { ok: true, message: "If that address has a seat in this game, a log-in link is on its way." };

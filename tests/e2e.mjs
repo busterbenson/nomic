@@ -101,8 +101,13 @@ try {
   check("you cannot mark someone else's notification read", (await bo.get("/one/api/notifications")).data.unread === boNotes.data.unread);
   check("emailed_at is recorded", d1(state, "SELECT COUNT(*) AS n FROM notifications WHERE emailed_at IS NOT NULL")[0].n >= 1);
 
-  check("the email tells people to click the link, then Continue",
-    d1(state, "SELECT body FROM outbox WHERE subject LIKE 'Finish joining%' LIMIT 1")[0].body.includes("Click the link, then press Continue"));
+  check("the join email names the game, the piece and how to finish",
+    (() => { const b = d1(state, "SELECT body FROM outbox WHERE subject = 'Promptocracy: take your seat in Game One' LIMIT 1")[0].body;
+      return b.includes("You asked to join Game One, a game of Promptocracy.") && b.includes("open this link and press Continue") && b.includes("Moderator, Game One"); })());
+  check("a later join email lists who is already seated",
+    d1(state, "SELECT body FROM outbox WHERE subject = 'Promptocracy: take your seat in Game One'").some((o) => /Players so far \(\d of \d\): .*Ada \(/.test(o.body)));
+  check("the first join email says nobody is seated yet",
+    d1(state, "SELECT body FROM outbox WHERE subject = 'Promptocracy: take your seat in Game One'").some((o) => o.body.includes("you'll be the first player")));
 
   console.log("rejections");
   const w = await client(A).post("/one/api/join", { code: "ZZZZZZZZ", email: "x@example.com", name: "X", color: COLORS[2] });
@@ -154,7 +159,7 @@ try {
   const lv = await finish(known, lk.data.dev_link);
   check("a log-in link creates a session only on POST", lv.status === 303 && (await known.get("/one/api/me")).data.user.name === "Ada");
   check("a decoy link for an unknown email logs nobody in", (await finish(unknown, lu.data.dev_link)).status === 400 && (await unknown.get("/one/api/me")).status === 401);
-  check("only the known address was emailed", d1(state, "SELECT to_addr FROM outbox WHERE subject = 'Your Game One log-in link'").every((r) => r.to_addr !== "ghost@example.com"));
+  check("only the known address was emailed", d1(state, "SELECT to_addr FROM outbox WHERE subject = 'Promptocracy: log in to Game One'").every((r) => r.to_addr !== "ghost@example.com"));
   const l2 = await client(A).post("/one/api/login", { email: "ada@example.com" });
   const l3 = await client(A).post("/one/api/login", { email: "ada@example.com" });
   const l4 = await client(A).post("/one/api/login", { email: "ada@example.com" });
@@ -305,7 +310,7 @@ try {
   const stranger = await client(A).post("/two/api/login", { email: "bo@example.com" });
   check("an email with a seat only in game one gets a decoy on game two: no email, no session",
     stranger.status === 200 && (await finish(client(A), stranger.data.dev_link)).status === 400 &&
-    !d1(state, "SELECT to_addr, subject FROM outbox WHERE subject LIKE 'Your Game Two log-in%'").some((o) => o.to_addr === "bo@example.com"));
+    !d1(state, "SELECT to_addr, subject FROM outbox WHERE subject = 'Promptocracy: log in to Game Two'").some((o) => o.to_addr === "bo@example.com"));
 
   // Rate limits: 3 per (game, email) per 15 minutes; 10 per email per hour across games.
   const lim = (slug, email) => client(A).post(`/${slug}/api/login`, { email });

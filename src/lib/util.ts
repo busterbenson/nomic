@@ -131,9 +131,16 @@ export const validRef = (s: unknown): s is string =>
 
 export const gameBase = (game: { slug: string }) => `/${game.slug}`;
 
-export async function seatsTaken(env: Env, gameId: string): Promise<{ color: string }[]> {
-  const r = await env.DB.prepare("SELECT color FROM players WHERE game_id = ?").bind(gameId).all();
-  return r.results as { color: string }[];
+export async function seatsTaken(env: Env, gameId: string): Promise<{ color: string; display_name: string }[]> {
+  const r = await env.DB.prepare("SELECT color, display_name FROM players WHERE game_id = ? ORDER BY turn_order").bind(gameId).all();
+  return r.results as { color: string; display_name: string }[];
+}
+
+// One line for the link emails: who is already seated, e.g.
+// "Players so far (2 of 8): Ana (Teal), Bo (Cobalt)."
+export function playersLine(taken: { color: string; display_name: string }[], limit: number, label = "Players so far"): string {
+  if (!taken.length) return "Nobody has taken a seat yet, so you'll be the first player.";
+  return `${label} (${taken.length} of ${limit}): ${taken.map((t) => who(t.display_name, t.color)).join(", ")}.`;
 }
 
 // A game seats at most `max_players` players (a game setting, 1 to 8: one piece colour each).

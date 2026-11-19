@@ -102,7 +102,9 @@ export const post = async (ctx: Ctx) => {
     // Same as /api/login: a token row is written either way, only a real player is emailed, the answer never says which.
     const link = await issueLink(ctx, game, {
       email, purpose: "login", send: !!player, next,
-      subject: `Your ${game.name} log-in link`, intro: `Click to log in to ${game.name} and connect an AI client at ${new URL(r.redirect_uri).host}.`,
+      subject: `Promptocracy: log in to ${game.name}`,
+      intro: `Here's your link to log in to ${game.name} and connect an AI client at ${new URL(r.redirect_uri).host}.`,
+      action: "To log in",
     });
     if (!link) return fail("Too many links requested. Wait 15 minutes and try again.", 429);
     const dev = emailMode(env) === "dev" ? `<p><a href="${esc(link)}">Log-in link</a></p>` : "";
