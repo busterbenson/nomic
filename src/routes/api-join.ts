@@ -1,6 +1,6 @@
 import { emailMode } from "../lib/email";
 import { issueLink, tooManyLinks } from "../lib/links";
-import { Ctx, PALETTE, cleanName, json, normCode, normEmail, readJson, seatLimit, seatsTaken, validEmail, who } from "../lib/util";
+import { Ctx, PALETTE, cleanName, json, normCode, normEmail, playersLine, readJson, seatLimit, seatsTaken, validEmail } from "../lib/util";
 
 export const post = async (ctx: Ctx) => {
   const { env } = ctx;
@@ -26,8 +26,9 @@ export const post = async (ctx: Ctx) => {
   // Same answer whether or not this address already has a seat here.
   const link = await issueLink(ctx, game, {
     email, purpose: "join", name, color, send: true,
-    subject: `Finish joining ${game.name}`,
-    intro: `Click to take your seat in ${game.name} as ${who(name, color)}.`,
+    subject: `Promptocracy: take your seat in ${game.name}`,
+    intro: `Hi ${name},\n\nYou asked to join ${game.name}, a game of Promptocracy. You'll play as ${PALETTE.find((c) => c.key === color)!.name}.\n\n${playersLine(taken, seatLimit(game))}`,
+    action: "To take your seat",
   });
   if (!link) return json({ error: "Too many links requested. Wait 15 minutes and try again." }, 429);
   const res: any = { ok: true, message: "Check your email for a link to finish joining." };
