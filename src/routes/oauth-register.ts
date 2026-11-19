@@ -26,7 +26,7 @@ export const post = async ({ env, request, data, waitUntil }: Ctx) => {
   if (!name) return bad("invalid_client_metadata", "client_name must be 1 to 40 characters.");
   const now = Date.now();
   const id = randomToken(24);
-  const ipHash = await sha256Hex(request.headers.get("cf-connecting-ip") ?? "no-address");
+  const ipHash = await sha256Hex(`${game.id}:${request.headers.get("cf-connecting-ip") ?? "no-address"}`);
   // The cap and the insert are one statement, so concurrent registrations cannot all slip under it.
   const ins = await env.DB.prepare(
     `INSERT INTO oauth_clients (id, game_id, name, redirect_uris, ip_hash, created_at)

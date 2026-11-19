@@ -512,6 +512,10 @@ try {
 
   console.log("  tokens");
   check("a token for this game does not work on another game", (await mcp(A, "prop", tokMia, "tools/list", {})).status === 401 && (await mcp(A, "nope", tokMia, "tools/list", {})).status === 404);
+  const otherPlayer = d1(state, `SELECT id FROM players WHERE game_id = '${gidOf("hex")}' LIMIT 1`)[0].id;
+  let crossGame = "accepted"; try { d1(state, `INSERT INTO oauth_tokens (token_hash, kind, client_id, game_id, player_id, created_at, expires_at) VALUES ('${"a".repeat(64)}', 'access', '${cid}', '${gidOf("pilot")}', '${otherPlayer}', 't', 't')`); } catch { crossGame = "refused"; }
+  let crossClient = "accepted"; try { d1(state, `INSERT INTO oauth_codes (code_hash, client_id, game_id, player_id, redirect_uri, code_challenge, created_at, expires_at) VALUES ('${"b".repeat(64)}', '${cid}', '${gidOf("hex")}', '${otherPlayer}', 'u', 'c', 't', 't')`); } catch { crossClient = "refused"; }
+  check("the database itself refuses a token for a player of another game, and a code for a client of another game", crossGame === "refused" && crossClient === "refused");
   check("a refresh token is not an access token", (await mcp(A, "pilot", mt.refresh_token, "tools/list", {})).status === 401);
   const rf = await form(A, "/pilot/oauth/token", { grant_type: "refresh_token", client_id: mt.clientId, refresh_token: mt.refresh_token });
   const rfd = await rf.json();

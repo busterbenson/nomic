@@ -18,7 +18,7 @@ board and by email.
 - `src/index.ts`: the Worker and its small hand-written router (no framework)
 - `src/routes/`, `src/lib/`: the page and API handlers, and shared code
 - `public/`: the static files: `board.html` (one board page for every game), `site.css`, `theme.css` (every color), `js/` (the board) and `vendor/` (three.js, pinned, no CDN)
-- `migrations/`: the D1 schema (`0001_init.sql`, `0002_island_board.sql`)
+- `migrations/`: the D1 schema (`0001_init.sql`, `0002_island_board.sql`, `0003_mcp_oauth.sql`)
 - `templates/RULES.md`: the starter ruleset a new game repo begins with
 - `scripts/create-game.sh`: creates a game and prints its join link
 - `tests/`: end-to-end tests and the screenshot script
@@ -138,7 +138,8 @@ it the way they change any rule.
   log-in link, which carries them back to the consent page (`login_tokens.next`, honoured only for that page);
   one already signed in on the board sees the question at once. Allow gives the client a one-time code (10 minutes);
   the token endpoint trades it for a 1-hour access token and a 30-day single-use refresh token. Only hashes are
-  stored (`migrations/0003_mcp_oauth.sql`). The token is accepted at `/<slug>/mcp` only, never by the web API.
+  stored (`migrations/0003_mcp_oauth.sql`; its tables point at a game's players and clients by composite keys, so the
+  database itself refuses a token that crosses games). A client that registered and was never used is swept after 7 days. The token is accepted at `/<slug>/mcp` only, never by the web API.
 - The server is stateless (no MCP session, no stream), built on `@modelcontextprotocol/sdk` and `zod`.
 
 ## Rules live in each game's repo
