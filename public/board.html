@@ -156,7 +156,6 @@
     const box = $("dock");
     if (!DATA) return;
     const { game, players, turns } = DATA;
-    const target = Number(game.winning_score) || 100;
     const current = game.status === "setup" ? null : (players[game.turn] || null);
     const mine = ME && ME.player && current && ME.player.turn_order === game.turn;
     const taken = current ? turns.find(t => t.turn_index === game.turn) : null;
@@ -164,12 +163,12 @@
     document.title = game.name || "Promptocracy";
     $("title").textContent = game.name || "Promptocracy";
     let html = game.status === "setup"
-      ? `<p><strong>Setting up.</strong> ${players.length} of ${game.max_players} seats taken. First to ${target} points wins (for now).</p>`
-      : `<p><strong>Round ${game.round}.</strong> ${current ? esc(who(current.name, current.color)) + "'s turn." : ""} First to ${target} points wins (for now).</p>`;
-    const moveLine = moved ? "You have moved this turn." : "You may also move your piece one space: tap a tile next to it, then Move here.";
+      ? `<p><strong>Setting up.</strong> ${players.length} of ${game.max_players} seats taken.</p>`
+      : `<p><strong>Round ${game.round}.</strong> ${current ? esc(who(current.name, current.color)) + "'s turn." : ""}</p>`;
+    const moveLine = moved ? "You have moved this turn." : "";
     if (game.status === "playing" && current) {
       if (mine && !taken) {
-        html += `<form id="turn-form"><p><strong>Your turn.</strong> You may propose one rule change: write one prompt for Chalant (the moderator). ${moveLine}</p>
+        html += `<form id="turn-form"><p><strong>Your turn.</strong> ${moveLine}</p>
           <textarea name="prompt" rows="4" maxlength="2000" required aria-label="Your prompt"></textarea>
           <div><button class="btn" type="submit">Submit my turn</button></div>
           <div id="turn-msg" role="status"></div></form>`;
@@ -250,9 +249,7 @@
       <p>${here.length ? here.map(p => `<span class="dot" style="background:${hex(p.color)}"></span> ${esc(who(p.name, p.color))} is here`).join("<br>") : '<span class="muted">Nobody is here.</span>'}</p>`;
     if (move.ok && canMoveTo(t)) {
       html += `<div><button class="btn" id="move-btn" type="button">Move here</button></div><div id="act-msg" role="status"></div>`;
-    } else if (move.ok) {
-      html += `<p class="muted">Your move: pick a tile next to your piece.</p>`;
-    } else if (move.why) {
+    } else if (!move.ok && move.why) {
       html += `<p class="muted">${esc(move.why)}</p>`;
     }
     box.innerHTML = html;
@@ -266,8 +263,6 @@
     const r = await api("/api/action", body);
     if (r.ok) {
       await refresh();
-      const m = $("act-msg");
-      if (m) m.textContent = "Moved. You may still propose a rule change this turn.";
       return;
     }
     msg.className = "notice err";

@@ -31,6 +31,8 @@ check("clauses are numbered 102.1, 102.2 under their rule, and a wrapped clause 
 const bad = parseRules(`## 150. Odd\n### 151 X\n## 200. Two [m]\n### 301 Wrong block\n### 301 Wrong block\n**302.1** orphan\n`);
 check("problems are named with their line: a block not a multiple of 100, a missing mark, a rule in the wrong block, a number used twice, a clause in the wrong rule", bad.warnings.some((w) => /Line 1: Block 150 is not a multiple of 100/.test(w)) && bad.warnings.some((w) => /Line 1: Block 150 does not say/.test(w)) && bad.warnings.some((w) => /Line 4: Rule 301 is in block 200/.test(w)) && bad.warnings.some((w) => /Number 301 is used twice/.test(w)) && bad.warnings.some((w) => /Clause 302.1 is in rule 301/.test(w)), J(bad.warnings));
 check("a rule before any block is reported, not lost silently", parseRules("### 101 Loose\ntext\n").warnings.some((w) => /outside any block/.test(w)));
+const prose = parseRules("## 100. Core [u]\nProse before any rule.\n\n### 101 One\n**101.1**\n**101.2** Second.\n");
+check("prose between a block heading and its first rule is reported (it is not shown), and a clause with no text is still a clause", prose.warnings.length === 1 && /Line 2: Text under block 100 comes before its first rule/.test(prose.warnings[0]) && prose.byNum["101"].clauses.map((c) => c.num).join() === "101.1,101.2" && prose.byNum["101.2"].paras[0].s === "Second.", J(prose.warnings));
 check("a file in the older format (no blocks) has no sections, so the page falls back to plain markdown", parseRules("# Rules\n\n## Core rules\n\n**101. Follow.** text\n").sections.length === 0 && /<h2>Core rules<\/h2>/.test(renderMarkdown("# Rules\n\n## Core rules\n\n**101. Follow.** text\n")));
 
 console.log("the starter rules renumbered");

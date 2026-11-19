@@ -30,7 +30,8 @@ export async function issueLink(
   // cannot all read "under the limit" and each insert a token.
   // `next` (migration 0003) is written only when there is one, so ordinary join and log-in links keep working
   // on a database that has not had that migration yet.
-  // `shape` (migration 0004) is written only for a join link, for the same reason.
+  // `shape` (migration 0004) is written only for a join link. Unlike `next`, nothing else is guarded: migration 0004 must be applied
+  // before this code is deployed (every player query reads `players.shape`).
   const hasNext = t.next !== undefined, hasShape = t.shape !== undefined;
   const ins = await env.DB.prepare(
     `INSERT INTO login_tokens (token_hash, game_id, email, purpose, display_name, color, created_at, expires_at${hasNext ? ", next" : ""}${hasShape ? ", shape" : ""})

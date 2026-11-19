@@ -108,7 +108,7 @@ console.log("migration 0002");
     const after = sql("SELECT id, color, score, shape, mirrored FROM players ORDER BY turn_order");
     check("migration 0004: every existing seat keeps its id, color and score, and is a pawn facing as drawn", JSON.stringify(after) === JSON.stringify([{ id: "p0", color: "vermilion", score: 0, shape: "pawn", mirrored: 0 }, { id: "p1", color: "saffron", score: 10, shape: "pawn", mirrored: 0 }, { id: "p2", color: "moss", score: 20, shape: "pawn", mirrored: 0 }]), JSON.stringify(after));
     let badFacing = "ok"; try { sql(`UPDATE players SET mirrored = 2 WHERE id = 'p0'`); } catch { badFacing = "refused"; }
-    check("migration 0004: a piece faces one way or the other, nothing else", badFacing === "refused" && sql("SELECT name, notnull FROM pragma_table_info('login_tokens') WHERE name = 'shape'")[0].notnull === 0 && sql("PRAGMA foreign_key_check").length === 0);
+    check("migration 0004: a piece faces one way or the other, nothing else", badFacing === "refused" && sql("SELECT name, [notnull] FROM pragma_table_info('login_tokens') WHERE name = 'shape'")[0].notnull === 0 && sql("PRAGMA foreign_key_check").length === 0);
   } catch (e) { fail++; console.log("  FAIL  migration harness:", String(e.stdout || "") + String(e.stderr || "") + (e.stack || e)); }
   finally { for (const d of [st, cfgDir]) { try { rmSync(d, { recursive: true, force: true }); } catch {} } }
 }
@@ -182,16 +182,16 @@ try {
   check("a color someone took is shown as taken and cannot be picked", /value="teal"[^>]*disabled/.test(page2.text) && !/value="cobalt"[^>]*disabled/.test(page2.text) && page2.text.includes("<small>Ana</small>"));
   const dupe = await client(A).post("/hex/api/join", { code: g.code, email: "x@example.com", name: "X", color: "teal" });
   check("joining with a taken color is refused (409)", dupe.status === 409 && /color/i.test(dupe.data.error), dupe.text);
-  check("an unknown color is refused (400), and so is a color from the first palette that is no longer offered, a monster-only color, and the old marker field", (await client(A).post("/hex/api/join", { code: g.code, email: "y@example.com", name: "Y", color: "saffron" })).status === 400 && (await client(A).post("/hex/api/join", { code: g.code, email: "y@example.com", name: "Y", color: "bog" })).status === 400 && (await client(A).post("/hex/api/join", { code: g.code, email: "y@example.com", name: "Y", color: "wraith" })).status === 400 && , (await client(A).post("/hex/api/join", { code: g.code, email: "y@example.com", name: "Y", color: "puce" })).status === 400 && (await client(A).post("/hex/api/join", { code: g.code, email: "y@example.com", name: "Y", marker: "x" })).status === 400 && (await client(A).post("/hex/api/join", { code: g.code, email: "y@example.com", name: "Y", color: "orchid", shape: "dragon" })).status === 400);
+  check("an unknown color is refused (400), and so is a color from the first palette that is no longer offered, a monster-only color, and the old marker field", (await client(A).post("/hex/api/join", { code: g.code, email: "y@example.com", name: "Y", color: "saffron" })).status === 400 && (await client(A).post("/hex/api/join", { code: g.code, email: "y@example.com", name: "Y", color: "bog" })).status === 400 && (await client(A).post("/hex/api/join", { code: g.code, email: "y@example.com", name: "Y", color: "wraith" })).status === 400 && (await client(A).post("/hex/api/join", { code: g.code, email: "y@example.com", name: "Y", color: "puce" })).status === 400 && (await client(A).post("/hex/api/join", { code: g.code, email: "y@example.com", name: "Y", marker: "x" })).status === 400 && (await client(A).post("/hex/api/join", { code: g.code, email: "y@example.com", name: "Y", color: "orchid", shape: "dragon" })).status === 400);
   const bo = await join(A, "hex", g.code, { email: "bo@example.com", name: "Bo", color: "cobalt", shape: "frog" });
   const cy = await join(A, "hex", g.code, { email: "cy@example.com", name: "Cy", color: "orchid" });
   const full = await client(A).post("/hex/api/join", { code: g.code, email: "d@example.com", name: "D", color: "indigo" });
   check("max_players 3 is honoured", full.status === 409 && /full/i.test(full.data.error), full.text);
   await new Promise((r) => setTimeout(r, 800)); // emails are sent after the reply
   const outbox = d1(state, "SELECT subject, body FROM outbox").map((o) => o.subject + o.body).join("\n");
-  check("the log and emails name players as 'Ana (Teal)'", outbox.includes("You'll play as Teal.") && outbox.includes("Players so far (1 of 3): Ana (Teal).") && outbox.includes("Bo (Cobalt) joined the game.") && (await client(A).get("/hex/api/game")).data.events.some((e) => e.text === "Cy (Rose) took a seat."), outbox.slice(0, 300));
+  check("the log and emails name players as 'Ana (Teal)'", outbox.includes("You'll play as Teal.") && outbox.includes("Players so far (1 of 3): Ana (Teal).") && outbox.includes("Bo (Cobalt) joined the game.") && (await client(A).get("/hex/api/game")).data.events.some((e) => e.text === "Cy (Orchid) took a seat."), outbox.slice(0, 300));
   const me = await ana.get("/hex/api/me");
-  check("/api/me carries the claimed color", me.data.player.color.key === "teal" && me.data.player.color.name === "Teal" && /^#[0-9a-f]{6}$/.test(me.data.player.color.hex) && !("marker" in me.data.player));
+  check("/api/me carries the claimed color", me.data.player.color.key === "teal" && me.data.player.color.name === "Teal" && /^#[0-9a-f]{6}$/i.test(me.data.player.color.hex) && !("marker" in me.data.player));
   const game = (await client(A).get("/hex/api/game")).data;
   check("/api/game players carry colors, not markers", game.players.every((p) => p.color?.key && !("marker" in p)) && game.players.map((p) => p.color.key).join() === "teal,cobalt,orchid");
   const bd = (await client(A).get("/hex/api/board")).data;
@@ -294,7 +294,7 @@ try {
   check("a move to the left on screen (west, or north) turns it back", west.status === 200 && faceOf() === 0 && (await client(A).get("/hex/api/board")).data.pieces[0].mirrored === false, west.text);
   setTurn("hex"); setPos("hex", 0, -1, -1);
   const north = await post(ana, { kind: "move", x: 0, y: 0 });
-  check("a move straight up the screen (north-east, a pure diagonal) keeps the way the piece faces", north.status === 200 && faceOf() === 0 && (setTurn("hex"), true) && (await post(ana, { kind: "move", x: 1, y: 0 })).status === 200 && faceOf() === 1 && (setTurn("hex"), true) && (await post(ana, { kind: "move", x: 2, y: 1 })).status === 200 && faceOf() === 1, north.text);
+  check("a move straight up the screen (north-east, a pure diagonal) keeps the way the piece faces", north.status === 200 && faceOf() === 0 && (setTurn("hex"), true) && (await post(ana, { kind: "move", x: 1, y: 0 })).status === 200 && faceOf() === 1 && (setTurn("hex"), true) && (await post(ana, { kind: "move", x: 0, y: -1 })).status === 200 && faceOf() === 1, north.text);
   // chart on move
   setTurn("hex"); setPos("hex", 0, 3, 0);
   d1(state, `INSERT INTO tiles (game_id, x, y, z, charted_at) VALUES ('${gidOf("hex")}', 4, 0, 0, 'x')`);
@@ -594,6 +594,16 @@ try {
   check("a stored value that is not a boolean falls back to the default (on)", (await mcp(A, "pilot", tokMia, "tools/list", {})).status === 200);
   d1(state, `UPDATE games SET settings = '{}' WHERE slug = 'pilot'`);
   check("and so does a game that stores no value for it", (await mcp(A, "pilot", tokMia, "tools/list", {})).status === 200);
+
+  console.log("join links made before the design port");
+  {
+    const lg = await createGame(state, { slug: "legacy", ...R });
+    const mk = async (email, color, shapeSql) => { const tk = "tok-" + Math.random().toString(36).slice(2) + "-padding-padding"; d1(state, `INSERT INTO login_tokens (token_hash, game_id, email, purpose, display_name, color, ${shapeSql ? "shape, " : ""}created_at, expires_at) VALUES ('${sha256Hex(tk)}', '${gidOf("legacy")}', '${email}', 'join', 'Old', '${color}', ${shapeSql ? `${shapeSql}, ` : ""}'2026-01-01T00:00:00Z', '2099-01-01T00:00:00Z')`); return (await finish(client(A), `${SITE}/legacy/auth/verify?token=${tk}`)).headers.get("location"); };
+    const l1 = await mk("o1@example.com", "saffron", null), l2 = await mk("o2@example.com", "orchid", "'dragon'"), l3 = await mk("o3@example.com", "jade", "'wizard'");
+    const rows = d1(state, `SELECT email, color, shape FROM players WHERE game_id = '${gidOf("legacy")}' ORDER BY turn_order`);
+    check("a join link made before shapes existed (no shape, and a color of the first palette) still seats the player: a pawn, in the color they asked for", l1 === "/legacy/?notice=joined" && J(rows[0]) === '{"email":"o1@example.com","color":"saffron","shape":"pawn"}', J(rows));
+    check("a link carrying a shape that is not one of the nine seats a pawn, and one carrying a real shape keeps it", l2 === "/legacy/?notice=joined" && rows[1].shape === "pawn" && l3 === "/legacy/?notice=joined" && rows[2].shape === "wizard", J(rows));
+  }
 
   console.log("static files");
   const js = await client(A).get("/js/board.js");

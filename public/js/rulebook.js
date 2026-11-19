@@ -16,11 +16,18 @@ export function parseRules(md) {
   let sec = null, rule = null, cl = null, para = [], list = null;
   const lines = md.split("\n");
   const target = () => cl || rule;
-  const pushPara = (p) => { const t = target(); if (t) t.paras.push(p); else if (!sec) out.intro.push(p); };
+  let at = 0, startAt = 0;   // the line being read, and the line the paragraph being collected began on
+  const pushPara = (p) => {
+    const t = target();
+    if (t) t.paras.push(p);
+    else if (!sec) out.intro.push(p);
+    else warn(startAt, "Text under block " + sec.num + " comes before its first rule, so it is not shown.");
+  };
   const flush = () => { if (para.length) { pushPara({ t: "p", s: para.join(" ") }); para = []; } if (list) { pushPara({ t: "ul", items: list }); list = null; } };
   const warn = (i, t) => out.warnings.push("Line " + (i + 1) + ": " + t);
   const claim = (num, i) => { if (out.byNum[num]) warn(i, "Number " + num + " is used twice."); };
   for (let i = 0; i < lines.length; i++) {
+    at = i;
     const line = lines[i].trim();
     let m;
     if (/^# /.test(line)) { flush(); continue; }
@@ -44,17 +51,18 @@ export function parseRules(md) {
       sec.rules.push(rule); out.byNum[rule.num] = rule; cl = null;
       continue;
     }
-    if ((m = line.match(/^\*\*(\d{3}\.\d+)\*\* (.*)$/))) {
+    if ((m = line.match(/^\*\*(\d{3}\.\d+)\*\*\s*(.*)$/))) {
       flush();
       if (!rule) { warn(i, "Clause " + m[1] + " is outside any rule."); continue; }
       if (m[1].split(".")[0] !== rule.num) warn(i, "Clause " + m[1] + " is in rule " + rule.num + ".");
       claim(m[1], i);
       cl = { kind: "clause", num: m[1], rule, paras: [] };
-      rule.clauses.push(cl); out.byNum[cl.num] = cl; para = [m[2]];
+      rule.clauses.push(cl); out.byNum[cl.num] = cl; para = m[2] ? [m[2]] : []; startAt = i;
       continue;
     }
-    if ((m = line.match(/^- (.*)$/))) { if (para.length) { pushPara({ t: "p", s: para.join(" ") }); para = []; } (list = list || []).push(m[1]); continue; }
+    if ((m = line.match(/^- (.*)$/))) { if (para.length) { pushPara({ t: "p", s: para.join(" ") }); para = []; } if (!list) startAt = i; (list = list || []).push(m[1]); continue; }
     if (!line) { flush(); continue; }
+    if (!para.length && !list) startAt = i;
     para.push(line);
   }
   flush();
@@ -69,7 +77,7 @@ const previewOf = (r) => { const p = r.paras[0] || (r.clauses[0] && r.clauses[0]
 const hl = (html, q) => {
   if (!q) return html;
   const re = new RegExp("(" + q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ")", "gi");
-  return html.split(/(<[^>]+>)/).map((seg) => (seg.startsWith("<") ? seg : seg.replace(re, "<mark>$1</mark>"))).join("");
+  return html.split(/(<[^>]+>|&[a-z]+;|&#\d+;)/).map((seg) => (seg.startsWith("<") || seg.startsWith("&") ? seg : seg.replace(re, "<mark>$1</mark>"))).join("");
 };
 const id = (num) => "r-" + num.replace(/\./g, "-");
 
