@@ -323,6 +323,11 @@ try {
   const lazy = (await client(A).get("/old/api/board")).data;
   check("a game with no tiles gets its island from its stored settings the first time the board is read: 6x4 centered (3W..3E, 2N..2S)", lazy.tiles.length === 24 && Math.min(...lazy.tiles.map((t) => t.x)) === -3 && Math.max(...lazy.tiles.map((t) => t.x)) === 2 && Math.min(...lazy.tiles.map((t) => t.y)) === -2 && Math.max(...lazy.tiles.map((t) => t.y)) === 1);
 
+  d1(state, `DELETE FROM tiles WHERE game_id = '${gid}' AND x = -3 AND y IN (-2, -1, 0)`);
+  check("a cut-short island is completed the next time the board is read (6x4 again, 24 tiles); a full one is left alone", tilesOf("old").length === 21 && (await client(A).get("/old/api/board")).data.tiles.length === 24 && tilesOf("old").length === 24 && (await client(A).get("/old/api/board")).data.tiles.length === 24);
+  const pg = (await client(A).get("/hex/api/game")).data.game;
+  check("/api/game and /api/board report `moved` (a boolean), not a move counter", typeof pg.moved === "boolean" && !("moves" in pg) && typeof (await client(A).get("/hex/api/board")).data.game.moved === "boolean" && !("moves" in (await client(A).get("/hex/api/board")).data.game));
+
   console.log("static files");
   const js = await client(A).get("/js/board.js");
   check("the board's script is served as JavaScript", js.status === 200 && /javascript/.test(js.headers.get("content-type")), js.status + " " + js.headers.get("content-type"));

@@ -111,7 +111,7 @@ settings identical.
 
 | Setting | Default | Controls |
 |---|---|---|
-| `max_players` | `8` | seats per game, 1 to 8. The one seat limit, enforced atomically at join |
+| `max_players` | `8` | seats per game, 1 to 8, and no more than the island's spawn spots (checked when a game is created: `validateSettings`). The one seat limit, enforced atomically at join |
 | `board.island` | `{width: 8, height: 8}` | the starting island, centered on the origin (even sizes, 4 to 16) |
 | `board.chart_radius` | `2` | a move charts every tile within this many tiles: a square with its four corners cut off (radius 2: 21 tiles) |
 | `turn.move_distance` | `1` | how far a move goes, in tiles |
@@ -133,7 +133,7 @@ settings identical.
 - **Moving** (`POST /<slug>/api/action`, `{kind:"move", x, y}` or `{kind:"move", label:"3N 2E"}`): on your
   turn you may move your piece one space, diagonals included, onto a charted tile nobody stands on, at most
   once per turn, **in addition** to proposing a rule change. A move does not end the turn (the moderator will;
-  `games.last_move` holds the `round:turn` of the last move, so advancing the turn needs no reset). The move then charts the shape around the
+  `games.last_move` holds the `round:turn` of the last move, so advancing the turn needs no reset, provided `round` increases whenever `turn` wraps to 0). The move then charts the shape around the
   new position. The decided details live in `src/lib/board-rules.js`, one constant each.
 - **Look.** Isometric (2:1 dimetric), one fixed angle, no rotation; pan, zoom and recenter; every tile is the
   same blank slab. All colors are CSS tokens in `public/theme.css`, which the WebGL and SVG renderers read too,

@@ -114,7 +114,7 @@ two games is two unrelated players.
 To start a game by hand (no moderator yet):
 `npx wrangler d1 execute DB --local --command "UPDATE games SET status='playing', round=1, turn=0 WHERE slug='demo'"`
 (add `--remote` against the deployed database).
-Once playing, the player whose turn it is (`games.turn` = their seat number, from 0) sees a "Your turn" box on the board and submits one prompt per round, and may also move their piece once (in either order). Proposing only records the turn; nothing advances `turn`, `round` or `moves` yet.
+Once playing, the player whose turn it is (`games.turn` = their seat number, from 0) sees a "Your turn" box on the board and submits one prompt per round, and may also move their piece once (in either order). Proposing only records the turn; nothing advances `turn` or `round` yet (a move is remembered in `games.last_move` as `round:turn`, so whatever advances the turn must make `round` grow when `turn` wraps).
 
 ## Rules live in each game's repo
 
