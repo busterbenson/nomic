@@ -441,6 +441,17 @@ try {
   console.log("  the tools");
   const init = await mcp(A, "pilot", tokMia, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } });
   check("initialize answers, naming the game and the player", init.status === 200 && init.data.result.serverInfo.name === "promptocracy-pilot" && /Pilot game as Mia/.test(init.data.result.instructions), init.text);
+  // The SDK's own client, as an AI app would use it: initialize, the initialized notification, list, call.
+  const { Client: SdkClient } = await import("@modelcontextprotocol/sdk/client/index.js");
+  const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
+  const sdk = new SdkClient({ name: "test-client", version: "1" });
+  try {
+    await sdk.connect(new StreamableHTTPClientTransport(new URL(`${A}/pilot/mcp`), { requestInit: { headers: { authorization: `Bearer ${tokMia}` } } }));
+    const sdkTools = await sdk.listTools();
+    const sdkState = await sdk.callTool({ name: "my_state", arguments: {} });
+    check("the SDK's own client connects with the token, lists the five tools and calls one", J(sdkTools.tools.map((t) => t.name).sort()) === J(["move", "my_state", "propose", "read_board", "read_rules"]) && JSON.parse(sdkState.content[0].text).you.name === "Mia" && sdk.getServerVersion()?.name === "promptocracy-pilot");
+  } catch (e) { check("the SDK's own client connects with the token, lists the five tools and calls one", false, String(e?.stack || e)); }
+  finally { await sdk.close().catch(() => {}); }
   const list = await mcp(A, "pilot", tokMia, "tools/list", {});
   check("the tools are read_rules, read_board, my_state, propose, move: no voting, no catch-all action yet", J(list.data.result.tools.map((t) => t.name).sort()) === J(["move", "my_state", "propose", "read_board", "read_rules"]), list.text);
   check("the read tools say they only read", ["read_rules", "read_board", "my_state"].every((n) => list.data.result.tools.find((t) => t.name === n).annotations.readOnlyHint === true) && list.data.result.tools.find((t) => t.name === "propose").annotations.readOnlyHint === false);
