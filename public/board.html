@@ -61,7 +61,7 @@
   }[c]));
   const $ = id => document.getElementById(id);
   const NOTICES = {
-    "joined": "You're in. Your seat is yours.",
+    "joined": "You're in.",
     "welcome-back": "You're logged in.",
     "link-invalid": "That link has expired or was already used. Log in again to get a new one.",
     "no-room": "Couldn't finish joining: there is no room on the map yet for a new piece to start.",
@@ -144,11 +144,8 @@
     else drawGame(g.data);
     // the rulebook shows each rule's settings, so it waits for the board's reply (which carries them)
     const [rules] = await Promise.all([fetch(BASE + "/api/rules").then(async r => { if (!r.ok) throw new Error("rules " + r.status); return r.text(); }).catch(() => null), boardLoaded]);
-    if (rules === null) { $("rules").innerHTML = '<p class="err" style="padding:20px 28px">Rules unavailable right now. They live in the game\'s repo.</p>'; return; }
+    if (rules === null) { $("rules").innerHTML = '<p class="err" style="padding:20px 28px">Rules unavailable right now.</p>'; return; }
     mountRulebook($("rules"), rules, { settings: (BOARD && BOARD.settings) || {} });
-    const repo = DATA && DATA.game && DATA.game.repo;
-    const head = $("rules").querySelector(".rbhead");
-    if (head && /^[\w.-]+\/[\w.-]+$/.test(repo || "")) head.insertAdjacentHTML("beforeend", `<a class="mono" href="https://github.com/${esc(repo)}">github.com/${esc(repo)}</a>`);
   }
 
   // The dock under the board: where the game stands, the selected tile, and (on your turn) the turn form.
@@ -163,7 +160,7 @@
     document.title = game.name || "Promptocracy";
     $("title").textContent = game.name || "Promptocracy";
     let html = game.status === "setup"
-      ? `<p><strong>Setting up.</strong> ${players.length} of ${game.max_players} seats taken.</p>`
+      ? `<p><strong>Setting up.</strong> ${players.length} of ${game.max_players} players joined.</p>`
       : `<p><strong>Round ${game.round}.</strong> ${current ? esc(who(current.name, current.color)) + "'s turn." : ""}</p>`;
     const moveLine = moved ? "You have moved this turn." : "";
     if (game.status === "playing" && current) {

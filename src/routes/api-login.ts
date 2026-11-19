@@ -22,7 +22,7 @@ export const post = async (ctx: Ctx) => {
     action: "To log in",
   });
   if (!link) return json({ error: "Too many links requested. Wait 15 minutes and try again." }, 429);
-  const res: any = { ok: true, message: "If that address has a seat in this game, a log-in link is on its way." };
+  const res: any = { ok: true, message: "If that address has joined this game, a log-in link is on its way." };
   if (emailMode(env) === "dev") res.dev_link = link;
   return json(res);
 };

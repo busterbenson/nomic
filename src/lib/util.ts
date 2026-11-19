@@ -158,7 +158,7 @@ export async function seatsTaken(env: Env, gameId: string): Promise<{ color: str
 // One line for the link emails: who is already seated, e.g.
 // "Players so far (2 of 8): Ana (Teal), Bo (Cobalt)."
 export function playersLine(taken: { color: string; display_name: string }[], limit: number, label = "Players so far"): string {
-  if (!taken.length) return "Nobody has taken a seat yet, so you'll be the first player.";
+  if (!taken.length) return "Nobody has joined yet, so you'll be the first player.";
   return `${label} (${taken.length} of ${limit}): ${taken.map((t) => who(t.display_name, t.color)).join(", ")}.`;
 }
 
