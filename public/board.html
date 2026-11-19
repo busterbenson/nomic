@@ -352,7 +352,7 @@
     if (r.ok) {
       await refresh();
       const n = $("act-note"); const left = r.data.moves_left || 0;
-      n.textContent = (r.data.turn_over === false
+      n.textContent = (r.data.turn_over === false && left > 0
         ? `Done. You have ${left} more move${left === 1 ? "" : "s"} this turn: tap a tile.`
         : "Done. Your turn is over.") + (r.data.harvest ? " " + r.data.harvest : "");
       n.hidden = false;

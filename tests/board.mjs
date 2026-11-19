@@ -9,6 +9,7 @@ import { ROOT, COLORS, client, createGame, d1, join, migrate, newState, startRul
 import { coordLabel, diagonals, generateTiles, neighbors, parseLabel, validProps } from "../src/lib/geometry.js";
 import { DEFAULT_SETTINGS, getSettings, landAllowed, settingsForSize, validateSettings } from "../src/lib/settings.js";
 import { readFileSync as readText } from "node:fs";
+import { PROPOSAL_INSERT_SQL } from "../src/lib/proposal.js";
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = "") => {
@@ -356,6 +357,7 @@ try {
     if (rc.status === 200) claimWon++; else proposalWon++;
     if (!(one && loserOk && consistent)) { raceOk = false; raceWhy = `${rc.status} ${rc.text} | ${rp.status} ${rp.text} turn=${sgr.game.turn} proposals=${proposals}`; break; }
   }
+  console.log(`  (race outcomes over 8 runs: claim won ${claimWon}, proposal won ${proposalWon}; local wrangler often serializes, so the guard is also proven directly below)`);
   check("a claim and a proposal sent together, 8 times: exactly one lands each time, the loser is refused with a clear 403/409, and a proposal never sits beside a completed move", raceOk, raceWhy);
   reset();
   d1(state, "UPDATE games SET moves = 1 WHERE slug = 'sett'");
@@ -364,7 +366,9 @@ try {
   d1(state, "UPDATE games SET moves = 0 WHERE slug = 'sett'");
   // The conditional INSERT itself: a proposal whose turn, round or moves no longer match inserts nothing. Prove it in SQL, the way the handler runs it.
   const gidS = d1(state, "SELECT id FROM games WHERE slug='sett'")[0].id, pidS = d1(state, "SELECT id FROM players WHERE game_id = (SELECT id FROM games WHERE slug='sett') AND turn_order = 0")[0].id;
-  const cond = (turn, round, moves) => { d1(state, `UPDATE games SET moves = ${moves} WHERE id = '${gidS}'`); d1(state, `INSERT INTO turns (id, game_id, player_id, round, turn_index, prompt, status, created_at, updated_at) SELECT 'tt${turn}${round}${moves}', g.id, '${pidS}', g.round, g.turn, 'p', 'submitted', 'n', 'n' FROM games g WHERE g.id = '${gidS}' AND g.status = 'playing' AND g.turn = ${turn} AND g.round = ${round} AND g.moves = 0`); return d1(state, "SELECT COUNT(*) AS n FROM turns WHERE id LIKE 'tt%'")[0].n; };
+  // The very SQL the handler runs (src/lib/proposal.js), with the binds substituted: weaken its WHERE and this fails.
+  const lit = (v) => (typeof v === "number" ? String(v) : `'${String(v).replace(/'/g, "''")}'`);
+  const cond = (turn, round, moves) => { d1(state, `UPDATE games SET moves = ${moves} WHERE id = '${gidS}'`); const binds = [`tt${turn}${round}${moves}`, pidS, "p", "n", "n", gidS, turn, round]; let i = 0; try { d1(state, PROPOSAL_INSERT_SQL.replace(/\?/g, () => lit(binds[i++]))); } catch { /* a second row for the same player and round is refused by the unique index */ } return d1(state, "SELECT COUNT(*) AS n FROM turns WHERE id LIKE 'tt%'")[0].n; };
   const n0 = cond(1, 1, 0), n1 = cond(0, 2, 0), n2 = cond(0, 1, 1), n3 = cond(0, 1, 0);
   check("the proposal INSERT lands only if turn, round and moves are exactly as read (wrong turn, wrong round, a move made: nothing; right: one row)", n0 === 0 && n1 === 0 && n2 === 0 && n3 === 1, [n0, n1, n2, n3].join());
   check("/api/game reports how many moves the current turn has used", typeof (await sgame()).game.moves === "number");
