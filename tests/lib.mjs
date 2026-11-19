@@ -100,11 +100,13 @@ export function client(base) {
     cookieFor: (path) => header(path),
     async req(method, path, body, headers = {}, raw = null) {
       const cookie = header(new URL(path, base).pathname);
-      const res = await fetch(base + path, {
+      const send = () => fetch(base + path, {
         method, redirect: "manual", signal: AbortSignal.timeout(20000),
         headers: { ...(body !== undefined ? { "content-type": "application/json" } : {}), ...(cookie ? { cookie } : {}), ...headers },
         body: raw !== null ? raw : body !== undefined ? JSON.stringify(body) : undefined,
       });
+      // A kept-alive socket the dev server closed while the test was busy elsewhere resets on reuse: retry once.
+      const res = await send().catch((e) => (e?.cause?.code === "ECONNRESET" ? send() : Promise.reject(e)));
       for (const sc of res.headers.getSetCookie?.() ?? []) {
         const [pair] = sc.split(";");
         const eq = pair.indexOf("=");

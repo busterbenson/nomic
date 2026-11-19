@@ -6,15 +6,7 @@ export function readTheme() {
   const cs = getComputedStyle(document.documentElement);
   const v = (n, f) => cssVar(cs, n, f);
   return {
-    terrain: {
-      meadow: { label: "Meadow", color: v("--terrain-meadow", "#a9c47c") },
-      water: { label: "Water", color: v("--terrain-water", "#6fa8cf") },
-      forest: { label: "Forest", color: v("--terrain-forest", "#5a8a5f") },
-      stone: { label: "Stone", color: v("--terrain-stone", "#a3a29c") },
-      sand: { label: "Sand", color: v("--terrain-sand", "#e3d097") },
-    },
-    decorForest: v("--decor-forest", "#33583d"),
-    decorStone: v("--decor-stone", "#7c7c79"),
+    tile: v("--tile", "#e4dcc6"),
     seaLine: v("--sea-line", "#5b7480"),
     seaAlpha: parseFloat(v("--sea-line-alpha", "0.3")),
     select: v("--tile-select", "#ffffff"),

@@ -1,14 +1,14 @@
-// The island board: labels and geometry, the generator, migration 0002 on a database with data, piece colors,
-// the claim/describe actions, the harvest, and the public board API.
+// The blank-slate board: compass labels and geometry, what a move charts, migration 0002 on a database with
+// data, settings, piece colors, spawning, the move action, and the public board API.
 // Run: npm test (after e2e.mjs). Real `wrangler dev`, LOCAL D1 only.
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, copyFileSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, copyFileSync, writeFileSync, rmSync, readFileSync as readText } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as pjoin } from "node:path";
-import { ROOT, COLORS, client, createGame, d1, join, migrate, newState, startRulesStub, startServer } from "./lib.mjs";
-import { coordLabel, diagonals, generateTiles, neighbors, parseLabel, validProps } from "../src/lib/geometry.js";
-import { DEFAULT_SETTINGS, getSettings, landAllowed, settingsForSize, validateSettings } from "../src/lib/settings.js";
-import { readFileSync as readText } from "node:fs";
+import { ROOT, COLORS, client, createGame, d1, finish, join, migrate, newState, startRulesStub, startServer } from "./lib.mjs";
+import { chartOffsets, chartedAround, coordLabel, diagonals, islandCoords, tileLabel, neighbors, parseLabel, validCoord, withinSteps, xLabel, yLabel, zLabel } from "../src/lib/geometry.js";
+import { DEFAULT_SETTINGS, getSettings, settingsForSize, validateSettings } from "../src/lib/settings.js";
+import { DIAGONAL_MOVES, MOVES_PER_TURN, SHARED_TILES } from "../src/lib/board-rules.js";
 import { PROPOSAL_INSERT_SQL } from "../src/lib/proposal.js";
 
 let pass = 0, fail = 0;
@@ -16,62 +16,45 @@ const check = (name, ok, detail = "") => {
   if (ok) { pass++; console.log(`  ok    ${name}`); }
   else { fail++; console.log(`  FAIL  ${name}${detail ? "  -> " + detail : ""}`); }
 };
+const J = JSON.stringify;
 
-// ---------------------------------------------------------------- geometry
+// ---------------------------------------------------------------- labels
 console.log("labels");
-check("C4 is x 2, y 3, and back", coordLabel(2, 3) === "C4" && JSON.stringify(parseLabel("C4")) === '{"x":2,"y":3}');
-check("labels are case-insensitive and tolerate spaces around", JSON.stringify(parseLabel("c4")) === '{"x":2,"y":3}' && JSON.stringify(parseLabel(" h8 ")) === '{"x":7,"y":7}');
-check("A1 is the origin, H8 the island's far corner", JSON.stringify(parseLabel("A1")) === '{"x":0,"y":0}' && coordLabel(7, 7) === "H8");
-check("beyond Z the columns go AA, AB ... (AA12 is x 26, y 11)", coordLabel(25, 0) === "Z1" && coordLabel(26, 11) === "AA12" && coordLabel(27, 0) === "AB1" && JSON.stringify(parseLabel("aa12")) === '{"x":26,"y":11}' && coordLabel(701, 0) === "ZZ1" && coordLabel(702, 0) === "AAA1");
-check("rows run past 8: 9, 10, ...", coordLabel(0, 8) === "A9" && coordLabel(3, 99) === "D100" && JSON.stringify(parseLabel("D100")) === '{"x":3,"y":99}');
+check("columns: ... 3W 2W 1W | 1E 2E 3E ..., with no zero (x -1 is 1W, x 0 is 1E)", [-3, -2, -1, 0, 1, 2].map(xLabel).join() === "3W,2W,1W,1E,2E,3E");
+check("rows: ... 2N 1N | 1S 2S ... (y 0 is 1N, y -1 is 1S, north is up)", [2, 1, 0, -1, -2].map(yLabel).join() === "3N,2N,1N,1S,2S");
+check("the seams: 1W and 1E are neighbours (x -1, 0), and so are 1N and 1S (y 0, -1)", xLabel(-1) === "1W" && xLabel(0) === "1E" && yLabel(0) === "1N" && yLabel(-1) === "1S" && J(parseLabel("1N 1W")) === '{"x":-1,"y":0,"z":0}' && J(parseLabel("1S 1E")) === '{"x":0,"y":-1,"z":0}');
+check("a tile reads row first, then column: 3N 2E is x 1, y 2", coordLabel(1, 2) === "3N 2E" && J(parseLabel("3N 2E")) === '{"x":1,"y":2,"z":0}');
+check("the four center tiles are 1N 1W, 1N 1E, 1S 1W, 1S 1E", [[-1, 0], [0, 0], [-1, -1], [0, -1]].map(([x, y]) => coordLabel(x, y)).join() === "1N 1W,1N 1E,1S 1W,1S 1E");
+check("big values: x 999999 is 1000000E, y -1000000 is 1000000S, and back", xLabel(999999) === "1000000E" && yLabel(-1000000) === "1000000S" && J(parseLabel("1000000S 1000000W")) === '{"x":-1000000,"y":-1000000,"z":0}' && coordLabel(-1000000, 999999) === "1000000N 1000000W");
 let rt = true;
-for (let x = 0; x < 1500; x += 7) for (const y of [0, 1, 7, 8, 9, 99, 1234]) { const p = parseLabel(coordLabel(x, y)); if (!p || p.x !== x || p.y !== y) rt = false; }
-check("label <-> coordinate round-trips across a wide range", rt);
-check("things that are not labels are refused", ["", "4C", "C", "C0", "C-1", "C 4", "C4x", "CC", "1", "A01", "ABCDE1", "C99999999", null, undefined, 4, {}].every((v) => parseLabel(v) === null));
-check("a coordinate with no chess name falls back to (x, y)", coordLabel(-1, 2) === "(-1, 2)" && coordLabel(2, -1) === "(2, -1)");
-check("neighbours: four orthogonal, four diagonal, kept apart",
-  JSON.stringify(neighbors(2, 3)) === "[[3,3],[2,4],[1,3],[2,2]]" && JSON.stringify(diagonals(2, 3)) === "[[3,4],[1,4],[1,2],[3,2]]");
-check("by default land is only at x >= 0 and y >= 0 (a rule may change that)", landAllowed(0, 0) && landAllowed(7, 7) && landAllowed(40, 9) && !landAllowed(-1, 0) && !landAllowed(0, -1) && !landAllowed(0.5, 0) && landAllowed(-5, -5, { ...DEFAULT_SETTINGS, "board.land_bounds": { min_x: null, min_y: null, max_x: null, max_y: null } }) && !landAllowed(9, 0, { ...DEFAULT_SETTINGS, "board.land_bounds": { min_x: 0, min_y: 0, max_x: 8, max_y: null } }));
+for (const x of [-1000000, -12345, -100, -9, -2, -1, 0, 1, 2, 9, 100, 12345, 999999]) for (const y of [-1000000, -777, -2, -1, 0, 1, 2, 9, 4321, 999999]) { const p = parseLabel(coordLabel(x, y)); if (!p || p.x !== x || p.y !== y) rt = false; }
+check("label <-> integers round-trips across negative, zero-adjacent and big values", rt);
+check("labels are case-insensitive and tolerate extra spaces", J(parseLabel("3n 2e")) === '{"x":1,"y":2,"z":0}' && J(parseLabel("  4S   4W ")) === '{"x":-4,"y":-4,"z":0}');
+check("things that are not labels are refused (there is no zero row or column; column first is not a label)", ["", "0N 1E", "1N 0E", "0S 0W", "2E 3N", "3N", "3N2E", "N3 E2", "3X 2E", "-1N 1E", "1N 1E 1", "01N 1E", "99999999N 1E", null, undefined, 4, {}].every((v) => parseLabel(v) === null));
+check("levels skip zero too: ground (z 0) is 1U, z 1 is 2U, z -1 is 1D, z -2 is 2D (the 1U/1D seam)", [-2, -1, 0, 1, 2].map(zLabel).join() === "2D,1D,1U,2U,3U" && tileLabel(1, 2, 0) === "3N 2E 1U" && tileLabel(-1, -1, -1) === "1S 1W 1D");
+check("a label may carry its level: 3N 2E 1U is z 0, 3N 2E 2U is z 1, 3N 2E 1D is z -1; without one it is the ground", J(parseLabel("3N 2E 1U")) === '{"x":1,"y":2,"z":0}' && J(parseLabel("3n 2e 2u")) === '{"x":1,"y":2,"z":1}' && J(parseLabel("3N 2E 1D")) === '{"x":1,"y":2,"z":-1}' && parseLabel("3N 2E 0U") === null && parseLabel("3N 2E 1X") === null && J(parseLabel(tileLabel(5, -6, -3))) === '{"x":5,"y":-6,"z":-3}');
+check("coordinates are plain integers up to a million, z included", validCoord(0, 0) && validCoord(-1000000, 1000000, 0) && !validCoord(1000001, 0) && !validCoord(0.5, 0) && !validCoord(0, 0, 1.5) && !validCoord("1", 0) && !validCoord(0, 0, 2000000));
+check("neighbours: four orthogonal, four diagonal, kept apart", J(neighbors(2, 3)) === "[[3,3],[2,4],[1,3],[2,2]]" && J(diagonals(2, 3)) === "[[3,4],[1,4],[1,2],[3,2]]");
 
-console.log("island generator");
-const land = (size, seed) => generateTiles(seed, settingsForSize(size));
-const tiles8 = land(8, 12345);
-check("an 8x8 island: tiles inside x 0..7, y 0..7, none repeated, no row for the sea",
-  tiles8.every((t) => t.x >= 0 && t.x <= 7 && t.y >= 0 && t.y <= 7) && new Set(tiles8.map((t) => t.x + "," + t.y)).size === tiles8.length && tiles8.length < 64);
-const seeds = Array.from({ length: 60 }, (_, i) => i * 7919 + 1);
-const counts = seeds.map((s) => land(8, s).length);
-check("the corners are eroded: 54 to 58 land tiles, every seed", counts.every((n) => n >= 54 && n <= 58), counts.join());
-check("each corner tile is sea", seeds.every((s) => { const set = new Set(land(8, s).map((t) => t.x + "," + t.y)); return !["0,0", "7,0", "0,7", "7,7"].some((k) => set.has(k)); }));
-check("every corner loses a second tile too, so each corner reads as a bite", seeds.every((s) => { const set = new Set(land(8, s).map((t) => t.x + "," + t.y)); return [[0, 0, [[1, 0], [0, 1]]], [7, 0, [[6, 0], [7, 1]]], [0, 7, [[1, 7], [0, 6]]], [7, 7, [[6, 7], [7, 6]]]].every(([, , ns]) => ns.some(([x, y]) => !set.has(x + "," + y))); }));
-const connected = (ts) => { const set = new Set(ts.map((t) => t.x + "," + t.y)); const seen = new Set([ts[0].x + "," + ts[0].y]); const st = [[ts[0].x, ts[0].y]]; while (st.length) { const [x, y] = st.pop(); for (const [a, b] of neighbors(x, y)) { const k = a + "," + b; if (set.has(k) && !seen.has(k)) { seen.add(k); st.push([a, b]); } } } return seen.size === set.size; };
-check("the island is one piece (4-connected), every seed", seeds.every((s) => connected(land(8, s))));
-check("the same seed gives the same island", JSON.stringify(land(8, 99)) === JSON.stringify(land(8, 99)));
-check("a different seed gives a different one", JSON.stringify(land(8, 99)) !== JSON.stringify(land(8, 100)));
-const nonMeadow = seeds.map((s) => { const t = land(8, s); return t.filter((x) => x.terrain !== "meadow").length / t.length; });
-check("about a quarter of the land is not meadow (18% to 32%, every seed)", nonMeadow.every((f) => f >= 0.18 && f <= 0.32), nonMeadow.map((f) => f.toFixed(2)).join());
-const comps = (ts, terrain) => {
-  const set = new Set(ts.filter((t) => t.terrain === terrain).map((t) => t.x + "," + t.y));
-  const seen = new Set(); let best = 0;
-  for (const k of set) {
-    if (seen.has(k)) continue;
-    let size = 0; const stack = [k]; seen.add(k);
-    while (stack.length) {
-      const [x, y] = stack.pop().split(",").map(Number); size++;
-      for (const [a, b] of neighbors(x, y)) { const n = `${a},${b}`; if (set.has(n) && !seen.has(n)) { seen.add(n); stack.push(n); } }
-    }
-    best = Math.max(best, size);
-  }
-  return best;
-};
-check("water is a lake: a clump of 3 or more connected tiles", seeds.every((s) => comps(land(8, s), "water") >= 3));
-const isCoast = (ts, t) => { const set = new Set(ts.map((u) => u.x + "," + u.y)); return neighbors(t.x, t.y).some(([a, b]) => !set.has(a + "," + b)); };
-check("the lake is INSIDE the island: no water tile touches the sea", seeds.every((s) => { const ts = land(8, s); return ts.filter((t) => t.terrain === "water").every((t) => !isCoast(ts, t)); }));
-check("sand lies along the coast", seeds.every((s) => { const ts = land(8, s); const sand = ts.filter((t) => t.terrain === "sand"); return sand.length >= 2 && sand.every((t) => isCoast(ts, t)); }));
-check("forest and stone come in clumps too", seeds.every((s) => comps(land(8, s), "stone") >= 2 && comps(land(8, s), "forest") >= 2));
-check("every terrain is the default or one of the kinds in the settings", seeds.every((s) => land(8, s).every((t) => ["meadow", ...Object.keys(DEFAULT_SETTINGS["board.terrain"].kinds)].includes(t.terrain))));
-check("other sizes work (4 to 16): one piece, inside x,y < size, corners bitten", [4, 5, 6, 12, 16].every((n) => { const t = land(n, 5); return t.length >= n * n - 11 && t.length <= n * n - 8 && connected(t) && t.every((u) => u.x < n && u.y < n); }));
-check("props must be an object of at most 4 KB",
-  validProps({}) && validProps({ a: 1, b: [1, 2], c: { d: true } }) && !validProps([]) && !validProps(null) && !validProps("x") && !validProps({ big: "x".repeat(4100) }));
+// ---------------------------------------------------------------- the island, charting, moving
+console.log("geometry");
+const isl = islandCoords(8, 8);
+const L = (x, y) => coordLabel(x, y);
+check("the starting island is 8x8 = 64 tiles centered on the origin: columns 4W..4E, rows 4N..4S", isl.length === 64 && new Set(isl.map((c) => c + "")).size === 64 &&
+  Math.min(...isl.map((c) => c[0])) === -4 && Math.max(...isl.map((c) => c[0])) === 3 && Math.min(...isl.map((c) => c[1])) === -4 && Math.max(...isl.map((c) => c[1])) === 3 &&
+  L(-4, 3) === "4N 4W" && L(3, -4) === "4S 4E" && L(-4, -4) === "4S 4W" && L(3, 3) === "4N 4E");
+check("other even sizes are centered too (4x4: 2W..2E, 2N..2S; 12x6)", islandCoords(4, 4).length === 16 && L(-2, 1) === "2N 2W" && Math.max(...islandCoords(12, 6).map((c) => c[0])) === 5 && Math.min(...islandCoords(12, 6).map((c) => c[1])) === -3);
+const off = chartOffsets(2);
+check("a move charts exactly 21 offsets: the 5x5 square without its 4 corners", off.length === 21 && new Set(off.map((o) => o + "")).size === 21);
+check("the four corners (+-2, +-2) are excluded, every other tile of the 5x5 square is in", [[2, 2], [-2, 2], [2, -2], [-2, -2]].every(([a, b]) => !off.some(([x, y]) => x === a && y === b)) && off.every(([x, y]) => Math.abs(x) <= 2 && Math.abs(y) <= 2) && off.some(([x, y]) => x === 2 && y === 1) && off.some(([x, y]) => x === 0 && y === -2) && off.some(([x, y]) => x === 0 && y === 0));
+check("it is the tiles with centers within Euclidean distance 2.5 of the piece", off.every(([x, y]) => Math.hypot(x, y) <= 2.5) && (() => { let n = 0; for (let x = -4; x <= 4; x++) for (let y = -4; y <= 4; y++) if (Math.hypot(x, y) <= 2.5) n++; return n === 21; })());
+check("chartedAround is that shape at a position, in the plain integers (across the 1W/1E seam too)", chartedAround(0, 0, 2).length === 21 && chartedAround(-1, -1, 2).some(([x, y]) => x === 1 && y === 0) && J(chartedAround(5, -7, 2).slice(0, 2)) === J([[4, -9], [5, -9]]) && chartOffsets(1).length === 9 - 0 && chartOffsets(3).length === 37);
+check("one step, with diagonals (P1, decided): all 8 neighbours, nothing two away, never the same tile", DIAGONAL_MOVES === true &&
+  [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]].every(([dx, dy]) => withinSteps(0, 0, dx, dy, 1)) &&
+  [[2, 0], [0, 2], [2, 1], [2, 2], [-2, 0], [0, 0]].every(([dx, dy]) => !withinSteps(0, 0, dx, dy, 1)));
+check("1W -> 1E and 1N -> 1S are one step (computed on the plain integers)", withinSteps(-1, 0, 0, 0, 1) && withinSteps(0, 0, 0, -1, 1) && withinSteps(-1, 0, 0, -1, 1) && !withinSteps(-1, 0, 1, 0, 1));
+check("without diagonals (the switch) only N, S, E, W count, and a larger distance reaches further", !withinSteps(0, 0, 1, 1, 1, false) && withinSteps(0, 0, 1, 0, 1, false) && withinSteps(0, 0, 2, 0, 2) && !withinSteps(0, 0, 3, 0, 2));
+check("the decided questions are pinned: P1 diagonals yes, P2 sharing a tile no, one move per turn", DIAGONAL_MOVES === true && SHARED_TILES === false && MOVES_PER_TURN === 1);
 
 // ---------------------------------------------------------------- migration 0002 on a database with data
 console.log("migration 0002");
@@ -104,52 +87,74 @@ console.log("migration 0002");
       sql("SELECT COUNT(*) AS n FROM sessions s JOIN players p ON p.id = s.player_id AND p.game_id = s.game_id")[0].n === 3 &&
       sql("SELECT COUNT(*) AS n FROM notifications")[0].n === 3 && sql("SELECT COUNT(*) AS n FROM turns")[0].n === 1);
     check("foreign keys are intact after the rebuild", sql("PRAGMA foreign_key_check").length === 0);
-    check("the existing game got a seed, empty settings (so the defaults apply) and a move counter; unused join links were voided",
-      sql("SELECT settings, seed FROM games")[0].settings === "{}" && sql("SELECT moves FROM games")[0].moves === 0 && sql("SELECT seed FROM games")[0].seed > 0 && sql("SELECT COUNT(*) AS n FROM login_tokens")[0].n === 0);
-    let dup = "ok"; try { sql(`INSERT INTO players (id, game_id, email, display_name, color, turn_order, joined_at) VALUES ('px','g1','x@x.test','x','vermilion',9,'2026-01-01T00:00:00Z')`); } catch { dup = "refused"; }
+    check("the existing game got its seat limit as a setting (the old column's 5; every other default applies) and a move counter; unused join links were voided",
+      sql("SELECT settings FROM games")[0].settings === '{"max_players":5}' && sql("SELECT moves FROM games")[0].moves === 0 && sql("SELECT COUNT(*) AS n FROM login_tokens")[0].n === 0);
+    let dup = "ok"; try { sql(`INSERT INTO players (id, game_id, email, display_name, color, turn_order, joined_at, x, y) VALUES ('px','g1','x@x.test','x','vermilion',9,'2026-01-01T00:00:00Z',0,0)`); } catch { dup = "refused"; }
     check("the new table keeps one color per player per game", dup === "refused");
-    let bad = 0;
-    for (const props of ["'[1,2]'", "'not json'", `'${JSON.stringify({ x: "y".repeat(4100) })}'`]) {
-      try { sql(`INSERT INTO tiles (game_id, x, y, props, updated_at) VALUES ('g1',0,0,${props},'t')`); } catch { bad++; }
-    }
-    check("the database itself refuses tile props that are not an object or are over 4 KB", bad === 3 && sql("SELECT COUNT(*) AS n FROM tiles")[0].n === 0);
-    sql(`INSERT INTO tiles (game_id, x, y, props, updated_at) VALUES ('g1',0,0,'{"fertility":2}','t')`);
-    check("and accepts any object", sql("SELECT props FROM tiles")[0].props === '{"fertility":2}');
+    const t = sql("SELECT x, y, z FROM tiles WHERE game_id = 'g1'");
+    check("the existing game's 8x8 island is charted: columns x -4..3 (4W..4E), rows y -4..3 (4N..4S), all on the ground",
+      t.length === 64 && t.every((u) => u.x >= -4 && u.x <= 3 && u.y >= -4 && u.y <= 3 && u.z === 0) && new Set(t.map((u) => u.x + "," + u.y)).size === 64);
+    const pos = sql("SELECT x, y, z FROM players ORDER BY turn_order");
+    check("every existing player is placed on a distinct charted tile", new Set(pos.map((u) => u.x + "," + u.y)).size === 3 && pos.every((u) => t.some((v) => v.x === u.x && v.y === u.y && u.z === 0)), JSON.stringify(pos));
+    check("tiles have no property columns at all", JSON.stringify(sql("SELECT name FROM pragma_table_info('tiles') ORDER BY cid").map((c) => c.name)) === '["game_id","x","y","z","charted_at"]');
+    let dupTile = "ok"; try { sql(`INSERT INTO tiles (game_id, x, y, z, charted_at) VALUES ('g1',0,0,0,'t')`); } catch { dupTile = "refused"; }
+    check("a tile exists once per game and place", dupTile === "refused");
   } catch (e) { fail++; console.log("  FAIL  migration harness:", String(e.stdout || "") + String(e.stderr || "") + (e.stack || e)); }
   finally { for (const d of [st, cfgDir]) { try { rmSync(d, { recursive: true, force: true }); } catch {} } }
 }
 
+
+// ---------------------------------------------------------------- settings
+console.log("settings");
+check("the default settings are valid; they are the seat limit, the island size, the chart radius and the move distance, nothing else", validateSettings(DEFAULT_SETTINGS).length === 0 && validateSettings(settingsForSize(16, 4)).length === 0 && J(Object.keys(DEFAULT_SETTINGS)) === '["max_players","board.island","board.chart_radius","turn.move_distance"]' && DEFAULT_SETTINGS.max_players === 8 && DEFAULT_SETTINGS["board.island"].width === 8 && DEFAULT_SETTINGS["board.chart_radius"] === 2 && DEFAULT_SETTINGS["turn.move_distance"] === 1);
+const bad = (k, v) => validateSettings({ ...DEFAULT_SETTINGS, [k]: v }).length > 0;
+check("bad values are refused: odd or tiny sizes, radii, distances, extra keys", bad("board.island", { width: 3, height: 8 }) && bad("board.island", { width: 7, height: 8 }) && bad("board.island", { width: 8 }) && bad("board.island", { width: 8, height: 8, depth: 1 }) && bad("board.chart_radius", 0) && bad("board.chart_radius", 2.5) && bad("max_players", 0) && bad("max_players", 9) && bad("max_players", 2.5) && bad("turn.move_distance", 0) && bad("turn.move_distance", "1") && validateSettings({ ...DEFAULT_SETTINGS, mystery: 1 }).length > 0);
+check("a game's stored settings override only what they name; an invalid stored value falls back to the default",
+  getSettings({ "turn.move_distance": 2 })["turn.move_distance"] === 2 && getSettings({ "turn.move_distance": 2 })["board.chart_radius"] === 2 && getSettings({ "turn.move_distance": "far" })["turn.move_distance"] === 1 && getSettings("not json")["board.island"].width === 8 && getSettings(null)["board.chart_radius"] === 2 && getSettings({ nope: 1 }).nope === undefined);
+check("settings named __proto__ or constructor are ignored, not thrown on", (() => { try { const s = getSettings(JSON.parse('{"__proto__":{"x":1},"constructor":{"y":2}}')); return s["board.island"].width === 8; } catch { return false; } })());
+const rulesText = readText(pjoin(ROOT, "templates/RULES.md"), "utf8");
+const named = [...rulesText.matchAll(/\[setting: ([^\]]+)\]/g)].flatMap((m) => m[1].split(",").map((n) => n.trim()));
+const inRules = new Set(named), inCode = new Set(Object.keys(DEFAULT_SETTINGS));
+check("every [setting: x] named in templates/RULES.md exists in the default settings", named.length > 0 && [...inRules].every((n) => inCode.has(n)), [...inRules].filter((n) => !inCode.has(n)).join());
+check("and every default setting is named in templates/RULES.md", [...inCode].every((n) => inRules.has(n)), [...inCode].filter((n) => !inRules.has(n)).join());
+check("the rules keep 201 to 206 and replace the old 207 to 212 with a Board and a Turn section (plus the player limit)", ["201.", "202.", "203.", "204.", "205.", "206.", "207. The Board.", "208. The Turn.", "209. Players."].every((h) => rulesText.includes("**" + h)) && !/\*\*(210|211|212)\./.test(rulesText) && !/claim|harvest|terrain|meadow|forest|owner/i.test(rulesText.slice(rulesText.indexOf("**207."))));
+const wrapped = rulesText.replace(/\s+/g, " ");
+const must = ["is infinite", "charted or uncharted", "8x8 charted island centered on the origin", "3N 2E", "no zero row or column", "5x5 square with its four corners cut off", "random unoccupied charted tile at least 2.5 tiles from any uncharted tile", "visible to everyone", "propose one rule change", "diagonals included", "at most once per turn", "no other piece stands on", "seats at most 8 players"];
+check("the rules say what Buster decided: infinite grid, charted/uncharted, 8x8 centered island, 3N 2E, no zero, 5x5 minus corners, random unoccupied start 2.5 from uncharted, visible to everyone, propose and move, diagonals, once per turn, 8 players", must.every((w) => wrapped.includes(w)), must.filter((w) => !wrapped.includes(w)).join(" | "));
+
 // ---------------------------------------------------------------- the running site
 const state = newState();
 let srv, stub;
-const tileOf = (b, q, r) => b.tiles.find((t) => t.x === q && t.y === r);
+const gidOf = (slug) => d1(state, `SELECT id FROM games WHERE slug = '${slug}'`)[0].id;
+const tilesOf = (slug) => d1(state, `SELECT x, y, z FROM tiles WHERE game_id = '${gidOf(slug)}'`);
+const playersOf = (slug) => d1(state, `SELECT display_name AS name, x, y, z, turn_order FROM players WHERE game_id = '${gidOf(slug)}' ORDER BY turn_order`);
+const tkey = (t) => `${t.x},${t.y},${t.z}`;
 try {
   migrate(state);
   stub = await startRulesStub(8897, { "/busterbenson/hex/main/RULES.md": "# Rules\n" });
   const R = { rulesBase: stub.base, repo: "busterbenson/hex" };
-  const g = await createGame(state, { slug: "hex", name: "Island game", max: 3, ...R });
-  const big = await createGame(state, { slug: "eight", name: "Eight", max: 8, size: 4, ...R });
+  const g = await createGame(state, { slug: "hex", name: "Blank board", max: 3, ...R });
+  const big = await createGame(state, { slug: "eight", name: "Eight", max: 8, size: 8, ...R });
   const prop = await createGame(state, { slug: "prop", name: "Proposals", max: 2, ...R });
   srv = await startServer(state, 8795, ["DEV_MODE=1", "SITE_URL=http://hex.test", `RULES_BASE_URL=${stub.base}`]);
   const A = srv.base;
 
-  console.log("board at creation");
-  const nTiles = (slug) => d1(state, `SELECT COUNT(*) AS n FROM tiles WHERE game_id = (SELECT id FROM games WHERE slug='${slug}')`)[0].n;
-  const row = d1(state, "SELECT seed, settings FROM games WHERE slug = 'hex'")[0];
-  const want = generateTiles(row.seed, getSettings(row.settings)).sort((a, b) => a.x - b.x || a.y - b.y);
-  check("a new game's row holds every board setting, written out, equal to the defaults", JSON.stringify(JSON.parse(row.settings)) === JSON.stringify(DEFAULT_SETTINGS) && validateSettings(JSON.parse(row.settings)).length === 0);
-  check("a new game has its island already: an 8x8 island with eroded corners (54-58 tiles)", getSettings(row.settings)["board.island"].width === 8 && nTiles("hex") === want.length && want.length >= 54 && want.length <= 58, String(nTiles("hex")));
-  check("and a --size 4 game has a smaller one", nTiles("eight") === generateTiles(d1(state, "SELECT seed FROM games WHERE slug='eight'")[0].seed, settingsForSize(4)).length && nTiles("eight") < 16);
-  const stored = d1(state, "SELECT x, y, terrain FROM tiles WHERE game_id = (SELECT id FROM games WHERE slug='hex') ORDER BY x, y");
-  check("stored terrain is exactly what the seed on the game generates, and there are no rows for sea", JSON.stringify(stored) === JSON.stringify(want) && d1(state, "SELECT COUNT(*) AS n FROM tiles WHERE x < 0 OR y < 0 OR x > 7 OR y > 7")[0].n === 0);
+  console.log("a new game");
+  const row = d1(state, "SELECT settings FROM games WHERE slug = 'eight'")[0];
+  check("a new game's row holds every board setting, written out, equal to the defaults", J(JSON.parse(row.settings)) === J(DEFAULT_SETTINGS) && validateSettings(JSON.parse(row.settings)).length === 0);
+  check("it starts with no tiles stored: the island is charted the first time anything needs the board", tilesOf("hex").length === 0);
+  const b0 = (await client(A).get("/hex/api/board")).data;
+  const gridKeys = new Set(islandCoords(8, 8).map((c) => c[0] + "," + c[1]));
+  check("reading the board charts the 8x8 island: 64 tiles, 4W..4E by 4N..4S, all on the ground", b0.tiles.length === 64 && b0.tiles.every((t) => t.z === 0 && gridKeys.has(t.x + "," + t.y)) && b0.tiles.some((t) => t.label === "4N 4W 1U") && b0.tiles.some((t) => t.label === "4S 4E 1U") && !b0.tiles.some((t) => /^0|\b0[NSEWUD]/.test(t.label)));
+  check("again: it is charted once, not twice", tilesOf("hex").length === 64 && (await client(A).get("/hex/api/board")).data.tiles.length === 64);
   let refused = "";
-  for (const bad of ["3", "17", "x"]) { try { await createGame(state, { slug: "zzz", size: bad, ...R }); refused += "no "; } catch { refused += "yes "; } }
-  check("create-game refuses an island size outside 4..16", refused === "yes yes yes ", refused);
+  for (const bad of ["3", "17", "x", "7", "5"]) { try { await createGame(state, { slug: "zzz", size: bad, ...R }); refused += "no "; } catch { refused += "yes "; } }
+  check("create-game refuses an island size that is not an even number from 4 to 16", refused === "yes yes yes yes yes ", refused);
   let nine = "";
   try { await createGame(state, { slug: "nine", max: 9, ...R }); nine = "created"; } catch { nine = "refused"; }
   check("create-game refuses more than 8 players (there are 8 colors)", nine === "refused");
 
-  console.log("piece colors");
+  console.log("piece colors and spawning");
   const page = await client(A).get(`/hex/join/${g.code}`);
   check("the join page offers all 8 colors as pieces, with their names", page.status === 200 && (page.text.match(/name="color"/g) || []).length === 8 && ["Vermilion", "Saffron", "Moss", "Teal", "Cobalt", "Violet", "Rose", "Graphite"].every((n) => page.text.includes(`<b>${n}</b>`)) && !page.text.includes('name="marker"'));
   const ana = await join(A, "hex", g.code, { email: "ana@example.com", name: "Ana", color: "teal" });
@@ -157,7 +162,7 @@ try {
   check("a color someone took is shown as taken and cannot be picked", /value="teal"[^>]*disabled/.test(page2.text) && !/value="cobalt"[^>]*disabled/.test(page2.text) && page2.text.includes("<i>taken</i>"));
   const dupe = await client(A).post("/hex/api/join", { code: g.code, email: "x@example.com", name: "X", color: "teal" });
   check("joining with a taken color is refused (409)", dupe.status === 409 && /color/i.test(dupe.data.error), dupe.text);
-  check("an unknown color is refused (400), and so is the old marker field", (await client(A).post("/hex/api/join", { code: g.code, email: "y@example.com", name: "Y", color: "puce" })).status === 400 && (await client(A).post("/hex/api/join", { code: g.code, email: "y@example.com", name: "Y", marker: "🦉" })).status === 400);
+  check("an unknown color is refused (400), and so is the old marker field", (await client(A).post("/hex/api/join", { code: g.code, email: "y@example.com", name: "Y", color: "puce" })).status === 400 && (await client(A).post("/hex/api/join", { code: g.code, email: "y@example.com", name: "Y", marker: "x" })).status === 400);
   const bo = await join(A, "hex", g.code, { email: "bo@example.com", name: "Bo", color: "cobalt" });
   const cy = await join(A, "hex", g.code, { email: "cy@example.com", name: "Cy", color: "rose" });
   const full = await client(A).post("/hex/api/join", { code: g.code, email: "d@example.com", name: "D", color: "moss" });
@@ -169,209 +174,152 @@ try {
   check("/api/me carries the claimed color", me.data.player.color.key === "teal" && me.data.player.color.name === "Teal" && /^#[0-9a-f]{6}$/.test(me.data.player.color.hex) && !("marker" in me.data.player));
   const game = (await client(A).get("/hex/api/game")).data;
   check("/api/game players carry colors, not markers", game.players.every((p) => p.color?.key && !("marker" in p)) && game.players.map((p) => p.color.key).join() === "teal,cobalt,rose");
-
+  const inner = new Set(islandCoords(8, 8).filter(([x, y]) => x >= -2 && x <= 1 && y >= -2 && y <= 1).map((c) => c[0] + "," + c[1]));
+  const ps = playersOf("hex");
+  check("the island leaves exactly 16 spawn spots (the inner 4x4, every tile whose whole chart shape is charted); each piece stands on one, on the ground, and no two share", inner.size === 16 && ps.length === 3 && ps.every((p) => p.z === 0 && inner.has(p.x + "," + p.y)) && new Set(ps.map((p) => p.x + "," + p.y)).size === 3, J(ps));
+  check("spawning charts nothing: still the 64 island tiles", tilesOf("hex").length === 64);
   const eight = [];
   for (let i = 0; i < 8; i++) eight.push(await join(A, "eight", big.code, { email: `e${i}@example.com`, name: `E${i}`, color: COLORS[i] }));
   const ninth = await client(A).post("/eight/api/join", { code: big.code, email: "e9@example.com", name: "E9", color: "teal" });
-  check("eight players fit, with eight different colors, and a ninth is turned away", ninth.status === 409 && (await client(A).get("/eight/api/game")).data.players.length === 8);
+  const p8 = playersOf("eight");
+  check("eight players fit, with eight different colors and eight different tiles, and a ninth is turned away", ninth.status === 409 && p8.length === 8 && new Set(p8.map((p) => p.x + "," + p.y)).size === 8 && p8.every((p) => inner.has(p.x + "," + p.y)));
+  check("the 9th join attempt fails with a clear message: 'This game is full.'", ninth.status === 409 && ninth.data.error === "This game is full." && d1(state, `SELECT COUNT(*) AS n FROM players WHERE game_id = '${gidOf("eight")}'`)[0].n === 8);
   check("the full join page offers no free piece", (await client(A).get(`/eight/join/${big.code}`)).text.includes("This game is full"));
+  // the seat limit is enforced atomically when the link is finished: two people finishing for the last seat
+  const last = await createGame(state, { slug: "last", max: 2, ...R });
+  await join(A, "last", last.code, { email: "l0@example.com", name: "L0", color: "teal" });
+  const lc1 = client(A), lc2 = client(A);
+  const lj1 = await lc1.post("/last/api/join", { code: last.code, email: "l1@example.com", name: "L1", color: "cobalt" });
+  const lj2 = await lc2.post("/last/api/join", { code: last.code, email: "l2@example.com", name: "L2", color: "rose" });
+  const [lv1, lv2] = await Promise.all([finish(lc1, lj1.data.dev_link), finish(lc2, lj2.data.dev_link)]);
+  const lloc = [lv1, lv2].map((v) => v.headers.get("location"));
+  check("two people finishing for the last seat at once: exactly one gets it, the other is told the join failed", playersOf("last").length === 2 && lloc.filter((l) => l.includes("notice=joined")).length === 1 && lloc.filter((l) => l.includes("notice=join-failed")).length === 1, lloc.join());
+  check("max_players is read from the game's settings, and nothing else caps seats", getSettings(d1(state, "SELECT settings FROM games WHERE slug = 'last'")[0].settings).max_players === 2 && getSettings(d1(state, "SELECT settings FROM games WHERE slug = 'eight'")[0].settings).max_players === 8);
+  // spawn is random: over many fresh games the first piece does not always land on the same tile
+  const spots = new Set();
+  for (let i = 0; i < 6; i++) { const slug = `rnd${i}`; const gg = await createGame(state, { slug, max: 2, ...R }); await join(A, slug, gg.code, { email: "r@example.com", name: "R", color: "teal" }); const p = playersOf(slug)[0]; spots.add(p.x + "," + p.y); }
+  check("spawn is random: six games put the first piece on more than one tile", spots.size > 1, [...spots].join(" "));
+  // no room: an island too small to have a fully charted shape around any tile
+  const tiny = await createGame(state, { slug: "tiny", max: 2, size: 4, ...R });
+  const tc = client(A);
+  const tj = await tc.post("/tiny/api/join", { code: tiny.code, email: "t1@example.com", name: "T1", color: "teal" });
+  const tv = await finish(tc, tj.data.dev_link);
+  check("a 4x4 island has no spawn spot: the join fails with the 'no room on the map yet' notice and takes no seat", tv.status === 303 && tv.headers.get("location") === "/tiny/?notice=no-room" && playersOf("tiny").length === 0, tv.headers.get("location"));
+  // occupied spots: leave exactly one qualifying spot, occupy it, and the next join is refused the same way
+  const one = await createGame(state, { slug: "one", max: 3, ...R });
+  await join(A, "one", one.code, { email: "o1@example.com", name: "O1", color: "teal" });
+  const op = playersOf("one")[0];
+  d1(state, `DELETE FROM tiles WHERE game_id = '${gidOf("one")}' AND NOT (x BETWEEN ${op.x - 2} AND ${op.x + 2} AND y BETWEEN ${op.y - 2} AND ${op.y + 2} AND (x - ${op.x}) * (x - ${op.x}) + (y - ${op.y}) * (y - ${op.y}) <= 6.25)`);
+  const oc = client(A), oj = await oc.post("/one/api/join", { code: one.code, email: "o2@example.com", name: "O2", color: "cobalt" });
+  const ov = await finish(oc, oj.data.dev_link);
+  check("the only spot is occupied (two pieces cannot share): the join fails with the no-room notice", tilesOf("one").length === 21 && ov.status === 303 && ov.headers.get("location") === "/one/?notice=no-room" && playersOf("one").length === 1, ov.headers.get("location"));
 
-  console.log("actions");
+  console.log("moves");
   const post = (c, body, slug = "hex") => c.post(`/${slug}/api/action`, body);
-  const turnOf = async (slug = "hex") => (await client(A).get(`/${slug}/api/game`)).data.game;
-  check("logged out is 401", (await post(client(A), { kind: "claim", x: 0, y: 0 })).status === 401);
-  const early = await post(ana, { kind: "claim", x: 2, y: 3 });
-  check("in setup, an action is refused (409) and nothing changes", early.status === 409 && /not started/i.test(early.data.error) && tileOf((await client(A).get("/hex/api/board")).data, 2, 3).owner === null, early.text);
-  d1(state, "UPDATE games SET status = 'playing', round = 1, turn = 0 WHERE slug = 'hex'");
-  for (const [label, body] of [["open sea far away", { kind: "claim", x: 99, y: 99 }], ["negative coordinates (no land there by default)", { kind: "claim", x: -1, y: 0 }], ["A1 is a corner: eroded, so sea", { kind: "claim", label: "A1" }], ["a label that is not one", { kind: "claim", label: "nope" }], ["row 0", { kind: "claim", label: "C0" }], ["a number as label", { kind: "claim", label: 5 }], ["a label and nothing sensible", { kind: "claim", label: "" }], ["text coordinates", { kind: "claim", x: "1", y: 0 }], ["fractions", { kind: "claim", x: 0.5, y: 0 }], ["missing r", { kind: "claim", x: 0 }], ["null", { kind: "claim", x: null, y: null }]]) {
-    const x = await post(ana, body);
-    check(`bad coordinates are refused (${label})`, x.status === 400, x.text);
-  }
-  check("an unknown kind is refused", (await post(ana, { kind: "teleport", x: 0, y: 0 })).status === 400 && (await post(ana, { x: 0, y: 0 })).status === 400);
-  check("players cannot write tile props through an action", (await post(ana, { kind: "claim", x: 2, y: 3, props: { gold: 99 } })).status === 400 && (await post(ana, { kind: "describe", x: 2, y: 3, name: "a", description: "b", props: { gold: 99 } })).status === 400);
-  const oot = await post(bo, { kind: "claim", x: 2, y: 4 });
-  check("out of turn is refused (403) and nothing is claimed", oot.status === 403 && (await turnOf()).turn === 0 && tileOf((await client(A).get("/hex/api/board")).data, 2, 4).owner === null, oot.text);
-  const notYet = await post(ana, { kind: "describe", x: 2, y: 3, name: "Hearth", description: "Warm." });
-  check("describing a tile you do not own is refused (403)", notYet.status === 403, notYet.text);
-
-  const notesBefore = (await bo.get("/hex/api/notifications")).data.unread;
-  const c1 = await post(ana, { kind: "claim", x: 2, y: 3 });
-  check("the player whose turn it is claims an unowned tile", c1.status === 200 && c1.data.kind === "claim" && c1.data.turn === 1 && c1.data.round === 1, c1.text);
-  let gm = await turnOf();
-  check("the turn advanced to the next player, same round, no harvest yet", gm.turn === 1 && gm.round === 1 && (await client(A).get("/hex/api/game")).data.players.every((p) => p.score === 0));
-  let board = (await client(A).get("/hex/api/board")).data;
-  check("the tile shows its owner and color", tileOf(board, 2, 3).owner.name === "Ana" && tileOf(board, 2, 3).owner.color.key === "teal");
-  check("the log records it, naming the tile like a chess square", (await client(A).get("/hex/api/game")).data.events[0].text === "Ana (Teal) claimed tile C4.");
-  check("every tile in /api/board carries its label, and so does a piece's position", board.tiles.every((t) => /^[A-H][1-8]$/.test(t.label)) && tileOf(board, 2, 3).label === "C4" && board.pieces.find((p) => p.name === "Ana").at.label === "C4");
-  check("board size and island extent are reported", board.width === 8 && board.height === 8 && board.tiles.length === want.length && board.settings["harvest"].points_per_tile === 1);
-  const notes = (await bo.get("/hex/api/notifications")).data;
-  check("the table is notified, and told who is up", notes.unread === notesBefore + 1 && notes.notifications[0].body.includes("Ana (Teal) claimed tile C4. Bo (Cobalt) is up."), JSON.stringify(notes.notifications[0]));
-  check("Ana's own turn is spent: she is refused now", (await post(ana, { kind: "claim", x: 2, y: 4 })).status === 403);
-  check("the same tile can be named by label or by x and y: owned by label is refused too", (await post(bo, { kind: "claim", label: "c4" })).status === 409);
-  const owned = await post(bo, { kind: "claim", x: 2, y: 3 });
-  check("claiming an owned tile is refused (409) and the turn stays", owned.status === 409 && (await turnOf()).turn === 1, owned.text);
-  const steal = await post(bo, { kind: "describe", x: 2, y: 3, name: "Mine", description: "Not mine." });
-  check("describing someone else's tile is refused (403)", steal.status === 403 && tileOf((await client(A).get("/hex/api/board")).data, 2, 3).name === null, steal.text);
-  const b1 = await post(bo, { kind: "claim", x: 3, y: 3 });
-  check("the next player claims", b1.status === 200 && b1.data.turn === 2 && b1.data.harvest === null, b1.text);
-  const c2 = await post(cy, { kind: "claim", label: "c5" });
-  gm = await turnOf();
-  const ev = (await client(A).get("/hex/api/game")).data;
-  check("when the turn wraps past the last player the round ends: round 2, turn 0", c2.status === 200 && gm.round === 2 && gm.turn === 0 && c2.data.round === 2, c2.text);
-  check("harvest: +1 point per tile owned, once, for everyone", ev.players.map((p) => p.score).join() === "1,1,1");
-  const harvests = ev.events.filter((e) => e.kind === "harvest");
-  check("one harvest event summarises it", harvests.length === 1 && harvests[0].text === "Harvest at the end of round 1: Ana (Teal) +1, Bo (Cobalt) +1, Cy (Rose) +1.", JSON.stringify(harvests));
-
-  console.log("describing");
-  for (const [label, body] of [["empty name", { name: "  ", description: "x" }], ["41-character name", { name: "n".repeat(41), description: "x" }], ["empty description", { name: "ok", description: "" }], ["281-character description", { name: "ok", description: "d".repeat(281) }], ["a number for a name", { name: 5, description: "x" }]]) {
-    const x = await post(ana, { kind: "describe", x: 2, y: 3, ...body });
-    check(`a bad name or description is refused (${label})`, x.status === 400, x.text);
-  }
-  check("and none of that cost her the turn", (await turnOf()).turn === 0);
-  const d1r = await post(ana, { kind: "describe", x: 2, y: 3, name: "Hearth\u0007 ‮hold", description: "A warm place.\n\nBring wood." });
-  board = (await client(A).get("/hex/api/board")).data;
-  check("a player names and describes their own tile; control and bidi characters are stripped", d1r.status === 200 && tileOf(board, 2, 3).name === "Hearth hold" && tileOf(board, 2, 3).description === "A warm place. Bring wood.", d1r.text);
-  check("describing also ends the turn, and the log says so", (await turnOf()).turn === 1 && (await client(A).get("/hex/api/game")).data.events[0].text === 'Ana (Teal) named tile C4 "Hearth hold".');
-  await post(bo, { kind: "claim", x: 3, y: 4 });
-  const c3 = await post(cy, { kind: "claim", x: 4, y: 4 });
-  const sc = (await client(A).get("/hex/api/game")).data;
-  check("round 2 ends: Ana owns 1, Bo 2, Cy 2, so scores are 1+1, 1+2, 1+2", c3.status === 200 && sc.game.round === 3 && sc.players.map((p) => p.score).join() === "2,3,3", JSON.stringify(sc.players.map((p) => p.score)));
-  check("two harvests are logged", sc.events.filter((e) => e.kind === "harvest").length === 2);
-
-  console.log("one winner of a race");
-  const [r1, r2] = await Promise.all([post(ana, { kind: "claim", x: 4, y: 3 }), post(ana, { kind: "claim", x: 5, y: 3 })]);
-  const sc2 = (await client(A).get("/hex/api/game")).data;
-  const owners = (await client(A).get("/hex/api/board")).data.tiles.filter((t) => t.owner?.name === "Ana").length;
-  check("two simultaneous moves from the same player: exactly one lands, the turn advances once",
-    [r1.status, r2.status].filter((s) => s === 200).length === 1 && [r1.status, r2.status].every((s) => [200, 403, 409].includes(s)) && sc2.game.turn === 1 && owners === 2, `${r1.status} ${r2.status} turn=${sc2.game.turn} owners=${owners}`);
-
-  console.log("board API");
-  const raw = await client(A).get("/hex/api/board");
-  board = raw.data;
-  check("it is public and never cached", raw.status === 200 && raw.headers.get("cache-control") === "no-store");
-  check("it has no email addresses and no ids", !raw.text.includes("@") && !/"(id|player_id|owner_player_id|game_id|email)"/.test(raw.text), raw.text.slice(0, 200));
-  check("an 8x8 island, the whole of it, and a piece per player", board.width === 8 && board.tiles.length === want.length && board.pieces.length === 3 && board.game.round === 3);
-  const anaPiece = board.pieces.find((p) => p.name === "Ana");
-  check("a piece stands on its owner's most recently claimed tile", (anaPiece.at.x === 4 && anaPiece.at.y === 3) || (anaPiece.at.x === 5 && anaPiece.at.y === 3));
-  check("pieces report color, score and tile count", anaPiece.color.key === "teal" && anaPiece.tiles === 2 && anaPiece.score === 2);
-  d1(state, `UPDATE tiles SET props = '{"fertility":2,"haunted":true,"notes":["a","b"]}' WHERE game_id = (SELECT id FROM games WHERE slug='hex') AND x = 5 AND y = 5`);
-  check("tile props of any shape come through", JSON.stringify(tileOf((await client(A).get("/hex/api/board")).data, 5, 5).props) === '{"fertility":2,"haunted":true,"notes":["a","b"]}');
-  check("a tile nobody owns has owner null and empty props", tileOf(board, 6, 3).owner === null && JSON.stringify(tileOf(board, 6, 3).props) === "{}");
-  const nobody = (await client(A).get("/prop/api/board")).data;
-  check("a piece with no tile has no position (it waits on the bench)", nobody.pieces.length === 0 && nobody.tiles.length >= 54 && nobody.tiles.length <= 58);
-  check("an unknown game is 404", (await client(A).get("/nope/api/board")).status === 404);
-
-  console.log("proposals");
+  const gameOf = async (slug = "hex") => (await client(A).get(`/${slug}/api/game`)).data.game;
+  const posOf = (slug, n) => playersOf(slug)[n];
+  const setPos = (slug, n, x, y, z = 0) => d1(state, `UPDATE players SET x = ${x}, y = ${y}, z = ${z} WHERE game_id = '${gidOf(slug)}' AND turn_order = ${n}`);
+  const setTurn = (slug, turn = 0, moves = 0, settings = "{}") => d1(state, `UPDATE games SET status = 'playing', round = 1, turn = ${turn}, moves = ${moves}, settings = '${settings}' WHERE slug = '${slug}'`);
+  check("logged out is 401", (await post(client(A), { kind: "move", x: 0, y: 0 })).status === 401);
+  const early = await post(ana, { kind: "move", x: 0, y: 0 });
+  check("in setup, a move is refused (409) and nothing changes", early.status === 409 && /not started/i.test(early.data.error));
+  setTurn("hex");
+  setPos("hex", 0, 0, 0); setPos("hex", 1, 3, 3); setPos("hex", 2, -3, -3);
+  check("an unknown kind is refused, including the removed claim and describe", (await post(ana, { kind: "teleport", x: 0, y: 0 })).status === 400 && (await post(ana, { kind: "claim", x: 0, y: 0 })).status === 400 && (await post(ana, { kind: "describe", x: 0, y: 0, name: "n", description: "d" })).status === 400 && (await post(ana, { x: 0, y: 0 })).status === 400);
+  const oot = await post(bo, { kind: "move", x: 3, y: 2 });
+  check("out of turn is refused (403) and the piece stays", oot.status === 403 && J([posOf("hex", 1).x, posOf("hex", 1).y]) === "[3,3]", oot.text);
+  check("not a label, or a label with a zero row or column, is refused (400)", (await post(ana, { kind: "move", label: "0N 1E" })).status === 400 && (await post(ana, { kind: "move", label: "A1" })).status === 400 && (await post(ana, { kind: "move", x: 0.5, y: 0 })).status === 400 && (await post(ana, { kind: "move" })).status === 400);
+  const far = await post(ana, { kind: "move", x: 2, y: 0 });
+  check("two steps away is refused (400): the piece stays and no move is used", far.status === 400 && /step/.test(far.data.error) && posOf("hex", 0).x === 0 && (await gameOf()).moves === 0, far.text);
+  check("so is the tile you already stand on", (await post(ana, { kind: "move", x: 0, y: 0 })).status === 400);
+  const lvl = await post(ana, { kind: "move", x: 1, y: 0, z: 1 });
+  check("a different level is refused for now (400)", lvl.status === 400 && /level/.test(lvl.data.error), lvl.text);
+  const logBefore = (await client(A).get("/hex/api/game")).data.events.length;
+  const diag = await post(ana, { kind: "move", x: 1, y: 1 });
+  check("a diagonal step succeeds (P1: diagonals count)", diag.status === 200 && diag.data.ok && diag.data.at.label === "2N 2E 1U" && J([posOf("hex", 0).x, posOf("hex", 0).y, posOf("hex", 0).z]) === "[1,1,0]", diag.text);
+  check("the move is logged, naming the tile, and the turn did NOT end (a move is in addition to proposing)", (await client(A).get("/hex/api/game")).data.events[0].text === "Ana (Teal) moved to 2N 2E 1U." && (await client(A).get("/hex/api/game")).data.events.length === logBefore + 1 && (await gameOf()).turn === 0 && (await gameOf()).moves === 1 && (await gameOf()).round === 1);
+  const again = await post(ana, { kind: "move", x: 2, y: 1 });
+  check("a second move in the same turn is refused (409), at most one per turn", again.status === 409 && /already moved/.test(again.data.error) && posOf("hex", 0).x === 1, again.text);
+  const prp = await ana.post("/hex/api/turn", { prompt: "Let there be cats." });
+  check("after moving, the same player can still propose a rule change this turn", prp.status === 200 && d1(state, `SELECT COUNT(*) AS n FROM turns WHERE game_id = '${gidOf("hex")}'`)[0].n === 1, prp.text);
+  check("and a proposal does not advance the turn", (await gameOf()).turn === 0);
+  // the other order: propose first, then move
   const pa = await join(A, "prop", prop.code, { email: "pa@example.com", name: "Pa", color: "vermilion" });
   const pb = await join(A, "prop", prop.code, { email: "pb@example.com", name: "Pb", color: "graphite" });
-  d1(state, "UPDATE games SET status = 'playing', round = 1, turn = 0 WHERE slug = 'prop'");
-  const prp = await pa.post("/prop/api/turn", { prompt: "Let there be cats." });
-  check("a proposal is recorded and does not advance the turn", prp.status === 200 && (await turnOf("prop")).turn === 0 && (await turnOf("prop")).round === 1, prp.text);
-  const after = await post(pa, { kind: "claim", x: 2, y: 4 }, "prop");
-  check("after proposing, the same turn cannot also act (409): it waits for the referee", after.status === 409 && /proposed/i.test(after.data.error) && (await turnOf("prop")).turn === 0, after.text);
-  check("and the other player is still not up", (await post(pb, { kind: "claim", x: 2, y: 4 }, "prop")).status === 403);
+  setTurn("prop"); setPos("prop", 0, 0, 0); setPos("prop", 1, 1, 0);
+  const prp2 = await pa.post("/prop/api/turn", { prompt: "Rain, but only on Tuesdays." });
+  const mv2 = await post(pa, { kind: "move", x: -1, y: 1 }, "prop");
+  check("propose first, then move: both land in the same turn", prp2.status === 200 && mv2.status === 200 && posOf("prop", 0).x === -1 && (await gameOf("prop")).turn === 0, mv2.text);
+  setTurn("prop", 0, 0); setPos("prop", 0, 0, 0); setPos("prop", 1, 1, 0);
+  const occ = await post(pa, { kind: "move", x: 1, y: 0 }, "prop");
+  check("a move onto a tile another piece stands on is refused (409): two pieces cannot share a tile", occ.status === 409 && /another piece/i.test(occ.data.error) && posOf("prop", 0).x === 0 && (await gameOf("prop")).moves === 0, occ.text);
+  check("and the other player is still not up", (await post(pb, { kind: "move", x: 2, y: 0 }, "prop")).status === 403);
+  // uncharted destination
+  setTurn("hex"); setPos("hex", 0, 1, 1);
+  d1(state, `DELETE FROM tiles WHERE game_id = '${gidOf("hex")}' AND x = 2 AND y = 2`);
+  const unc = await post(ana, { kind: "move", x: 2, y: 2 });
+  check("moving onto an uncharted tile is refused (400) and uses no move", unc.status === 400 && /not charted/.test(unc.data.error) && (await gameOf()).moves === 0 && posOf("hex", 0).x === 1, unc.text);
+  d1(state, `INSERT INTO tiles (game_id, x, y, z, charted_at) VALUES ('${gidOf("hex")}', 2, 2, 0, 'x')`);
+  // seams: 1N 1W -> 1S 1E in one diagonal step, by label
+  setTurn("hex"); setPos("hex", 0, -1, 0);
+  const seam = await post(ana, { kind: "move", label: "1s 1e" });
+  check("across both seams in one diagonal step: 1N 1W to 1S 1E, named by label", seam.status === 200 && J([posOf("hex", 0).x, posOf("hex", 0).y]) === "[0,-1]", seam.text);
+  // chart on move
+  setTurn("hex"); setPos("hex", 0, 3, 0);
+  d1(state, `INSERT INTO tiles (game_id, x, y, z, charted_at) VALUES ('${gidOf("hex")}', 4, 0, 0, 'x')`);
+  const before = new Set(tilesOf("hex").map(tkey));
+  const edge = await post(ana, { kind: "move", label: "1N 5E" });
+  const after = tilesOf("hex"), afterSet = new Set(after.map(tkey));
+  const shape = chartedAround(4, 0, 2).map(([x, y]) => `${x},${y},0`);
+  const expected = new Set([...before, ...shape]);
+  check("moving past the island edge charts the 21-tile shape around the new position, and only that", edge.status === 200 && shape.length === 21 && shape.every((k) => afterSet.has(k)) && afterSet.size === expected.size && [...afterSet].every((k) => expected.has(k)) && afterSet.size > before.size, `${before.size} -> ${afterSet.size}`);
+  check("the new tiles are blank: just a place, and a charted time", d1(state, `SELECT COUNT(*) AS n FROM tiles WHERE game_id = '${gidOf("hex")}' AND charted_at IS NULL`)[0].n === 0);
+  check("the corners of the shape stay uncharted", [[6, 2], [6, -2], [2, 2 + 0]].slice(0, 2).every(([x, y]) => !afterSet.has(`${x},${y},0`)) && afterSet.has("6,1,0") && afterSet.has("6,0,0"));
+  setTurn("hex"); setPos("hex", 0, 4, 0);
+  const n1 = tilesOf("hex").length;
+  const back = await post(ana, { kind: "move", x: 3, y: 0 });
+  check("charting a charted tile is a no-op: moving back changes no tile (insert-if-absent)", back.status === 200 && tilesOf("hex").length === n1, `${n1} -> ${tilesOf("hex").length}`);
+  // the move distance setting
+  setTurn("hex", 0, 0, '{"turn.move_distance":2}'); setPos("hex", 0, 0, 0);
+  const two = await post(ana, { kind: "move", x: 2, y: 1 });
+  check("the move distance is a setting: with 2, a two-step move succeeds", two.status === 200 && posOf("hex", 0).x === 2, two.text);
+  setTurn("hex", 0, 0, '{"turn.move_distance":2}'); setPos("hex", 0, 0, 0);
+  check("and three steps still fails", (await post(ana, { kind: "move", x: 3, y: 0 })).status === 400);
+  // two simultaneous moves
+  let raceOk = true, raceWhy = "";
+  for (let i = 0; i < 6; i++) {
+    setTurn("hex"); setPos("hex", 0, 0, 0); setPos("hex", 1, 3, 3);
+    const [r1, r2] = await Promise.all([post(ana, { kind: "move", x: 1, y: 0 }), post(ana, { kind: "move", x: 0, y: 1 })]);
+    const ok = [r1.status, r2.status].filter((x) => x === 200).length === 1 && [r1, r2].filter((r) => r.status !== 200).every((r) => r.status === 409);
+    const events = d1(state, `SELECT COUNT(*) AS n FROM events WHERE game_id = '${gidOf("hex")}' AND kind = 'piece_moved'`)[0].n;
+    if (!ok || (await gameOf()).moves !== 1) { raceOk = false; raceWhy = `${r1.status} ${r1.text} | ${r2.status} ${r2.text} moves=${(await gameOf()).moves} events=${events}`; break; }
+  }
+  check("two simultaneous moves from one player, 6 times: exactly one lands, the other is refused 409, one move is counted", raceOk, raceWhy);
+  // the proposal INSERT: guarded on turn and round, not on moves
+  const gidS = gidOf("prop"), pidS = d1(state, `SELECT id FROM players WHERE game_id = '${gidS}' AND turn_order = 0`)[0].id;
+  const lit = (v) => (typeof v === "number" ? String(v) : `'${String(v).replace(/'/g, "''")}'`);
+  const cond = (turn, round, moves, status = "playing") => { d1(state, `UPDATE games SET moves = ${moves}, status = '${status}' WHERE id = '${gidS}'`); d1(state, `DELETE FROM turns WHERE id LIKE 'tt%'`); const binds = [`tt${turn}${round}${moves}${status}`, pidS, "p", "n", "n", gidS, turn, round]; let i = 0; try { d1(state, PROPOSAL_INSERT_SQL.replace(/\?/g, () => lit(binds[i++]))); } catch { /* one live proposal per player and round */ } return d1(state, "SELECT COUNT(*) AS n FROM turns WHERE id LIKE 'tt%'")[0].n; };
+  d1(state, `DELETE FROM turns WHERE game_id = '${gidS}'`); setTurn("prop");
+  const n0 = cond(1, 1, 0), nA = cond(0, 2, 0), nB = cond(0, 1, 0, "setup"), nC = cond(0, 1, 1), nD = cond(0, 1, 0);
+  check("the proposal INSERT lands only if the game is playing and the turn and round are as read; a move made this turn does not stop it", n0 === 0 && nA === 0 && nB === 0 && nC === 1 && nD === 1, [n0, nA, nB, nC, nD].join());
+  check("/api/game reports how many moves the current turn has used", typeof (await gameOf()).moves === "number");
+
+  console.log("the public board");
+  const raw = await client(A).get("/hex/api/board");
+  const pb2 = raw.data;
+  check("it is public and never cached", raw.status === 200 && raw.headers.get("cache-control") === "no-store");
+  check("it has no email addresses and no ids", !raw.text.includes("@") && !/"(id|player_id|owner_player_id|game_id|email)"/.test(raw.text), raw.text.slice(0, 200));
+  check("a tile is only a place: x, y, z and a label, with no properties, terrain, owner or name", pb2.tiles.every((t) => J(Object.keys(t).sort()) === '["label","x","y","z"]') && !/terrain|props|owner|description/.test(raw.text));
+  check("every tile and piece carries x, y, z and a full label like '3N 2E 1U'", pb2.tiles.every((t) => t.z === 0 && /^[1-9][0-9]*[NS] [1-9][0-9]*[EW] 1U$/.test(t.label)) && pb2.pieces.length === 3 && pb2.pieces.every((p) => Number.isInteger(p.at.x) && Number.isInteger(p.at.y) && p.at.z === 0 && /^[1-9][0-9]*[NS] [1-9][0-9]*[EW] 1U$/.test(p.at.label)));
+  check("pieces report color, score and place; the board reports its settings and the move rules", pb2.pieces[0].color.key === "teal" && pb2.pieces[0].score === 0 && J(pb2.settings) === J(getSettings(d1(state, "SELECT settings FROM games WHERE slug = 'hex'")[0].settings)) && pb2.rules.move_distance === 1 && pb2.rules.diagonal_moves === true && pb2.rules.shared_tiles === false);
+  check("an unknown game is 404", (await client(A).get("/nope/api/board")).status === 404);
+  check("every piece stands on a charted tile", pb2.pieces.every((p) => pb2.tiles.some((t) => t.x === p.at.x && t.y === p.at.y && t.z === p.at.z)));
 
   console.log("legacy games");
   const gid = "11111111-2222-3333-4444-555555555555";
-  d1(state, `INSERT INTO games (id, slug, name, repo, join_code, status, settings, seed, created_at) VALUES ('${gid}','old','Old game','a/b','ZZZZ2222','setup','{"board.island":{"width":6,"height":5}}',123,'2026-01-01T00:00:00Z')`);
+  d1(state, `INSERT INTO games (id, slug, name, repo, join_code, status, settings, created_at) VALUES ('${gid}','old','Old game','a/b','ZZZZ2222','setup','{"board.island":{"width":6,"height":4}}','2026-01-01T00:00:00Z')`);
   const lazy = (await client(A).get("/old/api/board")).data;
-  const exp = generateTiles(123, settingsForSize(6, 5));
-  check("a game with no tiles gets them from its stored seed the first time the board is read, same as at creation",
-    lazy.tiles.length === exp.length && lazy.width === 6 && lazy.height === 5 && lazy.tiles.every((t) => exp.find((e) => e.x === t.x && e.y === t.y).terrain === t.terrain));
-  check("and not twice", d1(state, `SELECT COUNT(*) AS n FROM tiles WHERE game_id = '${gid}'`)[0].n === exp.length && (await client(A).get("/old/api/board")).data.tiles.length === exp.length);
-
-  console.log("settings");
-  check("the default settings are valid, and every game setting has a validator", validateSettings(DEFAULT_SETTINGS).length === 0 && validateSettings(settingsForSize(16, 4)).length === 0);
-  const bad = (k, v) => validateSettings({ ...DEFAULT_SETTINGS, [k]: v }).length > 0;
-  check("bad values are refused: sizes, erosion, shares, kinds, bounds, moves, harvest",
-    bad("board.island", { width: 3, height: 8 }) && bad("board.island", { width: 8 }) && bad("board.island", { width: 8, height: 8, depth: 1 }) && bad("board.erosion", { corner_tiles: 0, max_bays: 0 }) &&
-    bad("board.terrain", { ...DEFAULT_SETTINGS["board.terrain"], share: 0.9 }) && bad("board.terrain", { ...DEFAULT_SETTINGS["board.terrain"], kinds: { Lava: { share: 0.1, where: "any", clump: 2 } } }) &&
-    bad("board.terrain", { ...DEFAULT_SETTINGS["board.terrain"], kinds: { lava: { share: 0.1, where: "moon", clump: 2 } } }) && bad("board.land_bounds", { min_x: 5, min_y: 0, max_x: 2, max_y: null }) &&
-    bad("turn.actions", { claim: "yes", describe: true }) && bad("turn.actions_per_turn", 0) && bad("turn.actions_per_turn", 1.5) && bad("harvest", { points_per_tile: 1, when: "never" }) && validateSettings({ ...DEFAULT_SETTINGS, mystery: 1 }).length > 0);
-  check("a game's stored settings override only what they name; an invalid stored value falls back to the default",
-    getSettings({ harvest: { points_per_tile: 3 } }).harvest.when === "end_of_round" && getSettings({ harvest: { points_per_tile: 3 } }).harvest.points_per_tile === 3 &&
-    getSettings({ harvest: { points_per_tile: "lots" } }).harvest.points_per_tile === 1 && getSettings("not json")["turn.actions_per_turn"] === 1 && getSettings(null)["board.island"].width === 8 && getSettings({ nope: 1 }).nope === undefined);
-  check("a new terrain kind in the settings shows up on the board (a rule can add one)", (() => { const st = getSettings({ "board.terrain": { ...DEFAULT_SETTINGS["board.terrain"], kinds: { ...DEFAULT_SETTINGS["board.terrain"].kinds, lava: { share: 0.1, where: "inner", clump: 2 } } } }); return generateTiles(7, st).some((t) => t.terrain === "lava"); })());
-  check("the island size setting changes the island: 12 x 6 fits x 0..11, y 0..5", (() => { const t = generateTiles(3, settingsForSize(12, 6)); return Math.max(...t.map((u) => u.x)) === 11 && Math.max(...t.map((u) => u.y)) === 5 && t.length > 50; })());
-  check("land bounds clip the island", (() => { const st = getSettings({ "board.land_bounds": { min_x: 3, min_y: 0, max_x: null, max_y: null } }); return generateTiles(3, st).every((t) => t.x >= 3); })());
-  const rulesText = readText(pjoin(ROOT, "templates/RULES.md"), "utf8");
-  const named = [...rulesText.matchAll(/\[setting: ([^\]]+)\]/g)].flatMap((m) => m[1].split(",").map((n) => n.trim()));
-  const inRules = new Set(named), inCode = new Set(Object.keys(DEFAULT_SETTINGS));
-  check("every [setting: x] named in templates/RULES.md exists in the default settings", named.length > 0 && [...inRules].every((n) => inCode.has(n)), [...inRules].filter((n) => !inCode.has(n)).join());
-  check("and every default setting is named in templates/RULES.md", [...inCode].every((n) => inRules.has(n)), [...inCode].filter((n) => !inRules.has(n)).join());
-  check("the rules number the board rules 207 to 212 and keep 201 to 206", ["201.", "202.", "203.", "204.", "205.", "206.", "207. The Board.", "208. Land and terrain.", "209. Claiming land.", "210. Naming and describing.", "211. Harvest.", "212. Changing the board."].every((h) => rulesText.includes("**" + h)));
-
-  console.log("settings at work");
-  const sg = await createGame(state, { slug: "sett", name: "Settings game", max: 2, ...R });
-  const sa = await join(A, "sett", sg.code, { email: "sa@example.com", name: "Sa", color: "vermilion" });
-  const sb = await join(A, "sett", sg.code, { email: "sb@example.com", name: "Sb", color: "teal" });
-  const setSettings = (o) => d1(state, `UPDATE games SET settings = '${JSON.stringify(o)}', status = 'playing', round = 1, turn = 0, moves = 0 WHERE slug = 'sett'`);
-  const sgame = async () => (await client(A).get("/sett/api/game")).data;
-  setSettings({ "turn.actions": { claim: false, describe: true } });
-  const noClaim = await post(sa, { kind: "claim", label: "C4" }, "sett");
-  check("a move the settings switch off is refused (403) and nothing changes", noClaim.status === 403 && /do not allow/.test(noClaim.data.error) && (await sgame()).game.turn === 0);
-  setSettings({ "turn.actions_per_turn": 2, harvest: { points_per_tile: 3, when: "end_of_round" } });
-  const m1 = await post(sa, { kind: "claim", label: "C4" }, "sett");
-  check("with 2 moves per turn the first move does not end the turn", m1.status === 200 && m1.data.turn_over === false && m1.data.moves_left === 1 && (await sgame()).game.turn === 0);
-  check("a proposal after moving on the board this turn is refused", (await sa.post("/sett/api/turn", { prompt: "hi" })).status === 409);
-  check("the other player is still not up", (await post(sb, { kind: "claim", label: "D4" }, "sett")).status === 403);
-  const m2 = await post(sa, { kind: "claim", label: "C5" }, "sett");
-  check("the second move ends the turn", m2.status === 200 && m2.data.turn_over === true && (await sgame()).game.turn === 1);
-  await post(sb, { kind: "claim", label: "E4" }, "sett");
-  await post(sb, { kind: "describe", label: "E4", name: "Ebb", description: "Low tide." }, "sett");
-  const sg2 = await sgame();
-  check("harvest pays points_per_tile (3) per tile at the end of the round: Sa 2 tiles = 6, Sb 1 tile = 3", sg2.game.round === 2 && sg2.players.map((p) => p.score).join() === "6,3", JSON.stringify(sg2.players.map((p) => p.score)));
-  check("the harvest line shows the multiplied points", sg2.events.find((e) => e.kind === "harvest").text === "Harvest at the end of round 1: Sa (Vermilion) +6, Sb (Teal) +3.", sg2.events.find((e) => e.kind === "harvest")?.text);
-  d1(state, "UPDATE players SET score = 0 WHERE game_id = (SELECT id FROM games WHERE slug='sett')");
-  setSettings({ harvest: { points_per_tile: 2, when: "end_of_turn" } });
-  await post(sa, { kind: "describe", label: "C4", name: "Camp", description: "Tents." }, "sett");
-  const sg3 = await sgame();
-  check("end_of_turn harvest pays the player who just moved, right away, and nobody else", sg3.players.map((p) => p.score).join() === "4,0" && sg3.events[0].text === "Harvest after Sa (Vermilion)'s turn: +4." && sg3.game.round === 1 && sg3.game.turn === 1, JSON.stringify(sg3.players.map((p) => p.score)));
-  setSettings({ harvest: { points_per_tile: 0, when: "end_of_round" } });
-  await post(sa, { kind: "describe", label: "C4", name: "Camp", description: "Tents." }, "sett");
-  await post(sb, { kind: "describe", label: "E4", name: "Ebb", description: "Low." }, "sett");
-  check("0 points per tile means no harvest and no harvest log line", (await sgame()).events.filter((e) => e.kind === "harvest").length === 2 && (await sgame()).game.round === 2);
-
-  console.log("hardening");
-  check("settings named __proto__ or constructor are ignored, not thrown on", (() => { try { const s = getSettings(JSON.parse('{"__proto__":{"x":1},"constructor":{"y":2},"toString":3,"harvest":{"points_per_tile":4,"when":"end_of_turn"}}')); return s.harvest.points_per_tile === 4 && validateSettings(JSON.parse('{"__proto__":1}')).length > 0; } catch { return false; } })());
-  d1(state, `INSERT INTO games (id, slug, name, repo, join_code, status, settings, seed, created_at) VALUES ('99999999-2222-3333-4444-555555555555','void','Void','a/b','VVVV2222','setup','{"board.land_bounds":{"min_x":100,"min_y":0,"max_x":null,"max_y":null}}',5,'2026-01-01T00:00:00Z')`);
-  const none = await client(A).get("/void/api/board");
-  check("land bounds that leave no land give an empty board, not an error", none.status === 200 && none.data.tiles.length === 0 && none.data.pieces.length === 0);
-  d1(state, "UPDATE games SET settings = '{\"turn.actions_per_turn\": 1}', status = 'playing', round = 1, turn = 0, moves = 0 WHERE slug = 'sett'");
-  d1(state, "DELETE FROM turns WHERE game_id = (SELECT id FROM games WHERE slug='sett')");
-  d1(state, "UPDATE tiles SET owner_player_id = NULL, claimed_at = NULL, name = NULL, description = NULL WHERE game_id = (SELECT id FROM games WHERE slug='sett')");
-  const reset = () => {
-    d1(state, "UPDATE games SET settings = '{\"turn.actions_per_turn\": 1}', status = 'playing', round = 1, turn = 0, moves = 0 WHERE slug = 'sett'");
-    d1(state, "DELETE FROM turns WHERE game_id = (SELECT id FROM games WHERE slug='sett')");
-    d1(state, "UPDATE tiles SET owner_player_id = NULL, claimed_at = NULL, name = NULL, description = NULL WHERE game_id = (SELECT id FROM games WHERE slug='sett')");
-  };
-  let raceOk = true, raceWhy = "", claimWon = 0, proposalWon = 0;
-  for (let i = 0; i < 8; i++) {
-    reset();
-    const [rc, rp] = await Promise.all([post(sa, { kind: "claim", label: "C4" }, "sett"), sa.post("/sett/api/turn", { prompt: "A proposal racing a move." })]);
-    const sgr = await sgame();
-    const proposals = d1(state, "SELECT COUNT(*) AS n FROM turns WHERE game_id = (SELECT id FROM games WHERE slug='sett')")[0].n;
-    const one = [rc.status, rp.status].filter((x) => x === 200).length === 1;
-    const loserOk = rc.status === 200 ? (rp.status === 409 || rp.status === 403) && /turn changed|not your turn/.test(rp.data.error) : (rc.status === 409 || rc.status === 403) && /changed under you|already proposed|not your turn/.test(rc.data.error);
-    const consistent = rc.status === 200 ? proposals === 0 && sgr.game.turn === 1 : proposals === 1 && sgr.game.turn === 0;
-    if (rc.status === 200) claimWon++; else proposalWon++;
-    if (!(one && loserOk && consistent)) { raceOk = false; raceWhy = `${rc.status} ${rc.text} | ${rp.status} ${rp.text} turn=${sgr.game.turn} proposals=${proposals}`; break; }
-  }
-  console.log(`  (race outcomes over 8 runs: claim won ${claimWon}, proposal won ${proposalWon}; local wrangler often serializes, so the guard is also proven directly below)`);
-  check("a claim and a proposal sent together, 8 times: exactly one lands each time, the loser is refused with a clear 403/409, and a proposal never sits beside a completed move", raceOk, raceWhy);
-  reset();
-  d1(state, "UPDATE games SET moves = 1 WHERE slug = 'sett'");
-  const stale = await sa.post("/sett/api/turn", { prompt: "After a move." });
-  check("a proposal after a board move this turn is refused up front (409) and leaves no turn row", stale.status === 409 && /already moved/.test(stale.data.error) && d1(state, "SELECT COUNT(*) AS n FROM turns WHERE game_id = (SELECT id FROM games WHERE slug='sett')")[0].n === 0, stale.text);
-  d1(state, "UPDATE games SET moves = 0 WHERE slug = 'sett'");
-  // The conditional INSERT itself: a proposal whose turn, round or moves no longer match inserts nothing. Prove it in SQL, the way the handler runs it.
-  const gidS = d1(state, "SELECT id FROM games WHERE slug='sett'")[0].id, pidS = d1(state, "SELECT id FROM players WHERE game_id = (SELECT id FROM games WHERE slug='sett') AND turn_order = 0")[0].id;
-  // The very SQL the handler runs (src/lib/proposal.js), with the binds substituted: weaken its WHERE and this fails.
-  const lit = (v) => (typeof v === "number" ? String(v) : `'${String(v).replace(/'/g, "''")}'`);
-  const cond = (turn, round, moves) => { d1(state, `UPDATE games SET moves = ${moves} WHERE id = '${gidS}'`); const binds = [`tt${turn}${round}${moves}`, pidS, "p", "n", "n", gidS, turn, round]; let i = 0; try { d1(state, PROPOSAL_INSERT_SQL.replace(/\?/g, () => lit(binds[i++]))); } catch { /* a second row for the same player and round is refused by the unique index */ } return d1(state, "SELECT COUNT(*) AS n FROM turns WHERE id LIKE 'tt%'")[0].n; };
-  const n0 = cond(1, 1, 0), n1 = cond(0, 2, 0), n2 = cond(0, 1, 1), n3 = cond(0, 1, 0);
-  check("the proposal INSERT lands only if turn, round and moves are exactly as read (wrong turn, wrong round, a move made: nothing; right: one row)", n0 === 0 && n1 === 0 && n2 === 0 && n3 === 1, [n0, n1, n2, n3].join());
-  check("/api/game reports how many moves the current turn has used", typeof (await sgame()).game.moves === "number");
+  check("a game with no tiles gets its island from its stored settings the first time the board is read: 6x4 centered (3W..3E, 2N..2S)", lazy.tiles.length === 24 && Math.min(...lazy.tiles.map((t) => t.x)) === -3 && Math.max(...lazy.tiles.map((t) => t.x)) === 2 && Math.min(...lazy.tiles.map((t) => t.y)) === -2 && Math.max(...lazy.tiles.map((t) => t.y)) === 1);
 
   console.log("static files");
   const js = await client(A).get("/js/board.js");
@@ -380,7 +328,7 @@ try {
   check("nothing else in public/ is reachable, and no path tricks", (await client(A).get("/vendor/three.LICENSE")).status === 404 && (await client(A).get("/js/nope.js")).status === 404 && (await client(A).get("/js/%2e%2e/board.html")).status === 404 && (await client(A).get("/board.html")).status === 404);
 } catch (e) {
   fail++;
-  console.log("  FAIL  harness error:", e?.stack || e);
+  console.log("  FAIL  harness error:", e?.stack || e, e?.cause);
   if (srv) console.log(srv.log().slice(-1500));
 } finally {
   await srv?.stop();

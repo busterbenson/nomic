@@ -1,5 +1,5 @@
 // PUBLIC. Never include emails, player ids or the join code.
-import { Ctx, colorOf, json } from "../lib/util";
+import { Ctx, colorOf, json, seatLimit } from "../lib/util";
 
 export const get = async ({ env, data }: Ctx) => {
   const g = data.game!;
@@ -35,7 +35,7 @@ export const get = async ({ env, data }: Ctx) => {
       round: g.round,
       moves: g.moves,
       winning_score: g.winning_score,
-      max_players: g.max_players,
+      max_players: seatLimit(g),
     },
     players,
     events,

@@ -8,9 +8,11 @@
 //       browser form post (not JSON), it is guarded by an Origin check: the Origin
 //       header must match SITE_URL (or the request's own origin when SITE_URL is unset).
 import { createSession } from "../lib/auth";
+import { ensureTiles, spawnBinds, spawnWhere } from "../lib/board";
+import { SHARED_TILES } from "../lib/board-rules.js";
 import { notify } from "../lib/notify";
 import { expiredPage, page } from "../lib/pages";
-import { Ctx, MAX_SEATS, colorInfo, esc, nowIso, sha256Hex, siteUrl, who } from "../lib/util";
+import { Ctx, colorInfo, esc, nowIso, seatLimit, sha256Hex, siteUrl, who } from "../lib/util";
 
 const back = (slug: string, notice: string, cookie?: string) => {
   const h = new Headers({ location: `/${slug}/?notice=${notice}`, "cache-control": "no-store" });
@@ -86,24 +88,35 @@ export const post = async (ctx: Ctx) => {
   const existing: any = await env.DB.prepare("SELECT id FROM players WHERE game_id = ? AND email = ?").bind(game.id, t.email).first();
   if (existing) return back(game.slug, "welcome-back", await createSession(env, game, existing.id));
 
-  // One statement checks "setup", "not full" and picks the next turn_order, so
-  // two people verifying at once cannot take the same seat or overfill the game.
+  // The board has to exist before anyone can be placed on it.
+  await ensureTiles(env, game);
+  // One statement checks "setup", "not full", picks the next turn_order AND picks the piece's tile: a random
+  // charted tile nobody stands on whose whole chart shape is already charted (spawnWhere). Two people verifying
+  // at once cannot take the same seat or the same tile, or overfill the game. Spawning charts nothing.
   const playerId = crypto.randomUUID();
   let joined = false;
   try {
     const r = await env.DB.prepare(
-      `INSERT INTO players (id, game_id, email, display_name, color, score, turn_order, is_host, joined_at)
+      `INSERT INTO players (id, game_id, email, display_name, color, score, turn_order, is_host, joined_at, x, y, z)
        SELECT ?, g.id, ?, ?, ?, 0,
               (SELECT COUNT(*) FROM players WHERE game_id = g.id),
-              (SELECT COUNT(*) = 0 FROM players WHERE game_id = g.id), ?
-       FROM games g
-       WHERE g.id = ? AND g.status = 'setup' AND (SELECT COUNT(*) FROM players WHERE game_id = g.id) < MIN(g.max_players, ${MAX_SEATS})`,
-    ).bind(playerId, t.email, t.display_name, color, now, game.id).run();
+              (SELECT COUNT(*) = 0 FROM players WHERE game_id = g.id), ?, t.x, t.y, t.z
+       FROM games g JOIN tiles t ON t.game_id = g.id AND t.z = 0
+       WHERE g.id = ? AND g.status = 'setup' AND (SELECT COUNT(*) FROM players WHERE game_id = g.id) < ?
+         ${spawnWhere("t")}
+       ORDER BY random() LIMIT 1`,
+    ).bind(playerId, t.email, t.display_name, color, now, game.id, seatLimit(game), ...spawnBinds(game, SHARED_TILES)).run();
     joined = (r.meta?.changes ?? 0) > 0;
   } catch {
     joined = false; // color taken in the meantime (UNIQUE constraint)
   }
-  if (!joined) return back(game.slug, "join-failed");
+  if (!joined) {
+    // A seat that is open but has no qualifying tile to stand on is its own, clearer, failure.
+    const free: any = await env.DB.prepare(
+      `SELECT 1 AS ok FROM tiles t WHERE t.game_id = ? AND t.z = 0 ${spawnWhere("t")} LIMIT 1`,
+    ).bind(game.id, ...spawnBinds(game, SHARED_TILES)).first();
+    return back(game.slug, free ? "join-failed" : "no-room");
+  }
 
   const name = t.display_name; // stored raw, escaped when drawn
   await env.DB.prepare("INSERT INTO events (game_id, kind, text, created_at) VALUES (?, 'player_joined', ?, ?)")

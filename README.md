@@ -17,7 +17,7 @@ board and by email.
 
 - `src/index.ts`: the Worker and its small hand-written router (no framework)
 - `src/routes/`, `src/lib/`: the page and API handlers, and shared code
-- `public/`: the static files: `board.html` (one board page for every game), `site.css`, `theme.css` (every color), `js/` (the island board) and `vendor/` (three.js, pinned, no CDN)
+- `public/`: the static files: `board.html` (one board page for every game), `site.css`, `theme.css` (every color), `js/` (the board) and `vendor/` (three.js, pinned, no CDN)
 - `migrations/`: the D1 schema (`0001_init.sql`, `0002_island_board.sql`)
 - `templates/RULES.md`: the starter ruleset a new game repo begins with
 - `scripts/create-game.sh`: creates a game and prints its join link
@@ -33,8 +33,8 @@ board and by email.
 | `/<slug>/join/<CODE>` | the join page |
 | `/<slug>/auth/verify` | the magic link's Continue page (GET) and the claim (POST) |
 | `/<slug>/api/{game,me,join,login,logout,turn,rules,notifications,notifications/read}` | the game's API |
-| `/<slug>/api/board` | GET, public, never cached: the island's land tiles (`x`, `y`, `label` like `C4`, terrain, name, description, owner, `props`) and the pieces (color, score, tile count, position). No emails, no ids |
-| `/<slug>/api/action` | POST `{kind:"claim", label:"C4"}` or `{kind:"describe", label, name, description}` (`{x, y}` works too): the move of the player whose turn it is. It ends the turn; a round's end harvests 1 point per tile owned |
+| `/<slug>/api/board` | GET, public, never cached: the charted tiles (`x`, `y`, `z`, `label` like `3N 2E 1U`; nothing else) and the pieces (color, score, position), plus the settings and the move rules. No emails, no ids |
+| `/<slug>/api/action` | POST `{kind:"move", x, y}` or `{kind:"move", label:"3N 2E"}`: move your piece one space (diagonals included) onto a charted, unoccupied tile, once per turn, in addition to proposing. It charts the tiles around you |
 | `/js/*.js`, `/vendor/*.js`, `/theme.css`, `/site.css` | the board's scripts (three.js 0.186.1, vendored), and the styles |
 
 A slug is 2 to 40 characters of `a-z`, `0-9` and `-`, starting and ending with a
@@ -72,7 +72,7 @@ npx wrangler d1 execute DB --local --command "SELECT to_addr, subject, body FROM
 
 `create-game.sh` takes `--slug`, `--name`, `--repo owner/name`, and optionally
 `--rules-path` (default `RULES.md`), `--rules-ref` (default `main`),
-`--max-players` (1 to 8), `--size` (island side, 4 to 16, default 8; every other board setting is written to the game's row at its default and can be changed there: `src/lib/settings.js`), `--winning-score`, `--local` (default) or `--remote`. It checks
+`--max-players` (1 to 8, default 8: the `max_players` setting), `--size` (island side, even, 4 to 16, default 8; every other board setting is written to the game's row at its default and can be changed there: `src/lib/settings.js`), `--winning-score`, `--local` (default) or `--remote`. It checks
 the repo's rules file is publicly readable with a plain GET and refuses
 otherwise, generates the join code at run time (never committed), and prints
 `<SITE_URL>/<slug>/join/<CODE>`. Run it again with another slug for a second game.
@@ -114,7 +114,7 @@ two games is two unrelated players.
 To start a game by hand (no referee yet):
 `npx wrangler d1 execute DB --local --command "UPDATE games SET status='playing', round=1, turn=0 WHERE slug='demo'"`
 (add `--remote` against the deployed database).
-Once playing, the player whose turn it is (`games.turn` = their seat number, from 0) sees a "Your turn" box on the board and submits one prompt per round. This only records the turn; nothing advances `turn` or `round` yet.
+Once playing, the player whose turn it is (`games.turn` = their seat number, from 0) sees a "Your turn" box on the board and submits one prompt per round, and may also move their piece once (in either order). Proposing only records the turn; nothing advances `turn`, `round` or `moves` yet.
 
 ## Rules live in each game's repo
 

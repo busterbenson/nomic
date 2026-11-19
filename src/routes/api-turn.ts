@@ -17,13 +17,11 @@ export const post = async (ctx: Ctx) => {
 
   if (game.status !== "playing") return json({ error: "The game has not started, so there are no turns yet." }, 409);
   if (player.turn_order !== game.turn) return json({ error: "It is not your turn." }, 403);
-  if (game.moves > 0) return json({ error: "You already moved on the board this turn." }, 409);
 
   const now = nowIso();
   const name = player.display_name;
   // The turn and its log line land together or not at all.
-  // Both statements only land if the game is still exactly as it was read (same turn, round, no board
-  // move made): a board move racing this proposal can complete the turn in between.
+  // Both statements only land if the game is still exactly as it was read (same turn and round).
   const turnId = crypto.randomUUID();
   try {
     const res = await env.DB.batch([

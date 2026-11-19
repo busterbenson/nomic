@@ -8,7 +8,7 @@ const STATUS: Record<string, string> = { setup: "Setting up", playing: "In play"
 export const get = async ({ env }: Ctx) => {
   const games = (
     await env.DB.prepare(
-      `SELECT g.slug, g.name, g.status, g.max_players,
+      `SELECT g.slug, g.name, g.status, COALESCE(json_extract(g.settings, '$.max_players'), 8) AS max_players,
               (SELECT COUNT(*) FROM players p WHERE p.game_id = g.id) AS players
        FROM games g ORDER BY g.created_at DESC, g.rowid DESC`,
     ).all()

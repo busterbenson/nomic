@@ -18,7 +18,7 @@ First game: public, played by friends. The site is built to host several games
 | Accounts | Who is playing, per game: email, display name, session. No global users | D1 (`players`, `sessions`, `login_tokens`) |
 | Board state | Players, piece colors, scores, whose turn, the log, the tiles | D1 (`games`, `players`, `events`), read through `/<slug>/api/game` |
 | Notifications | In-game and email notices to every player | D1 (`notifications`), sent by `src/lib/notify.ts` |
-| Board | The public page that draws the state above and the game's rules; the island is drawn in WebGL (three.js, vendored) with an SVG fallback | `public/board.html`, `public/js/`, `public/theme.css` (the one file of colors), `public/site.css`, served as Worker static assets |
+| Board | The public page that draws the state above and the game's rules; the board is drawn in WebGL (three.js, vendored) with an SVG fallback | `public/board.html`, `public/js/`, `public/theme.css` (the one file of colors), `public/site.css`, served as Worker static assets |
 | Rulings | Every ruling the referee makes, with the rules it cited | `rulings/` (created by the first ruling) |
 | Referee | An AI model that drafts proposals and rules on what the rules mean | GitHub Actions + the Claude API (not built yet) |
 
@@ -96,64 +96,48 @@ broke down because the model lost track of which rules were in effect.)
 
 ## The board
 
-The world is an **infinite isometric grid of square tiles**, with signed integer
-coordinates `(x, y)`: x runs east, y runs north. Only **land** exists as data: a
-`tiles` row per land tile; everything else is open sea (drawn as a faint grid that
-fades out). A new game starts with an **island** 8 tiles wide and 8 tall (`--size`, 4 to 16) on
-x 0..7, y 0..7, with each corner bitten off so it reads as an island, which leaves
-54 to 58 land tiles.
+A **blank slate**. The world is an **infinite isometric grid of square tiles** with plain
+consecutive integer coordinates `(x, y, z)`: x runs east, y north, z up (z 0 is the ground, the only
+level in use). A tile is either **charted** (it has a row in `tiles`) or **uncharted** (it does not).
+Charted tiles are visible to everyone. A tile has **no properties**; nothing else about it is stored.
+Mechanics (claiming, terrain, scoring from tiles, ...) are deliberately not built: they are added
+by rules, discussed first.
 
-**Every number of the board is a setting, not code.** `games.settings` is a JSON object
-(validated; `src/lib/settings.js` holds the defaults and the validators) and
-`scripts/create-game.sh` writes the defaults into the new game's row. The code that makes
-the island, takes a move or pays the harvest reads them from there. A passed rule changes a
-value (or adds a terrain kind), not code. `templates/RULES.md` rules 207 to 212 state each
-setting in plain words and end with the setting they control in brackets, e.g. `[setting:
-board.island]`; a test keeps the rules and the settings identical.
+**A few numbers are settings, not code.** `games.settings` is a JSON object (validated;
+`src/lib/settings.js` holds the defaults and the validators) and `scripts/create-game.sh` writes the
+defaults into the new game's row. `templates/RULES.md` states each setting in plain words and ends with
+the setting it controls in brackets, e.g. `[setting: board.island]`; a test keeps the rules and the
+settings identical.
 
 | Setting | Default | Controls |
 |---|---|---|
-| `board.island` | `{width: 8, height: 8}` | the starting island's size |
-| `board.erosion` | `{corner_tiles: 2, max_bays: 2}` | how much of the corners and sides is bitten off |
-| `board.terrain` | meadow, 25% other: water (inside), sand (coast), stone, forest, in clumps | the terrain kinds, their share, and where each may go. A rule may add a kind |
-| `board.land_bounds` | `{min_x: 0, min_y: 0, max_x: null, max_y: null}` | where land may exist (the default limit: x and y at least 0) |
-| `turn.actions` | `{claim: true, describe: true}` | the moves a player may make instead of proposing |
-| `turn.actions_per_turn` | `1` | how many such moves a turn holds; the last one ends the turn |
-| `harvest` | `{points_per_tile: 1, when: "end_of_round"}` | points per owned tile, and when (`end_of_round` for everyone, or `end_of_turn` for the player who just moved) |
+| `max_players` | `8` | seats per game, 1 to 8. The one seat limit, enforced atomically at join |
+| `board.island` | `{width: 8, height: 8}` | the starting island, centered on the origin (even sizes, 4 to 16) |
+| `board.chart_radius` | `2` | a move charts every tile within this many tiles: a square with its four corners cut off (radius 2: 21 tiles) |
+| `turn.move_distance` | `1` | how far a move goes, in tiles |
 
-- **Names.** Tiles are named like chess squares: x is a letter (A..Z, then AA, AB,
-  ...) and y + 1 is the number, so `C4` is x 2, y 3 and `AA12` is x 26, y 11. The
-  conversion is `coordLabel` / `parseLabel` in `src/lib/geometry.js`.
-- **Land is only at x >= 0 and y >= 0 for now.** That is a default, not a law: the
-  schema allows any signed coordinates, and the `board.land_bounds` setting (read by
-  `landAllowed`) says where land may exist. A rule may lift it (the island could
-  grow west and south) by changing that setting. *Nothing creates new land yet*; a rule
-  that does will use `landAllowed`.
-- **Adjacency** is the four orthogonal neighbours; the diagonals are available
-  separately (`neighbors`, `diagonals`) for rules that want them. The geometry is one
-  file, so a different grid is a different `geometry.js` (plus the projection in
-  `public/js/board.js` and the slab in `board-gl.js`).
-- **Terrain** is one of meadow (default), water, forest, stone, sand, seeded and
-  deterministic (the seed is stored on the game): a lake inside the island, sand on
-  the coast, forest and stone in clumps. Terrain means nothing until a rule gives
-  it meaning.
-- **Tile properties** are an open-ended JSON object per tile (`props`, at most 4 KB,
-  validated by the database). Rules and the referee can put anything in it. Players
-  cannot write it.
-- **Pieces.** Each player claims one of eight piece colors at sign-up. A piece stands
-  on the player's most recently claimed tile (on a bench below the board until they
-  own one).
-- **Moves the site carries out itself** (`POST /<slug>/api/action`, no referee):
-  claim an unowned land tile, or name and describe a tile you own, by label
-  (`{"kind":"claim","label":"C4"}`). Only on your turn, only while the game is
-  `playing`. A move completes the turn (or uses one of its `turn.actions_per_turn`
-  moves); when the turn wraps past the last player the round ends and every player
-  harvests `harvest.points_per_tile` per tile owned (by default 1). Proposals are still
-  recorded and wait for the referee, and do not advance the turn; a player who
-  proposed this turn cannot also act on it.
-- **Look.** Isometric (2:1 dimetric), one fixed angle, no rotation; pan, zoom and
-  recenter. All colors are CSS tokens in `public/theme.css`, which the WebGL and SVG
-  renderers read too, so a new palette is a one-file change.
+- **Names.** Rows and columns skip zero, like years (1 BC is followed by 1 AD): columns `... 2W 1W | 1E
+  2E ...`, rows `... 2N 1N | 1S 2S ...`, levels `... 1D | 1U 2U ...`. Internally x -1 is `1W` and x 0
+  is `1E`; y 0 is `1N` and y -1 is `1S`; z 0 is `1U`. A tile reads row first: `3N 2E 1U`. The mapping and
+  its parser are `coordLabel` / `zLabel` / `tileLabel` / `parseLabel` in `src/lib/geometry.js`. The board
+  shows coordinates only on hover, right-click and long-press, never as axis labels.
+- **The starting island** is 8x8, columns `4W..4E`, rows `4N..4S` (x, y in -4..3), charted the first
+  time anything needs a game's board. The center is the 4-tile box `1N 1W, 1N 1E, 1S 1W, 1S 1E`.
+- **Charting** happens in one function, `chartTile` in `src/lib/board.ts`: it inserts a blank row if
+  the tile is absent and does nothing otherwise. Later rules that give new tiles some content change it.
+- **Pieces** carry `x, y, z` on the `players` row. Each player claims one of eight piece colors at
+  sign-up. **Spawning** puts a new piece on a random *unoccupied* charted tile whose whole chart shape
+  (the 21 tiles within 2.5 tiles) is already charted, which on the starting island leaves the inner 4x4: 16
+  spots. Spawning charts nothing. With no such tile the join fails ("no room on the map yet"). The pick and
+  the seat claim are one SQL statement, so two joiners cannot land on one tile.
+- **Moving** (`POST /<slug>/api/action`, `{kind:"move", x, y}` or `{kind:"move", label:"3N 2E"}`): on your
+  turn you may move your piece one space, diagonals included, onto a charted tile nobody stands on, at most
+  once per turn, **in addition** to proposing a rule change. A move does not end the turn (the referee will;
+  whatever advances `games.turn` must also reset `games.moves` to 0). The move then charts the shape around the
+  new position. The decided details live in `src/lib/board-rules.js`, one constant each.
+- **Look.** Isometric (2:1 dimetric), one fixed angle, no rotation; pan, zoom and recenter; every tile is the
+  same blank slab. All colors are CSS tokens in `public/theme.css`, which the WebGL and SVG renderers read too,
+  so a new palette is a one-file change.
 
 ## What the referee may and may not do
 

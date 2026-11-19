@@ -76,7 +76,7 @@ blockquote.prompt { margin: 10px 0 0; padding: 8px 12px; border-left: 3px solid 
 .games li:last-child { border-bottom: 0; }
 .games .sub { display: block; margin: 2px 0 0; }
 
-/* the island board page: wider than the other pages, board on top, tile panel below (beside it on desktop) */
+/* the board page: wider than the other pages, board on top, tile panel below (beside it on desktop) */
 body.wide main { max-width: 1040px; }
 .stage { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); margin-top: 16px; }
 @media (min-width: 860px) { .stage { grid-template-columns: minmax(0, 1fr) 320px; align-items: start; } }
@@ -85,19 +85,11 @@ body.wide main { max-width: 1040px; }
 .hex-canvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; outline-offset: -3px; }
 .board-tags { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .board-tags > div { position: absolute; left: 0; top: 0; font: 600 11px/1 system-ui, sans-serif; color: var(--board-label); }
-.board-tags .edge { opacity: 0.6; }
 .board-tags .tag { padding: 3px 6px; border-radius: 5px; background: var(--board-label-bg); box-shadow: 0 1px 3px rgba(0,0,0,.25); font-size: 12px; }
-.board-tags .tag.sel { font-size: 13px; }
 .board-tags [hidden] { display: none; }
 .recenter { position: absolute; right: 8px; bottom: 8px; font-size: 0.8rem; padding: 4px 10px; opacity: 0.9; }
 .tile-panel { margin-top: 0; overflow-wrap: anywhere; }
 .tile-panel h3 { margin: 0 0 6px; font-weight: normal; font-size: 1.15rem; }
-.tile-panel h3 small { color: var(--muted); font-size: 0.8rem; }
-.swatch { display: inline-block; width: 14px; height: 14px; border-radius: 3px; margin-right: 8px; vertical-align: -1px; border: 1px solid rgba(0,0,0,.25); }
-.tile-name { margin: 0; font-weight: bold; }
-.tile-desc { margin: 4px 0; white-space: pre-wrap; }
 .tile-owner { margin: 8px 0; }
-.props { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 8px 0; font-size: 0.9rem; }
-.props dt { color: var(--muted); } .props dd { margin: 0; }
 .tile-panel button.primary { margin-top: 8px; }
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }

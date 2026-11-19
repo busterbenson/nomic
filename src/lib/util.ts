@@ -1,4 +1,5 @@
-// Small shared helpers for the Worker. No dependencies.
+// Small shared helpers for the Worker.
+import { getSettings } from "./settings.js";
 
 // Loose types: wrangler bundles this with esbuild and does not type-check.
 export type Env = {
@@ -135,13 +136,5 @@ export async function seatsTaken(env: Env, gameId: string): Promise<{ color: str
   return r.results as { color: string }[];
 }
 
-// A game seats at most as many players as there are colours.
-export const seatLimit = (game: { max_players: number }) => Math.min(game.max_players, MAX_SEATS);
-
-// Free text typed by players (tile names and descriptions): no control characters or
-// bidi tricks, whitespace folded, 1..max characters. Returns null when it does not fit.
-export function cleanText(s: unknown, max: number): string | null {
-  if (typeof s !== "string") return null;
-  const t = s.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/[\u200B\u200E\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g, "").replace(/\s+/g, " ").trim();
-  return /[^\s\u200C\u200D]/.test(t) && [...t].length <= max ? t : null;
-}
+// A game seats at most `max_players` players (a game setting, 1 to 8: one piece colour each).
+export const seatLimit = (game: { settings: string }) => Math.min(getSettings(game.settings).max_players, MAX_SEATS);

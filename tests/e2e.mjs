@@ -45,7 +45,7 @@ try {
   console.log("join flow");
   check("join code is 8 characters, no repo-committed code", /^[A-HJKMNP-Z2-9]{8}$/.test(game.code));
   const page = await client(A).get(`/one/join/${game.code.toLowerCase()}`);
-  check("join page loads, code is case-insensitive", page.status === 200 && page.text.includes("Game One") && page.text.includes("5 of 5 seats open"));
+  check("join page loads, code is case-insensitive", page.status === 200 && page.text.includes("Game One") && page.text.includes("8 of 8 seats open"));
   const bad = await client(A).get("/one/join/ZZZZZZZZ");
   check("unknown code gives a friendly page", bad.status === 404 && bad.text.includes("doesn't match this game"));
 
@@ -345,7 +345,7 @@ try {
   const land = await client(A).get("/");
   check("the landing page lists both games, with status and player counts and links",
     land.status === 200 && land.text.includes("Game One") && land.text.includes("Game Two") && land.text.includes('href="/one/"') && land.text.includes('href="/two/"') &&
-    /Game Two<\/strong><\/a>\s*<span class="sub">In play · 2 of 5 players/.test(land.text), land.text.slice(0, 1500));
+    /Game Two<\/strong><\/a>\s*<span class="sub">In play · 2 of 8 players/.test(land.text), land.text.slice(0, 1500));
   check("the landing page contains no '@' and no join code", !land.text.includes("@") && !land.text.includes(game.code) && !land.text.includes(two.code));
   const redirect = await client(A).get("/one");
   check("/<slug> without the slash redirects to /<slug>/", redirect.status === 308 && redirect.headers.get("location") === "/one/");

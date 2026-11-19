@@ -1,9 +1,10 @@
--- The board: an island on an endless square grid, tiles with open-ended properties, a seed and an
--- island size per game, and
--- player pieces chosen by COLOR instead of an emoji marker.
+-- The board: a blank-slate world on an infinite grid. Tiles have no properties: a tile either exists
+-- in `tiles` (it is CHARTED) or it does not. Player pieces carry a position (x, y, z) and are chosen by
+-- COLOR instead of an emoji marker.
 -- Applied to existing games without losing anything: players are rebuilt (SQLite
--- cannot drop a column that sits in a UNIQUE constraint), and every existing player
--- is given the next free palette colour in turn order.
+-- cannot drop a column that sits in a UNIQUE constraint), every existing player
+-- is given the next free palette colour in turn order, every existing game gets its starting island
+-- charted, and every existing player is placed on a distinct tile of it.
 
 -- Rebuilding `players` while sessions, notifications and turns point at it: dropping a
 -- parent table that still has children fails the foreign-key check at commit (tried:
@@ -13,13 +14,14 @@
 -- place (SQLite rewrites the new children's references to follow it), rename the children.
 
 -- The game's board settings, as JSON: only the ones this game changes; the rest are the defaults in
--- src/lib/settings.js (island size, erosion, terrain kinds, land bounds, allowed moves, moves per turn,
--- harvest). Validated by the code that reads them. A passed rule changes a value here, not code.
+-- src/lib/settings.js (island size, chart radius, move distance). Validated by the code that reads them.
 ALTER TABLE games ADD COLUMN settings TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(settings) AND json_type(settings) = 'object');
--- Moves made so far in the current turn (a turn may hold several: setting turn.actions_per_turn).
+-- Board moves made so far in the current turn (a turn holds at most one: MOVES_PER_TURN in src/lib/board-rules.js).
+-- Whatever advances the turn must set it back to 0.
+-- The seat limit moves from the `max_players` column into the settings (setting max_players, 1 to 8): the column
+-- is no longer read. Existing games keep their cap.
+UPDATE games SET settings = json_set(settings, '$.max_players', MIN(MAX(max_players, 1), 8));
 ALTER TABLE games ADD COLUMN moves INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE games ADD COLUMN seed INTEGER NOT NULL DEFAULT 0;
-UPDATE games SET seed = abs(random() % 2147483647);
 
 CREATE TABLE players_new (
   id TEXT PRIMARY KEY,
@@ -33,16 +35,20 @@ CREATE TABLE players_new (
   turn_order INTEGER NOT NULL,
   is_host INTEGER NOT NULL DEFAULT 0,
   joined_at TEXT NOT NULL,
+  -- The piece's position: plain consecutive integers (labels skip zero, these do not). z 0 is the ground.
+  x INTEGER NOT NULL, y INTEGER NOT NULL, z INTEGER NOT NULL DEFAULT 0,
   UNIQUE (game_id, email),
   UNIQUE (game_id, color),
   UNIQUE (game_id, turn_order),
   UNIQUE (game_id, id)
 );
-INSERT INTO players_new (id, game_id, email, display_name, color, score, turn_order, is_host, joined_at)
+INSERT INTO players_new (id, game_id, email, display_name, color, score, turn_order, is_host, joined_at, x, y, z)
   SELECT id, game_id, email, display_name,
          CASE turn_order % 8 WHEN 0 THEN 'vermilion' WHEN 1 THEN 'saffron' WHEN 2 THEN 'moss' WHEN 3 THEN 'teal'
                              WHEN 4 THEN 'cobalt' WHEN 5 THEN 'violet' WHEN 6 THEN 'rose' ELSE 'graphite' END,
-         score, turn_order, is_host, joined_at
+         score, turn_order, is_host, joined_at,
+         -- a distinct tile of the 8 x 8 island (x, y in -4..3) per seat: 3 and 5 are coprime to 8
+         (turn_order * 3) % 8 - 4, (turn_order * 5) % 8 - 4, 0
   FROM players;
 CREATE TABLE sessions_new (
   id_hash TEXT PRIMARY KEY,
@@ -100,24 +106,19 @@ CREATE INDEX turns_round ON turns(game_id, round);
 DELETE FROM login_tokens WHERE purpose = 'join' AND used_at IS NULL;
 ALTER TABLE login_tokens RENAME COLUMN marker TO color;
 
--- One row per LAND tile, on an infinite grid of signed integer coordinates (x east, y north);
--- there is no row for open sea. Where land may exist, and how tiles are named (C4 = x 2, y 3), is
--- geometry (src/lib/geometry.js), not schema, so a rule can change it. `props` is a JSON object that rules (and later the referee) can
--- put anything in: {"fertility": 2, "haunted": true}. Terrain means nothing by
--- itself until a rule gives it meaning.
+-- One row per CHARTED tile, on an infinite grid of integer coordinates (x east, y north, z up; z 0 is the
+-- ground). A tile has no properties: charted or uncharted is all there is, and a row is created blank the
+-- first time the tile is charted (chartTile in src/lib/board.ts). How tiles are NAMED ("3N 2E") is
+-- src/lib/geometry.js, not schema.
 CREATE TABLE tiles (
   game_id TEXT NOT NULL REFERENCES games(id),
   x INTEGER NOT NULL,
   y INTEGER NOT NULL,
-  -- Any lowercase word: the kinds a game has come from its settings (board.terrain), so a rule can add one.
-  terrain TEXT NOT NULL DEFAULT 'meadow' CHECK (terrain GLOB '[a-z]*' AND length(terrain) <= 20),
-  name TEXT CHECK (name IS NULL OR length(name) BETWEEN 1 AND 40),
-  description TEXT CHECK (description IS NULL OR length(description) BETWEEN 1 AND 280),
-  owner_player_id TEXT,
-  claimed_at TEXT,
-  props TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(props) AND json_type(props) = 'object' AND length(CAST(props AS BLOB)) <= 4096),
-  updated_at TEXT NOT NULL,
-  PRIMARY KEY (game_id, x, y),
-  FOREIGN KEY (game_id, owner_player_id) REFERENCES players(game_id, id)
+  z INTEGER NOT NULL DEFAULT 0,
+  charted_at TEXT NOT NULL,
+  PRIMARY KEY (game_id, x, y, z)
 );
-CREATE INDEX tiles_owner ON tiles(game_id, owner_player_id);
+-- Every existing game starts with its 8 x 8 island charted: columns 4W..4E (x -4..3), rows 4N..4S (y -4..3).
+WITH RECURSIVE n(i) AS (SELECT -4 UNION ALL SELECT i + 1 FROM n WHERE i < 3)
+INSERT INTO tiles (game_id, x, y, z, charted_at)
+  SELECT g.id, a.i, b.i, 0, strftime('%Y-%m-%dT%H:%M:%fZ', 'now') FROM games g, n a, n b;
