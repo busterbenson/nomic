@@ -5,9 +5,9 @@
   "description": "Promptocracy: a game where changing the rules is a move.",
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --port 8788",
+    "dev": "wrangler dev --port 8788 --var MAIL_FROM: --var SITE_URL:",
     "migrate:local": "wrangler d1 migrations apply DB --local",
-    "test": "node tests/e2e.mjs",
+    "test": "node tests/e2e.mjs && node tests/board.mjs",
     "deploy:dry-run": "wrangler deploy --dry-run"
   },
   "devDependencies": {

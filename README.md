@@ -5,7 +5,7 @@ A modern interpretation of the game of nomic, powered by AI. (This repo is
 registered yet.)
 
 Nomic is a game where changing the rules is a move. In this version, players
-write their turns as plain-language prompts, and an AI referee turns each one
+write their turns as plain-language prompts, and Chalant, the AI moderator, turns each one
 into an exact rule change for the table to vote on, or carries it out if the
 rules already allow it.
 
@@ -17,8 +17,8 @@ board and by email.
 
 - `src/index.ts`: the Worker and its small hand-written router (no framework)
 - `src/routes/`, `src/lib/`: the page and API handlers, and shared code
-- `public/`: the static files: `board.html` (one board page for every game) and `site.css`
-- `migrations/`: the D1 schema (`0001_init.sql`)
+- `public/`: the static files: `board.html` (one board page for every game), `site.css`, `theme.css` (every color), `js/` (the board) and `vendor/` (three.js, pinned, no CDN)
+- `migrations/`: the D1 schema (`0001_init.sql`, `0002_island_board.sql`)
 - `templates/RULES.md`: the starter ruleset a new game repo begins with
 - `scripts/create-game.sh`: creates a game and prints its join link
 - `tests/`: end-to-end tests and the screenshot script
@@ -33,12 +33,15 @@ board and by email.
 | `/<slug>/join/<CODE>` | the join page |
 | `/<slug>/auth/verify` | the magic link's Continue page (GET) and the claim (POST) |
 | `/<slug>/api/{game,me,join,login,logout,turn,rules,notifications,notifications/read}` | the game's API |
+| `/<slug>/api/board` | GET, public, never cached: the charted tiles (`x`, `y`, `z`, `label` like `3N 2E 1U`; nothing else) and the pieces (color, score, position), plus the settings and the move rules. No emails, no ids |
+| `/<slug>/api/action` | POST `{kind:"move", x, y}` or `{kind:"move", label:"3N 2E"}`: move your piece one space (diagonals included) onto a charted, unoccupied tile, once per turn, in addition to proposing. It charts the tiles around you |
+| `/js/*.js`, `/vendor/*.js`, `/theme.css`, `/site.css` | the board's scripts (three.js 0.186.1, vendored), and the styles |
 
 A slug is 2 to 40 characters of `a-z`, `0-9` and `-`, starting and ending with a
 letter or digit. These are refused (they would collide with the site's own
-routes): api, auth, join, assets, static, site.css, index.html, admin, www, mail,
+routes): api, auth, join, assets, static, site.css, theme.css, js, vendor, index.html, admin, www, mail,
 help, about, rules, board. An unknown slug is a friendly 404. The router
-(`src/index.ts`) is an allowlist: only `/`, `/site.css` and the game routes answer;
+(`src/index.ts`) is an allowlist: only `/`, `/site.css`, `/theme.css`, the board's scripts and the game routes answer;
 everything else is 404. Only `public/` is ever uploaded as static files (config,
 migrations, tests and `templates/` are not), and the Worker runs first for every
 request (`run_worker_first`), so a file in `public/` is served only if the router names it.
@@ -69,7 +72,7 @@ npx wrangler d1 execute DB --local --command "SELECT to_addr, subject, body FROM
 
 `create-game.sh` takes `--slug`, `--name`, `--repo owner/name`, and optionally
 `--rules-path` (default `RULES.md`), `--rules-ref` (default `main`),
-`--max-players`, `--winning-score`, `--local` (default) or `--remote`. It checks
+`--max-players` (1 to 8, default 8: the `max_players` setting), `--size` (island side, even, 4 to 16, default 8; every other board setting is written to the game's row at its default and can be changed there: `src/lib/settings.js`), `--winning-score`, `--local` (default) or `--remote`. It checks
 the repo's rules file is publicly readable with a plain GET and refuses
 otherwise, generates the join code at run time (never committed), and prints
 `<SITE_URL>/<slug>/join/<CODE>`. Run it again with another slug for a second game.
@@ -90,7 +93,7 @@ two games is two unrelated players.
 - A game has a **join code** (8 characters, made by `scripts/create-game.sh`
   when the game is created; it is never committed, because this repo is public).
   The join link is `https://<site>/<slug>/join/<CODE>`. A code opens only its own game.
-- Joining asks for an email, a display name and a marker. Nothing is created
+- Joining asks for an email, a display name and a piece color (one of eight, unique per game). Nothing is created
   until the person clicks the link we email them, so nobody can sign up someone else.
 - Log-in is a **magic link** by email, for that game: single use, expires in 15
   minutes. Limits: 3 links per (game, email) per 15 minutes, and 10 per email
@@ -108,10 +111,10 @@ two games is two unrelated players.
   player takes a proposal once play begins).
 - `/<slug>/api/game` is public and never contains emails, player ids or the join code.
 
-To start a game by hand (no referee yet):
+To start a game by hand (no moderator yet):
 `npx wrangler d1 execute DB --local --command "UPDATE games SET status='playing', round=1, turn=0 WHERE slug='demo'"`
 (add `--remote` against the deployed database).
-Once playing, the player whose turn it is (`games.turn` = their seat number, from 0) sees a "Your turn" box on the board and submits one prompt per round. This only records the turn; nothing advances `turn` or `round` yet.
+Once playing, the player whose turn it is (`games.turn` = their seat number, from 0) sees a "Your turn" box on the board and submits one prompt per round, and may also move their piece once (in either order). Proposing only records the turn; nothing advances `turn` or `round` yet (a move is remembered in `games.last_move` as `round:turn`, so whatever advances the turn must make `round` grow when `turn` wraps).
 
 ## Rules live in each game's repo
 
@@ -132,6 +135,13 @@ One sender, chosen at runtime (`src/lib/email.ts`):
 2. else `RESEND_API_KEY` secret and `MAIL_FROM` set (Resend)
 3. else `DEV_MODE=1` (outbox table; **local only**, it returns magic links in API replies)
 4. else join and log-in answer `503 email is not configured`. They never pretend to succeed.
+
+In production `wrangler.toml` `[vars]` sets `MAIL_FROM = "Chalant <chalant@promptocracy.us>"`
+(the sender is Chalant, the moderator; Cloudflare Email Sending is set up for promptocracy.us) and
+`SITE_URL = "https://promptocracy.us"` (email links and the Origin check). Local development and
+the tests blank both (`.dev.vars.example`, `tests/lib.mjs`) so email goes to the outbox and links use
+the local origin (`npm run dev` passes `--var MAIL_FROM: --var SITE_URL:`, which wins over `.dev.vars`; to test real email links locally, run `wrangler dev` yourself with your own `--var`s). Previews do not inherit `[vars]`: they have no `MAIL_FROM`, no `SITE_URL` and no
+email binding (`tests/hex.mjs` fails if a `previews` block ever adds them).
 
 ## Deploy
 
@@ -187,7 +197,7 @@ npx wrangler d1 migrations apply DB --remote --config wrangler.preview-migration
 #    [[send_email]] block from wrangler.toml (the EMAIL binding wins over Resend
 #    whenever it exists), and
 npx wrangler secret put RESEND_API_KEY
-# Set SITE_URL in [vars] to the public address once it is known (the Origin check uses it).
+# MAIL_FROM and SITE_URL are already set in [vars] for promptocracy.us.
 
 # 4. Merge to main: Workers Builds deploys. (Or by hand: npx wrangler deploy.)
 

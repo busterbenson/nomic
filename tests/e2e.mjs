@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
-import { ROOT, client, createGame, d1, finish, join as joinGame, migrate, newState, startRulesStub, startServer, MARKERS } from "./lib.mjs";
+import { ROOT, client, createGame, d1, finish, join as joinGame, migrate, newState, startRulesStub, startServer, COLORS } from "./lib.mjs";
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = "") => {
@@ -45,12 +45,12 @@ try {
   console.log("join flow");
   check("join code is 8 characters, no repo-committed code", /^[A-HJKMNP-Z2-9]{8}$/.test(game.code));
   const page = await client(A).get(`/one/join/${game.code.toLowerCase()}`);
-  check("join page loads, code is case-insensitive", page.status === 200 && page.text.includes("Game One") && page.text.includes("5 of 5 seats open"));
+  check("join page loads, code is case-insensitive", page.status === 200 && page.text.includes("Game One") && page.text.includes("8 of 8 seats open"));
   const bad = await client(A).get("/one/join/ZZZZZZZZ");
   check("unknown code gives a friendly page", bad.status === 404 && bad.text.includes("doesn't match this game"));
 
   const ada = client(A);
-  const r1 = await ada.post("/one/api/join", { code: game.code.toLowerCase(), email: "Ada@Example.com", name: "Ada", marker: MARKERS[0] });
+  const r1 = await ada.post("/one/api/join", { code: game.code.toLowerCase(), email: "Ada@Example.com", name: "Ada", color: COLORS[0] });
   check("POST /api/join accepts the right code (lowercase) and returns a dev link", r1.status === 200 && r1.data.dev_link?.includes("/one/auth/verify?token="), r1.text);
   const pre = await ada.get("/one/api/game");
   check("nobody is a player until the link is clicked", pre.data.players.length === 0);
@@ -72,13 +72,13 @@ try {
   const sc = v1.headers.getSetCookie().join("\n");
   check("cookie is `s`, scoped to Path=/one, HttpOnly, Secure, SameSite=Lax, 30 days", /^s=/.test(sc) && /Path=\/one(;|$)/i.test(sc) && /HttpOnly/i.test(sc) && /Secure/i.test(sc) && /SameSite=Lax/i.test(sc) && /Max-Age=2592000/i.test(sc), sc);
   const me = await ada.get("/one/api/me");
-  check("/one/api/me returns user and player", me.status === 200 && me.data.user.name === "Ada" && me.data.player.marker === MARKERS[0] && me.data.player.is_host === true, me.text);
+  check("/one/api/me returns user and player", me.status === 200 && me.data.user.name === "Ada" && me.data.player.color.key === COLORS[0] && me.data.player.is_host === true, me.text);
   check("session id is stored hashed", d1(state, "SELECT id_hash FROM sessions").every((r) => /^[0-9a-f]{64}$/.test(r.id_hash)) && !sc.includes(d1(state, "SELECT id_hash FROM sessions")[0].id_hash));
   check("token is stored hashed", d1(state, "SELECT token_hash FROM login_tokens").every((r) => /^[0-9a-f]{64}$/.test(r.token_hash)));
   check("/one/api/me without a cookie is 401", (await client(A).get("/one/api/me")).status === 401);
 
   // second player so there is someone to notify
-  const bo = await join(A, game.code, { email: "bo@example.com", name: "Bo", marker: MARKERS[1] });
+  const bo = await join(A, game.code, { email: "bo@example.com", name: "Bo", color: COLORS[1] });
   const pub = await client(A).get("/one/api/game");
   check("/one/api/game lists both players in turn order", pub.data.players.map((p) => p.name).join() === "Ada,Bo" && pub.data.players[1].turn_order === 1, pub.text);
   check("/one/api/game contains no '@' anywhere", !pub.text.includes("@"), pub.text);
@@ -105,33 +105,33 @@ try {
     d1(state, "SELECT body FROM outbox WHERE subject LIKE 'Finish joining%' LIMIT 1")[0].body.includes("Click the link, then press Continue"));
 
   console.log("rejections");
-  const w = await client(A).post("/one/api/join", { code: "ZZZZZZZZ", email: "x@example.com", name: "X", marker: MARKERS[2] });
+  const w = await client(A).post("/one/api/join", { code: "ZZZZZZZZ", email: "x@example.com", name: "X", color: COLORS[2] });
   check("wrong code rejected", w.status === 404);
-  const taken = await client(A).post("/one/api/join", { code: game.code, email: "c@example.com", name: "Cy", marker: MARKERS[0] });
-  check("taken marker rejected", taken.status === 409 && /marker/i.test(taken.data.error), taken.text);
-  check("bad email rejected", (await client(A).post("/one/api/join", { code: game.code, email: "nope", name: "Cy", marker: MARKERS[2] })).status === 400);
+  const taken = await client(A).post("/one/api/join", { code: game.code, email: "c@example.com", name: "Cy", color: COLORS[0] });
+  check("taken color rejected", taken.status === 409 && /color/i.test(taken.data.error), taken.text);
+  check("bad email rejected", (await client(A).post("/one/api/join", { code: game.code, email: "nope", name: "Cy", color: COLORS[2] })).status === 400);
   check("empty and 41-char names rejected",
-    (await client(A).post("/one/api/join", { code: game.code, email: "n1@example.com", name: "  ", marker: MARKERS[2] })).status === 400 &&
-    (await client(A).post("/one/api/join", { code: game.code, email: "n2@example.com", name: "x".repeat(41), marker: MARKERS[2] })).status === 400);
+    (await client(A).post("/one/api/join", { code: game.code, email: "n1@example.com", name: "  ", color: COLORS[2] })).status === 400 &&
+    (await client(A).post("/one/api/join", { code: game.code, email: "n2@example.com", name: "x".repeat(41), color: COLORS[2] })).status === 400);
   check("a name made only of zero-width joiners is rejected",
-    (await client(A).post("/one/api/join", { code: game.code, email: "zz@example.com", name: "\u200C\u200D", marker: MARKERS[3] })).status === 400);
-  check("unknown marker rejected", (await client(A).post("/one/api/join", { code: game.code, email: "n3@example.com", name: "Z", marker: "💩" })).status === 400);
+    (await client(A).post("/one/api/join", { code: game.code, email: "zz@example.com", name: "\u200C\u200D", color: COLORS[3] })).status === 400);
+  check("unknown color rejected", (await client(A).post("/one/api/join", { code: game.code, email: "n3@example.com", name: "Z", color: "puce" })).status === 400);
   // full game: `small` seats 2. It is not the current game (game 1 has a later created_at) but joins go by code.
-  await join(A, small.code, { email: "s1@example.com", name: "S1", marker: MARKERS[0] });
-  await join(A, small.code, { email: "s2@example.com", name: "S2", marker: MARKERS[1] });
-  const full = await client(A).post("/tiny/api/join", { code: small.code, email: "s3@example.com", name: "S3", marker: MARKERS[2] });
+  await join(A, small.code, { email: "s1@example.com", name: "S1", color: COLORS[0] });
+  await join(A, small.code, { email: "s2@example.com", name: "S2", color: COLORS[1] });
+  const full = await client(A).post("/tiny/api/join", { code: small.code, email: "s3@example.com", name: "S3", color: COLORS[2] });
   check("full game rejected", full.status === 409 && /full/i.test(full.data.error), full.text);
   check("full game's join page says so", (await client(A).get(`/tiny/join/${small.code}`)).text.includes("This game is full."));
 
   // a link requested while there was room cannot overfill the game when clicked late
-  const late = await client(A).post("/one/api/join", { code: game.code, email: "late@example.com", name: "Late", marker: MARKERS[4] });
-  const lateOk = await client(A).post("/one/api/join", { code: game.code, email: "late2@example.com", name: "Late2", marker: MARKERS[4] });
+  const late = await client(A).post("/one/api/join", { code: game.code, email: "late@example.com", name: "Late", color: COLORS[4] });
+  const lateOk = await client(A).post("/one/api/join", { code: game.code, email: "late2@example.com", name: "Late2", color: COLORS[4] });
   const lateFirst = await finish(client(A), late.data.dev_link);
   const lateSecond = await finish(client(A), lateOk.data.dev_link);
-  check("two people holding links for one marker: first wins, second is told the join failed",
+  check("two people holding links for one color: first wins, second is told the join failed",
     lateFirst.headers.get("location") === "/one/?notice=joined" && lateSecond.headers.get("location") === "/one/?notice=join-failed" && !lateSecond.headers.getSetCookie().length);
 
-  const ex = await client(A).post("/one/api/join", { code: game.code, email: "dup@example.com", name: "Dup", marker: MARKERS[2] });
+  const ex = await client(A).post("/one/api/join", { code: game.code, email: "dup@example.com", name: "Dup", color: COLORS[2] });
   const first = await finish(client(A), ex.data.dev_link);
   const again = await finish(client(A), ex.data.dev_link);
   check("token works once", first.headers.get("location") === "/one/?notice=joined");
@@ -165,17 +165,17 @@ try {
   const g4 = await client(A).post("/one/api/login", { email: "ghost2@example.com" });
   check("the limit applies to unknown emails the same way", g1.status === 200 && g4.status === 429);
 
-  const j1 = await client(A).post("/one/api/join", { code: game.code, email: "spam@example.com", name: "Sp", marker: MARKERS[3] });
-  await client(A).post("/one/api/join", { code: game.code, email: "spam@example.com", name: "Sp", marker: MARKERS[3] });
-  await client(A).post("/one/api/join", { code: game.code, email: "spam@example.com", name: "Sp", marker: MARKERS[3] });
-  const j4 = await client(A).post("/one/api/join", { code: game.code, email: "spam@example.com", name: "Sp", marker: MARKERS[3] });
+  const j1 = await client(A).post("/one/api/join", { code: game.code, email: "spam@example.com", name: "Sp", color: COLORS[3] });
+  await client(A).post("/one/api/join", { code: game.code, email: "spam@example.com", name: "Sp", color: COLORS[3] });
+  await client(A).post("/one/api/join", { code: game.code, email: "spam@example.com", name: "Sp", color: COLORS[3] });
+  const j4 = await client(A).post("/one/api/join", { code: game.code, email: "spam@example.com", name: "Sp", color: COLORS[3] });
   check("the join form is rate limited the same way (4th link refused)", j1.status === 200 && j4.status === 429);
   const ads = await ada.post("/one/api/notifications/read", { ids: [] });
   check("marking an empty id list is a no-op, not a 500", ads.status === 200);
   check("bidi/zero-width characters are stripped from names",
-    (await client(A).post("/one/api/join", { code: game.code, email: "bidi@example.com", name: "A\u202EB\u200Bc", marker: MARKERS[3] })).status === 200 &&
+    (await client(A).post("/one/api/join", { code: game.code, email: "bidi@example.com", name: "A\u202EB\u200Bc", color: COLORS[3] })).status === 200 &&
     d1(state, "SELECT display_name FROM login_tokens WHERE email = 'bidi@example.com'")[0].display_name === "ABc");
-  await client(A).post("/one/api/join", { code: game.code, email: "zw@example.com", name: "\u0645\u06CC\u200C\u062E", marker: MARKERS[3] });
+  await client(A).post("/one/api/join", { code: game.code, email: "zw@example.com", name: "\u0645\u06CC\u200C\u062E", color: COLORS[3] });
   check("ZWNJ (needed in Persian names) is kept", d1(state, "SELECT display_name FROM login_tokens WHERE email = 'zw@example.com'")[0].display_name.includes("\u200C"));
 
   const burst = await Promise.all(Array.from({ length: 8 }, () => client(A).post("/one/api/login", { email: "burst@example.com" })));
@@ -243,7 +243,7 @@ try {
   check("the turn does NOT advance on submit", pub1.data.game.turn === 1 && pub1.data.game.round === 1);
   check("/one/api/game shows the prompt and status, still no '@' or ids",
     pub1.data.turn_status === "submitted" && pub1.data.turns[0].prompt.includes("cats") && pub1.data.turns[0].name === "Bo" && !pub1.text.includes("@") && !/user_id|"id"/.test(pub1.text), pub1.text);
-  check("the log records it", pub1.data.events[0].text.includes("Bo took their turn"));
+  check("the log records it", pub1.data.events[0].text.includes("Bo (Saffron) took their turn"));
   const after = await ada.get("/one/api/notifications");
   check("the other players were notified in-game", after.data.unread === before + 1 && after.data.notifications[0].kind === "turn_submitted");
   check("and by email, but not the submitter", (() => { const o = d1(state, "SELECT to_addr FROM outbox WHERE subject LIKE '%took their turn%'"); return o.some((r) => r.to_addr === "ada@example.com") && !o.some((r) => r.to_addr === "bo@example.com"); })());
@@ -257,13 +257,13 @@ try {
   const pathOf = { one: "/busterbenson/game-one/main/RULES.md", two: "/busterbenson/game-two/main/RULES.md" };
   // Game two: its own code, its own people. Same email as Ada, a different account.
   check("two games have different join codes", game.code !== two.code && /^[A-HJKMNP-Z2-9]{8}$/.test(two.code));
-  const wrongA = await client(A).post("/two/api/join", { code: game.code, email: "w1@example.com", name: "W", marker: MARKERS[2] });
-  const wrongB = await client(A).post("/one/api/join", { code: two.code, email: "w2@example.com", name: "W", marker: MARKERS[2] });
+  const wrongA = await client(A).post("/two/api/join", { code: game.code, email: "w1@example.com", name: "W", color: COLORS[2] });
+  const wrongB = await client(A).post("/one/api/join", { code: two.code, email: "w2@example.com", name: "W", color: COLORS[2] });
   check("joining game two with game one's code fails (and the reverse)", wrongA.status === 404 && wrongB.status === 404, wrongA.text + wrongB.text);
   check("game one's code opens no join page on game two", (await client(A).get(`/two/join/${game.code}`)).status === 404 && (await client(A).get(`/two/join/${two.code}`)).status === 200);
   check("no token was stored for the refused joins", d1(state, "SELECT COUNT(*) AS n FROM login_tokens WHERE email IN ('w1@example.com','w2@example.com')")[0].n === 0);
 
-  const sameEmail = await ada.post("/two/api/join", { code: two.code, email: "ADA@example.com", name: "Quill", marker: MARKERS[0] });
+  const sameEmail = await ada.post("/two/api/join", { code: two.code, email: "ADA@example.com", name: "Quill", color: COLORS[0] });
   const quillFinish = await finish(ada, sameEmail.data.dev_link);
   check("the same email can join a second game", sameEmail.status === 200 && quillFinish.status === 303 && quillFinish.headers.get("location") === "/two/?notice=joined");
   check("game two's cookie is `s` with Path=/two", /^s=/.test(quillFinish.headers.getSetCookie()[0]) && /Path=\/two(;|$)/i.test(quillFinish.headers.getSetCookie()[0]));
@@ -271,7 +271,7 @@ try {
   check("that is two separate accounts", accounts.length === 2 && accounts[0].id !== accounts[1].id && accounts.map((a) => a.slug).join() === "one,two" && accounts.map((a) => a.display_name).join() === "Ada,Quill", JSON.stringify(accounts));
   check("the browser keeps one session per game, each scoped to its own path", [...ada.jar.keys()].filter((k) => k.startsWith("s|")).sort().join() === "s|/one,s|/two");
   check("each game knows her by her own name", (await ada.get("/one/api/me")).data.user.name === "Ada" && (await ada.get("/two/api/me")).data.user.name === "Quill");
-  const zed = await join(A, two.code, { email: "zed@example.com", name: "Zed", marker: MARKERS[1] });
+  const zed = await join(A, two.code, { email: "zed@example.com", name: "Zed", color: COLORS[1] });
 
   // A session for one game is not a session for another, even with the cookie forced across.
   const aCookie = [...ada.jar].find(([k]) => k === "s|/one")[1];
@@ -345,7 +345,7 @@ try {
   const land = await client(A).get("/");
   check("the landing page lists both games, with status and player counts and links",
     land.status === 200 && land.text.includes("Game One") && land.text.includes("Game Two") && land.text.includes('href="/one/"') && land.text.includes('href="/two/"') &&
-    /Game Two<\/strong><\/a>\s*<span class="sub">In play · 2 of 5 players/.test(land.text), land.text.slice(0, 1500));
+    /Game Two<\/strong><\/a>\s*<span class="sub">In play · 2 of 8 players/.test(land.text), land.text.slice(0, 1500));
   check("the landing page contains no '@' and no join code", !land.text.includes("@") && !land.text.includes(game.code) && !land.text.includes(two.code));
   const redirect = await client(A).get("/one");
   check("/<slug> without the slash redirects to /<slug>/", redirect.status === 308 && redirect.headers.get("location") === "/one/");
@@ -420,7 +420,7 @@ try {
     migrate(state3);
     const g3 = await createGame(state3, { slug: "one", name: "Game One", repo: "busterbenson/game-one", ...R });
     third = await startServer(state3, 8794, ["DEV_MODE=1", `RULES_BASE_URL=${stub.base}`]);
-    const bl = await client(third.base).post("/one/api/join", { code: g3.code, email: "br@example.com", name: "Br", marker: MARKERS[0] });
+    const bl = await client(third.base).post("/one/api/join", { code: g3.code, email: "br@example.com", name: "Br", color: COLORS[0] });
     let out = "";
     try {
       // async: a blocked event loop would stop us draining wrangler's log pipes and stall the servers
@@ -436,7 +436,7 @@ try {
   migrate(state2);
   const g2 = await createGame(state2, { slug: "one", name: "Game One", repo: "busterbenson/game-one", ...R });
   bare = await startServer(state2, 8792, ["DEV_MODE=0"]);
-  const j503 = await client(bare.base).post("/one/api/join", { code: g2.code, email: "a@example.com", name: "A", marker: MARKERS[0] });
+  const j503 = await client(bare.base).post("/one/api/join", { code: g2.code, email: "a@example.com", name: "A", color: COLORS[0] });
   check("with DEV_MODE unset and no email configured, /api/join is 503", j503.status === 503 && /not configured/i.test(j503.data.error), j503.text);
   check("so is /api/login", (await client(bare.base).post("/one/api/login", { email: "a@example.com" })).status === 503);
   check("and nothing was stored or sent", d1(state2, "SELECT COUNT(*) AS n FROM login_tokens")[0].n === 0 && d1(state2, "SELECT COUNT(*) AS n FROM outbox")[0].n === 0);

@@ -1,7 +1,7 @@
 // notify() writes one in-game notification per player of ONE game and queues the
 // emails. Today player_joined and turn_submitted use it. turn_started,
 // proposal_open, vote_result and ruling are meant to call it the same way once
-// the referee exists.
+// the moderator exists.
 import { emailMode, sendEmail } from "./email";
 import { Ctx, Env, nowIso } from "./util";
 

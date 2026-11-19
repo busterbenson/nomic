@@ -50,6 +50,7 @@ export async function createGame(state, o) {
   const args = ["--slug", o.slug, "--name", o.name || `Game ${o.slug}`, "--repo", o.repo || "busterbenson/test-game"];
   if (o.rulesPath) args.push("--rules-path", o.rulesPath);
   if (o.max) args.push("--max-players", String(o.max));
+  if (o.size) args.push("--size", String(o.size));
   const { stdout: out } = await execFileP(pjoin(ROOT, "scripts", "create-game.sh"), args, {
     cwd: ROOT, encoding: "utf8", timeout: 60000,
     env: { ...env, PROMPTOCRACY_PERSIST_TO: state, SITE_URL: o.site || "http://localhost", RULES_BASE_URL: o.rulesBase },
@@ -60,6 +61,10 @@ export async function createGame(state, o) {
 export async function startServer(state, port, bindings = []) {
   if (!existsSync(WRANGLER)) throw new Error("Run `npm install` first.");
   const args = ["dev", "--port", String(port), "--persist-to", state, "--ip", "127.0.0.1"];
+  // wrangler.toml [vars] holds the PRODUCTION MAIL_FROM and SITE_URL. Local runs blank both
+  // (email goes to the outbox, links use the local origin) unless a test sets its own.
+  const given = new Set(bindings.map((b) => b.split("=")[0]));
+  for (const k of ["MAIL_FROM", "SITE_URL"]) if (!given.has(k)) args.push("--var", `${k}:`);
   for (const b of bindings) args.push("--var", b.replace("=", ":"));
   const child = spawn(WRANGLER, args, { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"], detached: false });
   let log = "";
@@ -95,11 +100,13 @@ export function client(base) {
     cookieFor: (path) => header(path),
     async req(method, path, body, headers = {}, raw = null) {
       const cookie = header(new URL(path, base).pathname);
-      const res = await fetch(base + path, {
+      const send = () => fetch(base + path, {
         method, redirect: "manual", signal: AbortSignal.timeout(20000),
         headers: { ...(body !== undefined ? { "content-type": "application/json" } : {}), ...(cookie ? { cookie } : {}), ...headers },
         body: raw !== null ? raw : body !== undefined ? JSON.stringify(body) : undefined,
       });
+      // A kept-alive socket the dev server closed while the test was busy elsewhere resets on reuse: retry once.
+      const res = await send().catch((e) => (e?.cause?.code === "ECONNRESET" ? send() : Promise.reject(e)));
       for (const sc of res.headers.getSetCookie?.() ?? []) {
         const [pair] = sc.split(";");
         const eq = pair.indexOf("=");
@@ -121,11 +128,11 @@ export function client(base) {
   return c;
 }
 
-export const MARKERS = ["🦉", "🐙", "🦊", "🐢", "🦋"];
+export const COLORS = ["vermilion", "saffron", "moss", "teal", "cobalt", "violet", "rose", "graphite"];
 
 // Join through the real flow: request the link, follow it. Returns a client logged in to that game.
-export async function join(base, slug, code, { email, name, marker }, c = client(base)) {
-  const r = await c.post(`/${slug}/api/join`, { code, email, name, marker });
+export async function join(base, slug, code, { email, name, color }, c = client(base)) {
+  const r = await c.post(`/${slug}/api/join`, { code, email, name, color });
   if (r.status !== 200) throw new Error(`join ${email}: ${r.status} ${r.text}`);
   const v = await finish(c, r.data.dev_link);
   if (v.status !== 303) throw new Error(`verify ${email}: ${v.status}`);

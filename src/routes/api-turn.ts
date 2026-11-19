@@ -1,9 +1,10 @@
 // POST /<slug>/api/turn {prompt}: the player whose turn it is submits their prompt.
 // This only RECORDS the turn. It does not advance games.turn: that happens when
-// the referee and the vote are built.
+// the moderator and the vote are built.
 import { getPlayer } from "../lib/auth";
+import { PROPOSAL_INSERT_SQL } from "../lib/proposal.js";
 import { notify } from "../lib/notify";
-import { Ctx, json, nowIso, readJson, siteUrl } from "../lib/util";
+import { Ctx, json, nowIso, readJson, siteUrl, who } from "../lib/util";
 
 export const post = async (ctx: Ctx) => {
   const { env, request } = ctx;
@@ -20,14 +21,16 @@ export const post = async (ctx: Ctx) => {
   const now = nowIso();
   const name = player.display_name;
   // The turn and its log line land together or not at all.
+  // Both statements only land if the game is still exactly as it was read (same turn and round).
+  const turnId = crypto.randomUUID();
   try {
-    await env.DB.batch([
-      env.DB.prepare(
-        "INSERT INTO turns (id, game_id, player_id, round, turn_index, prompt, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'submitted', ?, ?)",
-      ).bind(crypto.randomUUID(), game.id, player.id, game.round, game.turn, prompt, now, now),
-      env.DB.prepare("INSERT INTO events (game_id, kind, text, created_at) VALUES (?, 'turn_submitted', ?, ?)")
-        .bind(game.id, `${player.marker} ${name} took their turn.`, now),
+    const res = await env.DB.batch([
+      env.DB.prepare(PROPOSAL_INSERT_SQL)
+        .bind(turnId, player.id, prompt, now, now, game.id, game.turn, game.round),
+      env.DB.prepare("INSERT INTO events (game_id, kind, text, created_at) SELECT ?, 'turn_submitted', ?, ? WHERE EXISTS (SELECT 1 FROM turns WHERE id = ?)")
+        .bind(game.id, `${who(name, player.color)} took their turn.`, now, turnId),
     ]);
+    if (!(res[0]?.meta?.changes > 0)) return json({ error: "The turn changed under you. Reload and try again." }, 409);
   } catch (e: any) {
     // Only the one-live-turn-per-round index means "already took it"; anything else is a real failure.
     if (/UNIQUE constraint failed/i.test(String(e?.message || e) + String(e?.cause?.message || ""))) {
@@ -38,11 +41,11 @@ export const post = async (ctx: Ctx) => {
   }
   try {
     await notify(env, ctx, game, {
-      kind: "turn_submitted", body: `${player.marker} ${name} took their turn.`,
+      kind: "turn_submitted", body: `${who(name, player.color)} took their turn.`,
       email: true, exceptPlayerId: player.id, baseUrl: siteUrl(env, request),
     });
   } catch (e: any) {
     console.error("notify failed after turn:", e?.message || e);
   }
-  return json({ ok: true, status: "submitted", message: "Turn recorded. Waiting for the referee." });
+  return json({ ok: true, status: "submitted", message: "Turn recorded. Waiting for Chalant (the moderator)." });
 };

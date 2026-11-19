@@ -23,14 +23,12 @@ database_id = "639f045e-df2d-406e-91a4-a1facc4ca2fe"
 migrations_dir = "migrations"
 
 [vars]
-# (Nothing is set by default; see below.)
-# The From address for every email, e.g. MAIL_FROM = "Promptocracy <play@promptocracy.us>".
-# Must be on a domain set up for sending (Cloudflare Email Sending, or the domain
-# you verified with Resend). Deliberately unset: until you set it, join and
-# log-in answer 503 "email is not configured" instead of failing silently.
-# MAIL_FROM = "Promptocracy <play@promptocracy.us>"
-# Public address of the site, used in email links and the Origin check. Set it once the site has one.
-# SITE_URL = "https://promptocracy.us"   # placeholder: the domain is not registered yet
+# PRODUCTION values. Cloudflare Email Sending is set up for promptocracy.us, and the
+# sender is Chalant (the moderator), not "Promptocracy". Local development and the tests
+# override both (.dev.vars.example and tests/lib.mjs set them empty, so email goes to the
+# outbox table and links use the local origin). Previews do not inherit [vars] at all.
+MAIL_FROM = "Chalant <chalant@promptocracy.us>"
+SITE_URL = "https://promptocracy.us"
 
 # Cloudflare Email Sending (https://developers.cloudflare.com/email-service/). When this
 # binding exists AND MAIL_FROM is set it is used first; otherwise RESEND_API_KEY, then
