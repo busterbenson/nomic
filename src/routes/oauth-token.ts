@@ -33,7 +33,7 @@ export const post = async ({ env, request, data }: Ctx) => {
     if (row.client_id !== client.id || row.redirect_uri !== f("redirect_uri")) return err("invalid_grant", "That code is invalid, expired or already used.");
     if ((await pkceChallenge(f("code_verifier"))) !== row.code_challenge) return err("invalid_grant", "The code_verifier does not match.");
     const seat = await env.DB.prepare("SELECT 1 AS ok FROM players WHERE id = ? AND game_id = ?").bind(row.player_id, game.id).first();
-    if (!seat) return err("invalid_grant", "That player no longer has a seat in this game.");
+    if (!seat) return err("invalid_grant", "That player is no longer in this game.");
     return withCors(json(await mintTokens(env, { clientId: client.id, gameId: game.id, playerId: row.player_id, grantId: codeHash }), 200, { pragma: "no-cache" }));
   }
 
@@ -44,7 +44,7 @@ export const post = async ({ env, request, data }: Ctx) => {
     ).bind(await sha256Hex(f("refresh_token")), game.id, client.id, now).first();
     if (!row) return err("invalid_grant", "That refresh token is invalid or expired.");
     const seat = await env.DB.prepare("SELECT 1 AS ok FROM players WHERE id = ? AND game_id = ?").bind(row.player_id, game.id).first();
-    if (!seat) return err("invalid_grant", "That player no longer has a seat in this game.");
+    if (!seat) return err("invalid_grant", "That player is no longer in this game.");
     return withCors(json(await mintTokens(env, { clientId: client.id, gameId: game.id, playerId: row.player_id, grantId: row.grant_id }), 200, { pragma: "no-cache" }));
   }
   return err("unsupported_grant_type", "Use authorization_code or refresh_token.");

@@ -126,7 +126,7 @@ export const post = async (ctx: Ctx) => {
 
   const name = t.display_name; // stored raw, escaped when drawn
   await env.DB.prepare("INSERT INTO events (game_id, kind, text, created_at) VALUES (?, 'player_joined', ?, ?)")
-    .bind(game.id, `${who(name, color)} took a seat.`, now).run();
+    .bind(game.id, `${who(name, color)} joined the game.`, now).run();
   // The seat is already taken: a notification problem must not cost them the session.
   try {
     await notify(env, ctx, game, {

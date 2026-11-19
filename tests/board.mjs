@@ -128,12 +128,12 @@ const named = [...rulesText.matchAll(/\[setting: ([^\]]+)\]/g)].flatMap((m) => m
 const inRules = new Set(named), inCode = new Set(Object.keys(DEFAULT_SETTINGS));
 check("every [setting: x] named in templates/RULES.md exists in the default settings", named.length > 0 && [...inRules].every((n) => inCode.has(n)), [...inRules].filter((n) => !inCode.has(n)).join());
 check("and every default setting is named in templates/RULES.md", [...inCode].every((n) => inRules.has(n)), [...inCode].filter((n) => !inRules.has(n)).join());
-check("the starter rules are the old rules renumbered into hundreds blocks (100 Core, 200 Seats and turns, 300 Proposals and rulings, 400 Points and winning, 500 The board), with no rule from the later parts (days, voting by ballot, hearts and monsters, making things)",
-  ["## 100. Core rules [unanimous]", "## 200. Seats and turns [majority]", "## 300. Proposals and rulings [majority]", "## 400. Points and winning [majority]", "## 500. The board [majority]"].every((h) => rulesText.includes(h)) &&
-  ["101 Follow the rules", "102 Players", "103 Turns", "104 Voting", "105 The moderator", "201 Seats", "202 Your turn", "203 Time", "204 AI clients", "301 Overruling the moderator", "302 The board is part of the game", "401 Points", "402 Winning", "403 Paradox", "501 The grid", "502 Coordinates", "503 The island", "504 Moving and charting", "505 New players"].every((h) => rulesText.includes("### " + h + "\n")) &&
+check("the starter rules are the old rules renumbered into hundreds blocks (100 Core, 200 Players and turns, 300 Proposals and rulings, 400 Points and winning, 500 The board), with no rule from the later parts (days, voting by ballot, hearts and monsters, making things)",
+  ["## 100. Core rules [unanimous]", "## 200. Players and turns [majority]", "## 300. Proposals and rulings [majority]", "## 400. Points and winning [majority]", "## 500. The board [majority]"].every((h) => rulesText.includes(h)) &&
+  ["101 Follow the rules", "102 Players", "103 Turns", "104 Voting", "105 The moderator", "201 Game size", "202 Your turn", "203 Time", "204 AI clients", "301 Overruling the moderator", "302 The board is part of the game", "401 Points", "402 Winning", "403 Paradox", "501 The grid", "502 Coordinates", "503 The island", "504 Moving and charting", "505 New players"].every((h) => rulesText.includes("### " + h + "\n")) &&
   !/^## (600|700)\./m.test(rulesText) && !/claim|harvest|terrain|meadow|forest|owner|heart|monster|catalog/i.test(rulesText.slice(rulesText.indexOf("## 500."))));
 const wrapped = rulesText.replace(/\s+/g, " ");
-const must = ["is infinite", "charted or uncharted", "8x8 charted island centered on the origin", "3N 2E", "no zero row or column", "5x5 square with its four corners cut off", "random unoccupied charted tile at least 2.5 tiles from any uncharted tile", "visible to everyone", "propose one rule change", "diagonals included", "at most once per turn", "no other piece stands on", "seats at most 8 players"];
+const must = ["is infinite", "charted or uncharted", "8x8 charted island centered on the origin", "3N 2E", "no zero row or column", "5x5 square with its four corners cut off", "random unoccupied charted tile at least 2.5 tiles from any uncharted tile", "visible to everyone", "propose one rule change", "diagonals included", "at most once per turn", "no other piece stands on", "has at most 8 players"];
 check("the rules say what Buster decided: infinite grid, charted/uncharted, 8x8 centered island, 3N 2E, no zero, 5x5 minus corners, random unoccupied start 2.5 from uncharted, visible to everyone, propose and move, diagonals, once per turn, 8 players", must.every((w) => wrapped.includes(w)), must.filter((w) => !wrapped.includes(w)).join(" | "));
 check("mcp_enabled is a boolean setting, true by default: anything else is refused, and a game that stores nothing for it has MCP on", !bad("mcp_enabled", false) && !bad("mcp_enabled", true) && bad("mcp_enabled", "yes") && bad("mcp_enabled", 1) && bad("mcp_enabled", null) && getSettings({}).mcp_enabled === true && getSettings({ max_players: 4 }).mcp_enabled === true && getSettings({ mcp_enabled: false }).mcp_enabled === false && getSettings('{"mcp_enabled":false}').mcp_enabled === false && getSettings({ mcp_enabled: "no" }).mcp_enabled === true);
 check("the rule that enables MCP is 204 in the template and names the setting (the sync checks above keep the two in step)", wrapped.includes("### 204 AI clients A player may connect an AI client to this game and take their own turns through it. [setting: mcp_enabled]") && inRules.has("mcp_enabled") && inCode.has("mcp_enabled"));
@@ -189,7 +189,7 @@ try {
   check("max_players 3 is honoured", full.status === 409 && /full/i.test(full.data.error), full.text);
   await new Promise((r) => setTimeout(r, 800)); // emails are sent after the reply
   const outbox = d1(state, "SELECT subject, body FROM outbox").map((o) => o.subject + o.body).join("\n");
-  check("the log and emails name players as 'Ana (Teal)'", outbox.includes("You'll play as Teal.") && outbox.includes("Players so far (1 of 3): Ana (Teal).") && outbox.includes("Bo (Cobalt) joined the game.") && (await client(A).get("/hex/api/game")).data.events.some((e) => e.text === "Cy (Orchid) took a seat."), outbox.slice(0, 300));
+  check("the log and emails name players as 'Ana (Teal)'", outbox.includes("You'll play as Teal.") && outbox.includes("Players so far (1 of 3): Ana (Teal).") && outbox.includes("Bo (Cobalt) joined the game.") && (await client(A).get("/hex/api/game")).data.events.some((e) => e.text === "Cy (Orchid) joined the game."), outbox.slice(0, 300));
   const me = await ana.get("/hex/api/me");
   check("/api/me carries the claimed color", me.data.player.color.key === "teal" && me.data.player.color.name === "Teal" && /^#[0-9a-f]{6}$/i.test(me.data.player.color.hex) && !("marker" in me.data.player));
   const game = (await client(A).get("/hex/api/game")).data;
@@ -407,7 +407,7 @@ try {
   const fields = (o = {}) => ({ ...Object.fromEntries(new URLSearchParams(authorizeQuery(cid, pk))), ...o });
   const stranger = await web.form("/pilot/oauth/authorize", fields({ step: "login", email: "stranger@example.com" }), { origin: SITE });
   const decoy = /href="([^"]+auth\/verify[^"]+)"/.exec(stranger.text)?.[1];
-  check("an address with no seat gets the same page as one that has (and a decoy link)", stranger.status === 200 && /If that address has a seat/.test(stranger.text) && !!decoy);
+  check("an address with no seat gets the same page as one that has (and a decoy link)", stranger.status === 200 && /If that address has joined this game/.test(stranger.text) && !!decoy);
   const dv = await finish(client(A), decoy);
   check("the decoy link gives no session and no redirect: it is the expired-link page", dv.status === 400 && !dv.headers.getSetCookie().length);
   const noSess = await web.form("/pilot/oauth/authorize", fields({ step: "decide", decision: "allow" }), { origin: SITE });
@@ -501,7 +501,7 @@ try {
   const s1 = JSON.parse(st.text);
   const b1 = (await client(A).get("/pilot/api/board")).data;
   check("my_state: who I am, whose turn it is, where my piece stands, what I can do now",
-    s1.you.name === "Mia" && s1.you.seat === 0 && s1.you.color === "Teal" && s1.you.score === 0 && s1.you.is_host === true && J(s1.you.at) === J(b1.pieces[0].at) && s1.game.status === "playing" && s1.game.round === 1 && s1.game.turn === 0 && s1.whose_turn.name === "Mia" && s1.your_turn === true && J(s1.you_can) === '{"propose":{"allowed":true},"move":{"allowed":true}}' && noLeak(st.text), st.text);
+    s1.you.name === "Mia" && s1.you.turn_order === 0 && s1.you.color === "Teal" && s1.you.score === 0 && s1.you.is_host === true && J(s1.you.at) === J(b1.pieces[0].at) && s1.game.status === "playing" && s1.game.round === 1 && s1.game.turn === 0 && s1.whose_turn.name === "Mia" && s1.your_turn === true && J(s1.you_can) === '{"propose":{"allowed":true},"move":{"allowed":true}}' && noLeak(st.text), st.text);
   const s2 = JSON.parse((await tool(A, "pilot", tokMax, "my_state")).text);
   const webOut = await max.post("/pilot/api/turn", { prompt: "Hello" });
   const webOutMove = await max.post("/pilot/api/action", { kind: "move", x: 3, y: 2 });

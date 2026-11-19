@@ -21,7 +21,7 @@ export const get = async ({ env }: Ctx) => {
       const seated = (g.colors ? g.colors.split(",") : []).map((k) => `<span class="dot" style="background:${esc(colorOf(k).hex)}" title="${esc(colorOf(k).name)}"></span>`);
       const open = Array.from({ length: Math.max(0, g.max_players - g.players) }, () => `<span class="dot open"></span>`);
       return `<li><a class="gcard" href="/${esc(g.slug)}/"><span class="gtile">${TILE}</span><span class="gtext"><span class="gname">${esc(g.name)}</span>
-<span class="gmeta"><span>/${esc(g.slug)}</span><span>${g.players} of ${g.max_players} seats</span><span>${esc(STATUS[g.status] ?? g.status)}</span></span>
+<span class="gmeta"><span>/${esc(g.slug)}</span><span>${g.players} of ${g.max_players} players</span><span>${esc(STATUS[g.status] ?? g.status)}</span></span>
 <span class="gseats" aria-hidden="true">${seated.join("")}${open.join("")}</span></span><span class="go">Open the game →</span></a></li>`;
     })
     .join("");

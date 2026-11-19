@@ -71,9 +71,9 @@ export function registerTools(server: McpServer, ctx: Ctx, player: Player) {
       return { allowed: true };
     };
     return { content: [{ type: "text" as const, text: asJson({
-      you: { name: me.data.user.name, seat: player.turn_order, color: me.data.player.color.name, score: me.data.player.score, is_host: me.data.player.is_host, at: piece?.at ?? null },
+      you: { name: me.data.user.name, turn_order: player.turn_order, color: me.data.player.color.name, score: me.data.player.score, is_host: me.data.player.is_host, at: piece?.at ?? null },
       game: { name: g.data.game.name, slug: g.data.game.slug, status: fresh.status, round: fresh.round, turn: fresh.turn, winning_score: g.data.game.winning_score },
-      whose_turn: fresh.status === "playing" && current ? { name: current.name, seat: current.turn_order, color: current.color.name } : null,
+      whose_turn: fresh.status === "playing" && current ? { name: current.name, turn_order: current.turn_order, color: current.color.name } : null,
       your_turn: fresh.status === "playing" && player.turn_order === fresh.turn,
       you_can: { propose: can("propose"), move: can("move") },
     }) }] };

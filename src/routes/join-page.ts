@@ -8,7 +8,7 @@ export const get = async ({ env, params, data }: Ctx) => {
   const code = normCode(params.code);
   const game = data.game!;
   const home = `/${esc(game.slug)}/`;
-  const right = `<a class="quiet" href="${home}"><span class="long">Already have a seat? </span>Log in</a>`;
+  const right = `<a class="quiet" href="${home}"><span class="long">Already joined? </span>Log in</a>`;
   if (!code || code !== game.join_code) {
     return page(game.name, `<h1>${esc(game.name)}</h1><div class="now">That code doesn't match this game.</div>
       <p><a href="${home}">See the board</a></p>`, 404, { right });
@@ -19,7 +19,7 @@ export const get = async ({ env, params, data }: Ctx) => {
   const closed = game.status !== "setup" || taken.length >= limit;
   const head = `<h1>${esc(game.name)}</h1>`;
   if (closed) {
-    return page(game.name, `${head}<div class="now">${game.status !== "setup" ? "This game has already started, so the seats are closed." : "This game is full."}</div>
+    return page(game.name, `${head}<div class="now">${game.status !== "setup" ? "This game has already started, so it's closed to new players." : "This game is full."}</div>
       <p><a href="${home}">See the board</a></p>`, 409, { right });
   }
   const dots = taken.map((t) => `<span class="dot" style="background:${esc(colorOf(t.color).hex)}"></span>`).join("");
@@ -34,7 +34,7 @@ export const get = async ({ env, params, data }: Ctx) => {
   return page(
     `Join ${game.name}`,
     `${head}
-<span class="seatchip"><span class="dots">${dots}</span>${taken.length} of ${limit} seats taken</span>
+<span class="seatchip"><span class="dots">${dots}</span>${taken.length} of ${limit} players</span>
 <form class="stack" id="f">
   <label class="field"><span>Your name</span><input type="text" name="name" maxlength="40" required autocomplete="nickname"></label>
   <label class="field"><span>Your email</span><input type="email" name="email" required autocomplete="email"></label>
@@ -43,7 +43,7 @@ export const get = async ({ env, params, data }: Ctx) => {
     <fieldset><legend>Your shape</legend><div class="opts shapes">${shapes}</div></fieldset>
     <fieldset><legend>Your color</legend><div class="opts colors">${colors}</div></fieldset>
   </div>
-  <button class="btn" type="submit">Take a seat</button>
+  <button class="btn" type="submit">Join the game</button>
   <div id="msg" role="status"></div>
 </form>
 <script type="module">

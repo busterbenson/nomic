@@ -11,7 +11,7 @@ export const post = async (ctx: Ctx) => {
 
   // The code must be THIS game's code: another game's code does not open this one.
   if (!normCode(body.code) || normCode(body.code) !== game.join_code) return json({ error: "That code doesn't match this game." }, 404);
-  if (game.status !== "setup") return json({ error: "This game has already started, so the seats are closed." }, 409);
+  if (game.status !== "setup") return json({ error: "This game has already started, so it's closed to new players." }, 409);
   const taken = await seatsTaken(env, game.id);
   if (taken.length >= seatLimit(game)) return json({ error: "This game is full." }, 409);
   const color = PALETTE.find((c) => c.key === body.color)?.key;
@@ -29,9 +29,9 @@ export const post = async (ctx: Ctx) => {
   // Same answer whether or not this address already has a seat here.
   const link = await issueLink(ctx, game, {
     email, purpose: "join", name, color, shape, send: true,
-    subject: `Promptocracy: take your seat in ${game.name}`,
+    subject: `Promptocracy: join ${game.name}`,
     intro: `Hi ${name},\n\nYou asked to join ${game.name}, a game of Promptocracy. You'll play as ${PALETTE.find((c) => c.key === color)!.name}.\n\n${playersLine(taken, seatLimit(game))}`,
-    action: "To take your seat",
+    action: "To join the game",
   });
   if (!link) return json({ error: "Too many links requested. Wait 15 minutes and try again." }, 429);
   const res: any = { ok: true, message: "Check your email for a link to finish joining." };

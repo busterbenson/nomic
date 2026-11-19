@@ -108,7 +108,7 @@ export const post = async (ctx: Ctx) => {
     });
     if (!link) return fail("Too many links requested. Wait 15 minutes and try again.", 429);
     const dev = emailMode(env) === "dev" ? `<p><a href="${esc(link)}">Log-in link</a></p>` : "";
-    return page(game.name, `<h1>${esc(game.name)}</h1><div class="now">If that address has a seat in this game, a log-in link is on its way.</div>${dev}`);
+    return page(game.name, `<h1>${esc(game.name)}</h1><div class="now">If that address has joined this game, a log-in link is on its way.</div>${dev}`);
   }
 
   const player = await getPlayer(env, request, game);

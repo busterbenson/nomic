@@ -44,7 +44,7 @@ const keep = [
   ["101", "Every player, and the moderator, must follow the rules in this file as they stand on `main`."],
   ["102", "Adding or removing a player takes a passed proposal."],
   ["104", "A proposal that changes a core rule (1xx) passes only if every player votes yes."],
-  ["201", "A game seats at most 8 players. [setting: max_players]"],
+  ["201", "A game has at most 8 players. [setting: max_players]"],
   ["202", "you move at most once per turn."],
   ["203", "is skipped for that round."],
   ["301", "If more than half of all players vote to overturn it, the ruling is reversed"],
@@ -58,7 +58,7 @@ const keep = [
 ];
 check("each old rule's sentences survive word for word under their new number", keep.every(([, t]) => rules.includes(t)), keep.filter(([, t]) => !rules.includes(t)).join(" | "));
 check("the renumbering is a map, not a rewrite: old 101-105 stay, 209 to 201, 208 to 202, 205 to 203, 210 to 204, 201 to 301, 204 to 302, 202 to 401, 203 to 402, 206 to 403, 207 to 501-505",
-  T.byNum["201"].paras[0].s.startsWith("A game seats") && T.byNum["202"].paras[0].s.startsWith("On your turn") && T.byNum["203"].paras[0].s.startsWith("A player who has not taken") && T.byNum["204"].paras[0].s.startsWith("A player may connect an AI client") && T.byNum["301"].paras[0].s.startsWith("Any player may appeal") && T.byNum["302"].paras[0].s.startsWith("A proposal may change the website") && T.byNum["401"].paras[0].s.startsWith("A player whose proposal passes") && T.byNum["402"].paras[0].s.startsWith("The first player to reach 100") && T.byNum["403"].paras[0].s.startsWith("If the rules are changed so that further play"));
+  T.byNum["201"].paras[0].s.startsWith("A game has at most") && T.byNum["202"].paras[0].s.startsWith("On your turn") && T.byNum["203"].paras[0].s.startsWith("A player who has not taken") && T.byNum["204"].paras[0].s.startsWith("A player may connect an AI client") && T.byNum["301"].paras[0].s.startsWith("Any player may appeal") && T.byNum["302"].paras[0].s.startsWith("A proposal may change the website") && T.byNum["401"].paras[0].s.startsWith("A player whose proposal passes") && T.byNum["402"].paras[0].s.startsWith("The first player to reach 100") && T.byNum["403"].paras[0].s.startsWith("If the rules are changed so that further play"));
 
 console.log("one palette file, one set of pieces");
 const hexOk = (h) => /^#[0-9A-Fa-f]{6}$/.test(h);
