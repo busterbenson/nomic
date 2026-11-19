@@ -33,7 +33,7 @@ export const get = async ({ env, data }: Ctx) => {
       status: g.status,
       turn: g.turn,
       round: g.round,
-      moves: g.moves,
+      moved: g.last_move === `${g.round}:${g.turn}`,
       winning_score: g.winning_score,
       max_players: seatLimit(g),
     },

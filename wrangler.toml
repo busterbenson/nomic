@@ -24,7 +24,7 @@ migrations_dir = "migrations"
 
 [vars]
 # PRODUCTION values. Cloudflare Email Sending is set up for promptocracy.us, and the
-# sender is Chalant (the referee), not "Promptocracy". Local development and the tests
+# sender is Chalant (the moderator), not "Promptocracy". Local development and the tests
 # override both (.dev.vars.example and tests/lib.mjs set them empty, so email goes to the
 # outbox table and links use the local origin). Previews do not inherit [vars] at all.
 MAIL_FROM = "Chalant <chalant@promptocracy.us>"

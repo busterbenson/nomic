@@ -3,8 +3,10 @@
 // each one in plain words and names it in brackets ("[setting: board.island]"), and a test keeps the
 // two lists identical.
 //
-// Plain JavaScript with no imports so the Worker (esbuild) and scripts/*.mjs (node) share it.
+// Plain JavaScript (imports only geometry.js) so the Worker (esbuild) and scripts/*.mjs (node) share it.
 // A game stores only the settings it changes; the rest come from DEFAULT_SETTINGS.
+
+import { chartOffsets } from "./geometry.js";
 
 export const DEFAULT_SETTINGS = {
   // How many players a game seats. At most 8: there are eight piece colors, and the starting island has
@@ -37,6 +39,16 @@ function exactly(v, keys) {
   return extra.length ? `unknown key ${extra[0]}` : missing.length ? `missing key ${missing[0]}` : null;
 }
 
+// How many tiles a new piece could start on in a fresh island: those whose whole chart shape lies inside it.
+// (One function, so the check below and the spawn rule cannot drift: it uses the same shape as a move.)
+export function spawnSpots(width, height, radius) {
+  const inside = (x, y) => x >= -width / 2 && x < width / 2 && y >= -height / 2 && y < height / 2;
+  const off = chartOffsets(radius);
+  let n = 0;
+  for (let x = -width / 2; x < width / 2; x++) for (let y = -height / 2; y < height / 2; y++) if (off.every(([dx, dy]) => inside(x + dx, y + dy))) n++;
+  return n;
+}
+
 // Checks a complete settings object. Returns a list of problems (empty = fine).
 export function validateSettings(s) {
   if (!isObj(s)) return ["settings must be an object"];
@@ -46,6 +58,11 @@ export function validateSettings(s) {
     if (!Object.hasOwn(s, k)) { errors.push(`missing setting ${k}`); continue; }
     const e = VALIDATORS[k](s[k]);
     if (e) errors.push(`${k}: ${e}`);
+  }
+  // The seats must fit: every player needs a spawn spot on the starting island.
+  if (!errors.length) {
+    const spots = spawnSpots(s["board.island"].width, s["board.island"].height, s["board.chart_radius"]);
+    if (spots < s.max_players) errors.push(`max_players ${s.max_players} does not fit: this island and chart radius leave only ${spots} spawn spots`);
   }
   return errors;
 }

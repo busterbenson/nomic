@@ -28,9 +28,9 @@ export function chartAroundStatements(env: Env, game: { id: string; settings: st
 // A game's starting island is charted the first time anything needs the board (a join, a read), from
 // the game's settings. Insert-if-absent, so two requests doing it at once cannot clash.
 export async function ensureTiles(env: Env, game: { id: string; settings: string }): Promise<void> {
-  const row: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM tiles WHERE game_id = ?").bind(game.id).first();
-  if (row?.n > 0) return;
   const { width, height } = getSettings(game.settings)["board.island"];
+  const row: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM tiles WHERE game_id = ?").bind(game.id).first();
+  if (row?.n >= width * height) return; // a game that has moved only ever has more; fewer means an island cut short, so finish it
   await chartAll(env, game.id, islandCoords(width, height));
 }
 

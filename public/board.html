@@ -212,21 +212,21 @@
     if (!current) { box.hidden = true; return; }
     const mine = ME && ME.player && ME.player.turn_order === game.turn;
     const taken = turns.find(t => t.turn_index === game.turn);
-    const moved = game.moves > 0;
+    const moved = !!game.moved;
     const moveLine = moved ? "You have moved this turn." : "You may also move your piece one space: tap a tile next to it, then Move here.";
     let html = "";
     if (mine && !taken) {
-      html = `<strong>Your turn.</strong> You may propose one rule change: write one prompt for Chalant (the referee). ${moveLine}
+      html = `<strong>Your turn.</strong> You may propose one rule change: write one prompt for Chalant (the moderator). ${moveLine}
         <form class="stack" id="turn-form" style="margin-top:10px; max-width:none">
           <textarea name="prompt" rows="4" maxlength="2000" required aria-label="Your prompt"></textarea>
           <button class="primary" type="submit">Submit my turn</button>
           <div id="turn-msg" role="status"></div>
         </form>`;
     } else if (mine) {
-      html = `<strong>Your turn.</strong> Your prompt is in: waiting for Chalant (the referee). ${moveLine}
+      html = `<strong>Your turn.</strong> Your prompt is in: waiting for Chalant (the moderator). ${moveLine}
         <blockquote class="prompt">${esc(taken.prompt)}</blockquote>`;
     } else if (taken) {
-      html = `<strong>${esc(who(current.name, current.color))}</strong> took their turn. Waiting for Chalant (the referee).
+      html = `<strong>${esc(who(current.name, current.color))}</strong> took their turn. Waiting for Chalant (the moderator).
         <blockquote class="prompt">${esc(taken.prompt)}</blockquote>`;
     } else {
       html = `<strong>${esc(who(current.name, current.color))}</strong> is playing.`;
@@ -309,7 +309,7 @@
     if (g.status !== "playing") return { ok: false, why: "" };
     const current = DATA.players[g.turn];
     if (ME.player.turn_order !== g.turn) return { ok: false, why: current ? `Waiting for ${who(current.name, current.color)} to play.` : "" };
-    if (g.moves >= 1) return { ok: false, why: "You have already moved this turn." };
+    if (g.moved) return { ok: false, why: "You have already moved this turn." };
     return { ok: true };
   }
 

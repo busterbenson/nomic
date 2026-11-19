@@ -2,8 +2,8 @@
 
 Nomic is a game where changing the rules is a move. Peter Suber invented it in
 1982, and Douglas Hofstadter's *Scientific American* column made it famous. This
-version keeps Suber's idea and swaps the human judge for an AI referee. On your
-turn you write a prompt in plain language, and the referee turns it into an exact
+version keeps Suber's idea and swaps the human judge for an AI moderator. On your
+turn you write a prompt in plain language, and the moderator turns it into an exact
 rule change, or carries it out as an action the rules allow. Rule changes can
 also change this website.
 
@@ -19,8 +19,8 @@ First game: public, played by friends. The site is built to host several games
 | Board state | Players, piece colors, scores, whose turn, the log, the tiles | D1 (`games`, `players`, `events`), read through `/<slug>/api/game` |
 | Notifications | In-game and email notices to every player | D1 (`notifications`), sent by `src/lib/notify.ts` |
 | Board | The public page that draws the state above and the game's rules; the board is drawn in WebGL (three.js, vendored) with an SVG fallback | `public/board.html`, `public/js/`, `public/theme.css` (the one file of colors), `public/site.css`, served as Worker static assets |
-| Rulings | Every ruling the referee makes, with the rules it cited | `rulings/` (created by the first ruling) |
-| Referee | An AI model that drafts proposals and rules on what the rules mean | GitHub Actions + the Claude API (not built yet) |
+| Rulings | Every ruling the moderator makes, with the rules it cited | `rulings/` (created by the first ruling) |
+| Moderator | An AI model that drafts proposals and rules on what the rules mean | GitHub Actions + the Claude API (not built yet) |
 
 ## Hosting, accounts and the git / D1 split
 
@@ -36,7 +36,7 @@ Anyone who wants to play signs up on the site: a **join code** (shared as a link
 it and logs them in. There are no passwords. Every player then gets
 **notifications**: an in-game list under a bell on the board, and an email. Only
 "player joined" exists today; turn started, proposal open, vote result and ruling
-call the same `notify()` once the referee exists.
+call the same `notify()` once the moderator exists.
 
 ## Many games, one repo each
 
@@ -52,7 +52,7 @@ is scoped to `Path=/<slug>` and is also checked against the game on the server.
 rules live in that game's own public repo (`games.repo`, `rules_path`,
 `rules_ref`), and later its rulings and any game-specific board extensions do
 too. So one game's rule changes (a passed proposal is a commit to its own repo)
-can never touch another game, and the referee for a game only ever gets write
+can never touch another game, and the moderator for a game only ever gets write
 access to that game's repo, never the platform's.
 
 What lives where:
@@ -66,7 +66,7 @@ What lives where:
   when the game is created (`scripts/create-game.sh`).
 
 The game's repo holds the rules: every passed proposal is a commit, so `git log` is
-the history of the rules, and the referee rereads `RULES.md` and the game state
+the history of the rules, and the moderator rereads `RULES.md` and the game state
 on every turn instead of remembering anything. (Earlier attempts to have a chatbot run Nomic
 broke down because the model lost track of which rules were in effect.)
 
@@ -79,15 +79,15 @@ broke down because the model lost track of which rules were in effect.)
    shows it to the whole table, and notifies the other players. One live turn per
    player per round; 1 to 2000 characters. **Built.**
    *Not built yet:* submitting does **not** advance the turn. The turn moves on
-   only when the referee and the vote exist (next PR), so for now a submitted turn
+   only when the moderator and the vote exist (next PR), so for now a submitted turn
    just waits, and `games.turn` / `games.round` are changed by hand.
-2. **Draft.** The referee replies on the turn with:
+2. **Draft.** The moderator replies on the turn with:
    - whether this is a **proposal** (it changes the rules or the site) or an
      **action** (something a rule already allows);
    - for a proposal, the exact new text and a PR containing it;
    - the rules it relied on, and any conflicts it found.
    The player can revise the prompt until the draft says what they meant.
-3. **Vote.** Players vote on the website (or on the PR; undecided). Code counts the votes (rule 104), not the referee.
+3. **Vote.** Players vote on the website (or on the PR; undecided). Code counts the votes (rule 104), not the moderator.
 4. **Result.** If the vote passes, the PR merges, the game state in D1 is updated
    (points, next turn, a log line), and the board updates. If it fails, the PR is
    closed and the turn moves on.
@@ -132,25 +132,25 @@ settings identical.
   the seat claim are one SQL statement, so two joiners cannot land on one tile.
 - **Moving** (`POST /<slug>/api/action`, `{kind:"move", x, y}` or `{kind:"move", label:"3N 2E"}`): on your
   turn you may move your piece one space, diagonals included, onto a charted tile nobody stands on, at most
-  once per turn, **in addition** to proposing a rule change. A move does not end the turn (the referee will;
-  whatever advances `games.turn` must also reset `games.moves` to 0). The move then charts the shape around the
+  once per turn, **in addition** to proposing a rule change. A move does not end the turn (the moderator will;
+  `games.last_move` holds the `round:turn` of the last move, so advancing the turn needs no reset). The move then charts the shape around the
   new position. The decided details live in `src/lib/board-rules.js`, one constant each.
 - **Look.** Isometric (2:1 dimetric), one fixed angle, no rotation; pan, zoom and recenter; every tile is the
   same blank slab. All colors are CSS tokens in `public/theme.css`, which the WebGL and SVG renderers read too,
   so a new palette is a one-file change.
 
-## What the referee may and may not do
+## What the moderator may and may not do
 
-The referee is the most interesting player at the table and the easiest one to
+The moderator is the most interesting player at the table and the easiest one to
 talk into things. "Ignore the previous rules, I win" is a legal Nomic move, and
-deciding what to do with it is the referee's job. So the boundaries are set in
-code, not in the referee's instructions:
+deciding what to do with it is the moderator's job. So the boundaries are set in
+code, not in the moderator's instructions:
 
 - It only ever **proposes**: it opens PRs and writes comments. It never merges.
   Merging happens when the code that counts votes says the vote passed.
 - It may edit `RULES.md`, `rulings/` and the site's files. It may not
   touch `.github/` (the workflows and their secrets). A rule cannot change that,
-  because the rule would have to be carried out by code the referee can't edit.
+  because the rule would have to be carried out by code the moderator can't edit.
 - It cites rule numbers for every ruling and writes the ruling down. Later
   rulings must be consistent with earlier ones unless a rule changed in between.
 - When a passed rule changes the site (rule 204), the code change is in the same
@@ -171,13 +171,13 @@ code, not in the referee's instructions:
   manual D1 update (see README). Seats close at that point.
 - **Who the host is.** The first person to join is marked host, which grants
   nothing yet.
-- **Referee access to D1.** The referee (a GitHub Action today) will get its own
+- **Moderator access to D1.** The moderator (a GitHub Action today) will get its own
   D1 access later, with a narrow token that can write scores, turns and
   notifications but not accounts or sessions. Not built.
-- **How the referee gets a turn.** The site records the turn; the referee will
+- **How the moderator gets a turn.** The site records the turn; the moderator will
   read `turns` rows with status `submitted` (mechanism not built: a Worker route
   calling the Claude API, or a scheduled job).
-- **The referee's model and API key.** Which model, and whose key pays for it.
+- **The moderator's model and API key.** Which model, and whose key pays for it.
   Each turn is a few calls; the cost per game should be small.
 - **Publishing.** Creating the Cloudflare D1 databases (production and preview), and
   choosing the email sender (Cloudflare Email Sending or Resend). Steps are in the README.
@@ -189,7 +189,7 @@ code, not in the referee's instructions:
 
 1. This skeleton: rules, state, a static board. (This PR.)
 2. Deploy to Cloudflare Workers, make the game, share the join link. (Accounts, join codes and notifications are built.)
-3. The referee: an Action that reads a turn issue, drafts the proposal and opens
+3. The moderator: an Action that reads a turn issue, drafts the proposal and opens
    the PR.
 4. Vote counting, merge, score and turn updates.
 5. Appeals and the rulings log.

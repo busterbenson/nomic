@@ -7,8 +7,8 @@ import { tmpdir } from "node:os";
 import { join as pjoin } from "node:path";
 import { ROOT, COLORS, client, createGame, d1, finish, join, migrate, newState, startRulesStub, startServer } from "./lib.mjs";
 import { chartOffsets, chartedAround, coordLabel, diagonals, islandCoords, tileLabel, neighbors, parseLabel, validCoord, withinSteps, xLabel, yLabel, zLabel } from "../src/lib/geometry.js";
-import { DEFAULT_SETTINGS, getSettings, settingsForSize, validateSettings } from "../src/lib/settings.js";
-import { DIAGONAL_MOVES, MOVES_PER_TURN, SHARED_TILES } from "../src/lib/board-rules.js";
+import { DEFAULT_SETTINGS, getSettings, settingsForSize, spawnSpots, validateSettings } from "../src/lib/settings.js";
+import { DIAGONAL_MOVES, SHARED_TILES } from "../src/lib/board-rules.js";
 import { PROPOSAL_INSERT_SQL } from "../src/lib/proposal.js";
 
 let pass = 0, fail = 0;
@@ -54,7 +54,7 @@ check("one step, with diagonals (P1, decided): all 8 neighbours, nothing two awa
   [[2, 0], [0, 2], [2, 1], [2, 2], [-2, 0], [0, 0]].every(([dx, dy]) => !withinSteps(0, 0, dx, dy, 1)));
 check("1W -> 1E and 1N -> 1S are one step (computed on the plain integers)", withinSteps(-1, 0, 0, 0, 1) && withinSteps(0, 0, 0, -1, 1) && withinSteps(-1, 0, 0, -1, 1) && !withinSteps(-1, 0, 1, 0, 1));
 check("without diagonals (the switch) only N, S, E, W count, and a larger distance reaches further", !withinSteps(0, 0, 1, 1, 1, false) && withinSteps(0, 0, 1, 0, 1, false) && withinSteps(0, 0, 2, 0, 2) && !withinSteps(0, 0, 3, 0, 2));
-check("the decided questions are pinned: P1 diagonals yes, P2 sharing a tile no, one move per turn", DIAGONAL_MOVES === true && SHARED_TILES === false && MOVES_PER_TURN === 1);
+check("the decided questions are pinned: P1 diagonals yes, P2 sharing a tile no", DIAGONAL_MOVES === true && SHARED_TILES === false);
 
 // ---------------------------------------------------------------- migration 0002 on a database with data
 console.log("migration 0002");
@@ -87,8 +87,8 @@ console.log("migration 0002");
       sql("SELECT COUNT(*) AS n FROM sessions s JOIN players p ON p.id = s.player_id AND p.game_id = s.game_id")[0].n === 3 &&
       sql("SELECT COUNT(*) AS n FROM notifications")[0].n === 3 && sql("SELECT COUNT(*) AS n FROM turns")[0].n === 1);
     check("foreign keys are intact after the rebuild", sql("PRAGMA foreign_key_check").length === 0);
-    check("the existing game got its seat limit as a setting (the old column's 5; every other default applies) and a move counter; unused join links were voided",
-      sql("SELECT settings FROM games")[0].settings === '{"max_players":5}' && sql("SELECT moves FROM games")[0].moves === 0 && sql("SELECT COUNT(*) AS n FROM login_tokens")[0].n === 0);
+    check("the existing game got its seat limit as a setting (the old column's 5; every other default applies) and an empty last-move marker; unused join links were voided",
+      sql("SELECT settings FROM games")[0].settings === '{"max_players":5}' && sql("SELECT last_move FROM games")[0].last_move === "" && sql("SELECT COUNT(*) AS n FROM login_tokens")[0].n === 0);
     let dup = "ok"; try { sql(`INSERT INTO players (id, game_id, email, display_name, color, turn_order, joined_at, x, y) VALUES ('px','g1','x@x.test','x','vermilion',9,'2026-01-01T00:00:00Z',0,0)`); } catch { dup = "refused"; }
     check("the new table keeps one color per player per game", dup === "refused");
     const t = sql("SELECT x, y, z FROM tiles WHERE game_id = 'g1'");
@@ -106,8 +106,9 @@ console.log("migration 0002");
 
 // ---------------------------------------------------------------- settings
 console.log("settings");
-check("the default settings are valid; they are the seat limit, the island size, the chart radius and the move distance, nothing else", validateSettings(DEFAULT_SETTINGS).length === 0 && validateSettings(settingsForSize(16, 4)).length === 0 && J(Object.keys(DEFAULT_SETTINGS)) === '["max_players","board.island","board.chart_radius","turn.move_distance"]' && DEFAULT_SETTINGS.max_players === 8 && DEFAULT_SETTINGS["board.island"].width === 8 && DEFAULT_SETTINGS["board.chart_radius"] === 2 && DEFAULT_SETTINGS["turn.move_distance"] === 1);
+check("the default settings are valid; they are the seat limit, the island size, the chart radius and the move distance, nothing else", validateSettings(DEFAULT_SETTINGS).length === 0 && validateSettings(settingsForSize(16, 12)).length === 0 && J(Object.keys(DEFAULT_SETTINGS)) === '["max_players","board.island","board.chart_radius","turn.move_distance"]' && DEFAULT_SETTINGS.max_players === 8 && DEFAULT_SETTINGS["board.island"].width === 8 && DEFAULT_SETTINGS["board.chart_radius"] === 2 && DEFAULT_SETTINGS["turn.move_distance"] === 1);
 const bad = (k, v) => validateSettings({ ...DEFAULT_SETTINGS, [k]: v }).length > 0;
+check("seats must fit the island: max_players above the spawn spots is refused (8x8 radius 2 leaves 16; 6x6 leaves 4; radius 3 on 8x8 leaves 4)", spawnSpots(8, 8, 2) === 16 && spawnSpots(6, 6, 2) === 4 && spawnSpots(8, 8, 3) === 4 && spawnSpots(4, 4, 2) === 0 && validateSettings(settingsForSize(6, 6)).length === 1 && /spawn spots/.test(validateSettings(settingsForSize(6, 6))[0]) && validateSettings(settingsForSize(6, 6, 4)).length === 0 && validateSettings({ ...DEFAULT_SETTINGS, max_players: 5, "board.chart_radius": 3 }).length === 1 && validateSettings({ ...DEFAULT_SETTINGS, max_players: 4, "board.chart_radius": 3 }).length === 0);
 check("bad values are refused: odd or tiny sizes, radii, distances, extra keys", bad("board.island", { width: 3, height: 8 }) && bad("board.island", { width: 7, height: 8 }) && bad("board.island", { width: 8 }) && bad("board.island", { width: 8, height: 8, depth: 1 }) && bad("board.chart_radius", 0) && bad("board.chart_radius", 2.5) && bad("max_players", 0) && bad("max_players", 9) && bad("max_players", 2.5) && bad("turn.move_distance", 0) && bad("turn.move_distance", "1") && validateSettings({ ...DEFAULT_SETTINGS, mystery: 1 }).length > 0);
 check("a game's stored settings override only what they name; an invalid stored value falls back to the default",
   getSettings({ "turn.move_distance": 2 })["turn.move_distance"] === 2 && getSettings({ "turn.move_distance": 2 })["board.chart_radius"] === 2 && getSettings({ "turn.move_distance": "far" })["turn.move_distance"] === 1 && getSettings("not json")["board.island"].width === 8 && getSettings(null)["board.chart_radius"] === 2 && getSettings({ nope: 1 }).nope === undefined);
@@ -147,6 +148,9 @@ try {
   const gridKeys = new Set(islandCoords(8, 8).map((c) => c[0] + "," + c[1]));
   check("reading the board charts the 8x8 island: 64 tiles, 4W..4E by 4N..4S, all on the ground", b0.tiles.length === 64 && b0.tiles.every((t) => t.z === 0 && gridKeys.has(t.x + "," + t.y)) && b0.tiles.some((t) => t.label === "4N 4W 1U") && b0.tiles.some((t) => t.label === "4S 4E 1U") && !b0.tiles.some((t) => /^0|\b0[NSEWUD]/.test(t.label)));
   check("again: it is charted once, not twice", tilesOf("hex").length === 64 && (await client(A).get("/hex/api/board")).data.tiles.length === 64);
+  let seatsRefused = "";
+  try { await createGame(state, { slug: "zzz", size: 6, ...R }); seatsRefused = "created"; } catch { seatsRefused = "refused"; }
+  check("create-game refuses an island too small for the seats (--size 6 with the default 8 players), and accepts it with --max-players 4", seatsRefused === "refused" && (await createGame(state, { slug: "six", size: 6, max: 4, ...R })).slug === "six");
   let refused = "";
   for (const bad of ["3", "17", "x", "7", "5"]) { try { await createGame(state, { slug: "zzz", size: bad, ...R }); refused += "no "; } catch { refused += "yes "; } }
   check("create-game refuses an island size that is not an even number from 4 to 16", refused === "yes yes yes yes yes ", refused);
@@ -200,26 +204,26 @@ try {
   for (let i = 0; i < 6; i++) { const slug = `rnd${i}`; const gg = await createGame(state, { slug, max: 2, ...R }); await join(A, slug, gg.code, { email: "r@example.com", name: "R", color: "teal" }); const p = playersOf(slug)[0]; spots.add(p.x + "," + p.y); }
   check("spawn is random: six games put the first piece on more than one tile", spots.size > 1, [...spots].join(" "));
   // no room: an island too small to have a fully charted shape around any tile
-  const tiny = await createGame(state, { slug: "tiny", max: 2, size: 4, ...R });
+  const tiny = await createGame(state, { slug: "tiny", max: 2, ...R });
+  d1(state, `UPDATE games SET settings = '{"board.island":{"width":4,"height":4},"max_players":2}' WHERE slug = 'tiny'`);
   const tc = client(A);
   const tj = await tc.post("/tiny/api/join", { code: tiny.code, email: "t1@example.com", name: "T1", color: "teal" });
   const tv = await finish(tc, tj.data.dev_link);
-  check("a 4x4 island has no spawn spot: the join fails with the 'no room on the map yet' notice and takes no seat", tv.status === 303 && tv.headers.get("location") === "/tiny/?notice=no-room" && playersOf("tiny").length === 0, tv.headers.get("location"));
-  // occupied spots: leave exactly one qualifying spot, occupy it, and the next join is refused the same way
-  const one = await createGame(state, { slug: "one", max: 3, ...R });
-  await join(A, "one", one.code, { email: "o1@example.com", name: "O1", color: "teal" });
-  const op = playersOf("one")[0];
-  d1(state, `DELETE FROM tiles WHERE game_id = '${gidOf("one")}' AND NOT (x BETWEEN ${op.x - 2} AND ${op.x + 2} AND y BETWEEN ${op.y - 2} AND ${op.y + 2} AND (x - ${op.x}) * (x - ${op.x}) + (y - ${op.y}) * (y - ${op.y}) <= 6.25)`);
-  const oc = client(A), oj = await oc.post("/one/api/join", { code: one.code, email: "o2@example.com", name: "O2", color: "cobalt" });
+  check("a game whose island is 4x4 has no spawn spot (settings edited by hand, since create-game refuses it): the join fails with the 'no room on the map yet' notice and takes no seat", tv.status === 303 && tv.headers.get("location") === "/tiny/?notice=no-room" && playersOf("tiny").length === 0, tv.headers.get("location"));
+  // occupied spots: a 6x6 island has exactly 4 spawn spots; with the seat limit forced to 5 by hand, the 5th joiner has none left
+  const one = await createGame(state, { slug: "one", max: 4, size: 6, ...R });
+  d1(state, `UPDATE games SET settings = '{"board.island":{"width":6,"height":6},"max_players":5}' WHERE slug = 'one'`);
+  for (let i = 0; i < 4; i++) await join(A, "one", one.code, { email: `o${i}@example.com`, name: `O${i}`, color: COLORS[i] });
+  const oc = client(A), oj = await oc.post("/one/api/join", { code: one.code, email: "o9@example.com", name: "O9", color: "violet" });
   const ov = await finish(oc, oj.data.dev_link);
-  check("the only spot is occupied (two pieces cannot share): the join fails with the no-room notice", tilesOf("one").length === 21 && ov.status === 303 && ov.headers.get("location") === "/one/?notice=no-room" && playersOf("one").length === 1, ov.headers.get("location"));
+  check("all 4 spawn spots are occupied (two pieces cannot share): the 5th join fails with the no-room notice, and the first four stood on four different tiles", playersOf("one").length === 4 && new Set(playersOf("one").map((q) => q.x + "," + q.y)).size === 4 && ov.status === 303 && ov.headers.get("location") === "/one/?notice=no-room", ov.headers.get("location"));
 
   console.log("moves");
   const post = (c, body, slug = "hex") => c.post(`/${slug}/api/action`, body);
   const gameOf = async (slug = "hex") => (await client(A).get(`/${slug}/api/game`)).data.game;
   const posOf = (slug, n) => playersOf(slug)[n];
   const setPos = (slug, n, x, y, z = 0) => d1(state, `UPDATE players SET x = ${x}, y = ${y}, z = ${z} WHERE game_id = '${gidOf(slug)}' AND turn_order = ${n}`);
-  const setTurn = (slug, turn = 0, moves = 0, settings = "{}") => d1(state, `UPDATE games SET status = 'playing', round = 1, turn = ${turn}, moves = ${moves}, settings = '${settings}' WHERE slug = '${slug}'`);
+  const setTurn = (slug, turn = 0, moved = false, settings = "{}") => d1(state, `UPDATE games SET status = 'playing', round = 1, turn = ${turn}, last_move = '${moved ? `1:${turn}` : ""}', settings = '${settings}' WHERE slug = '${slug}'`);
   check("logged out is 401", (await post(client(A), { kind: "move", x: 0, y: 0 })).status === 401);
   const early = await post(ana, { kind: "move", x: 0, y: 0 });
   check("in setup, a move is refused (409) and nothing changes", early.status === 409 && /not started/i.test(early.data.error));
@@ -230,14 +234,14 @@ try {
   check("out of turn is refused (403) and the piece stays", oot.status === 403 && J([posOf("hex", 1).x, posOf("hex", 1).y]) === "[3,3]", oot.text);
   check("not a label, or a label with a zero row or column, is refused (400)", (await post(ana, { kind: "move", label: "0N 1E" })).status === 400 && (await post(ana, { kind: "move", label: "A1" })).status === 400 && (await post(ana, { kind: "move", x: 0.5, y: 0 })).status === 400 && (await post(ana, { kind: "move" })).status === 400);
   const far = await post(ana, { kind: "move", x: 2, y: 0 });
-  check("two steps away is refused (400): the piece stays and no move is used", far.status === 400 && /step/.test(far.data.error) && posOf("hex", 0).x === 0 && (await gameOf()).moves === 0, far.text);
+  check("two steps away is refused (400): the piece stays and no move is used", far.status === 400 && /step/.test(far.data.error) && posOf("hex", 0).x === 0 && (await gameOf()).moved === false, far.text);
   check("so is the tile you already stand on", (await post(ana, { kind: "move", x: 0, y: 0 })).status === 400);
   const lvl = await post(ana, { kind: "move", x: 1, y: 0, z: 1 });
   check("a different level is refused for now (400)", lvl.status === 400 && /level/.test(lvl.data.error), lvl.text);
   const logBefore = (await client(A).get("/hex/api/game")).data.events.length;
   const diag = await post(ana, { kind: "move", x: 1, y: 1 });
   check("a diagonal step succeeds (P1: diagonals count)", diag.status === 200 && diag.data.ok && diag.data.at.label === "2N 2E 1U" && J([posOf("hex", 0).x, posOf("hex", 0).y, posOf("hex", 0).z]) === "[1,1,0]", diag.text);
-  check("the move is logged, naming the tile, and the turn did NOT end (a move is in addition to proposing)", (await client(A).get("/hex/api/game")).data.events[0].text === "Ana (Teal) moved to 2N 2E 1U." && (await client(A).get("/hex/api/game")).data.events.length === logBefore + 1 && (await gameOf()).turn === 0 && (await gameOf()).moves === 1 && (await gameOf()).round === 1);
+  check("the move is logged, naming the tile, and the turn did NOT end (a move is in addition to proposing)", (await client(A).get("/hex/api/game")).data.events[0].text === "Ana (Teal) moved to 2N 2E 1U." && (await client(A).get("/hex/api/game")).data.events.length === logBefore + 1 && (await gameOf()).turn === 0 && (await gameOf()).moved === true && (await gameOf()).round === 1);
   const again = await post(ana, { kind: "move", x: 2, y: 1 });
   check("a second move in the same turn is refused (409), at most one per turn", again.status === 409 && /already moved/.test(again.data.error) && posOf("hex", 0).x === 1, again.text);
   const prp = await ana.post("/hex/api/turn", { prompt: "Let there be cats." });
@@ -250,16 +254,14 @@ try {
   const prp2 = await pa.post("/prop/api/turn", { prompt: "Rain, but only on Tuesdays." });
   const mv2 = await post(pa, { kind: "move", x: -1, y: 1 }, "prop");
   check("propose first, then move: both land in the same turn", prp2.status === 200 && mv2.status === 200 && posOf("prop", 0).x === -1 && (await gameOf("prop")).turn === 0, mv2.text);
-  setTurn("prop", 0, 0); setPos("prop", 0, 0, 0); setPos("prop", 1, 1, 0);
+  setTurn("prop", 0, false); setPos("prop", 0, 0, 0); setPos("prop", 1, 1, 0);
   const occ = await post(pa, { kind: "move", x: 1, y: 0 }, "prop");
-  check("a move onto a tile another piece stands on is refused (409): two pieces cannot share a tile", occ.status === 409 && /another piece/i.test(occ.data.error) && posOf("prop", 0).x === 0 && (await gameOf("prop")).moves === 0, occ.text);
+  check("a move onto a tile another piece stands on is refused (409): two pieces cannot share a tile", occ.status === 409 && /another piece/i.test(occ.data.error) && posOf("prop", 0).x === 0 && (await gameOf("prop")).moved === false, occ.text);
   check("and the other player is still not up", (await post(pb, { kind: "move", x: 2, y: 0 }, "prop")).status === 403);
   // uncharted destination
-  setTurn("hex"); setPos("hex", 0, 1, 1);
-  d1(state, `DELETE FROM tiles WHERE game_id = '${gidOf("hex")}' AND x = 2 AND y = 2`);
-  const unc = await post(ana, { kind: "move", x: 2, y: 2 });
-  check("moving onto an uncharted tile is refused (400) and uses no move", unc.status === 400 && /not charted/.test(unc.data.error) && (await gameOf()).moves === 0 && posOf("hex", 0).x === 1, unc.text);
-  d1(state, `INSERT INTO tiles (game_id, x, y, z, charted_at) VALUES ('${gidOf("hex")}', 2, 2, 0, 'x')`);
+  setTurn("hex"); setPos("hex", 0, 3, 0);
+  const unc = await post(ana, { kind: "move", x: 4, y: 0 }); // one step past the island's east edge (x 3): uncharted
+  check("moving onto an uncharted tile is refused (400) and uses no move", unc.status === 400 && /not charted/.test(unc.data.error) && (await gameOf()).moved === false && posOf("hex", 0).x === 3, unc.text);
   // seams: 1N 1W -> 1S 1E in one diagonal step, by label
   setTurn("hex"); setPos("hex", 0, -1, 0);
   const seam = await post(ana, { kind: "move", label: "1s 1e" });
@@ -280,10 +282,10 @@ try {
   const back = await post(ana, { kind: "move", x: 3, y: 0 });
   check("charting a charted tile is a no-op: moving back changes no tile (insert-if-absent)", back.status === 200 && tilesOf("hex").length === n1, `${n1} -> ${tilesOf("hex").length}`);
   // the move distance setting
-  setTurn("hex", 0, 0, '{"turn.move_distance":2}'); setPos("hex", 0, 0, 0);
+  setTurn("hex", 0, false, '{"turn.move_distance":2}'); setPos("hex", 0, 0, 0);
   const two = await post(ana, { kind: "move", x: 2, y: 1 });
   check("the move distance is a setting: with 2, a two-step move succeeds", two.status === 200 && posOf("hex", 0).x === 2, two.text);
-  setTurn("hex", 0, 0, '{"turn.move_distance":2}'); setPos("hex", 0, 0, 0);
+  setTurn("hex", 0, false, '{"turn.move_distance":2}'); setPos("hex", 0, 0, 0);
   check("and three steps still fails", (await post(ana, { kind: "move", x: 3, y: 0 })).status === 400);
   // two simultaneous moves
   let raceOk = true, raceWhy = "";
@@ -292,17 +294,17 @@ try {
     const [r1, r2] = await Promise.all([post(ana, { kind: "move", x: 1, y: 0 }), post(ana, { kind: "move", x: 0, y: 1 })]);
     const ok = [r1.status, r2.status].filter((x) => x === 200).length === 1 && [r1, r2].filter((r) => r.status !== 200).every((r) => r.status === 409);
     const events = d1(state, `SELECT COUNT(*) AS n FROM events WHERE game_id = '${gidOf("hex")}' AND kind = 'piece_moved'`)[0].n;
-    if (!ok || (await gameOf()).moves !== 1) { raceOk = false; raceWhy = `${r1.status} ${r1.text} | ${r2.status} ${r2.text} moves=${(await gameOf()).moves} events=${events}`; break; }
+    if (!ok || !(await gameOf()).moved) { raceOk = false; raceWhy = `${r1.status} ${r1.text} | ${r2.status} ${r2.text} moved=${(await gameOf()).moved} events=${events}`; break; }
   }
-  check("two simultaneous moves from one player, 6 times: exactly one lands, the other is refused 409, one move is counted", raceOk, raceWhy);
+  check("two simultaneous moves from one player, 6 times: exactly one lands, the other is refused 409, the turn is marked as moved", raceOk, raceWhy);
   // the proposal INSERT: guarded on turn and round, not on moves
   const gidS = gidOf("prop"), pidS = d1(state, `SELECT id FROM players WHERE game_id = '${gidS}' AND turn_order = 0`)[0].id;
   const lit = (v) => (typeof v === "number" ? String(v) : `'${String(v).replace(/'/g, "''")}'`);
-  const cond = (turn, round, moves, status = "playing") => { d1(state, `UPDATE games SET moves = ${moves}, status = '${status}' WHERE id = '${gidS}'`); d1(state, `DELETE FROM turns WHERE id LIKE 'tt%'`); const binds = [`tt${turn}${round}${moves}${status}`, pidS, "p", "n", "n", gidS, turn, round]; let i = 0; try { d1(state, PROPOSAL_INSERT_SQL.replace(/\?/g, () => lit(binds[i++]))); } catch { /* one live proposal per player and round */ } return d1(state, "SELECT COUNT(*) AS n FROM turns WHERE id LIKE 'tt%'")[0].n; };
+  const cond = (turn, round, moves, status = "playing") => { d1(state, `UPDATE games SET last_move = '${moves ? "1:0" : ""}', status = '${status}' WHERE id = '${gidS}'`); d1(state, `DELETE FROM turns WHERE id LIKE 'tt%'`); const binds = [`tt${turn}${round}${moves}${status}`, pidS, "p", "n", "n", gidS, turn, round]; let i = 0; try { d1(state, PROPOSAL_INSERT_SQL.replace(/\?/g, () => lit(binds[i++]))); } catch { /* one live proposal per player and round */ } return d1(state, "SELECT COUNT(*) AS n FROM turns WHERE id LIKE 'tt%'")[0].n; };
   d1(state, `DELETE FROM turns WHERE game_id = '${gidS}'`); setTurn("prop");
   const n0 = cond(1, 1, 0), nA = cond(0, 2, 0), nB = cond(0, 1, 0, "setup"), nC = cond(0, 1, 1), nD = cond(0, 1, 0);
   check("the proposal INSERT lands only if the game is playing and the turn and round are as read; a move made this turn does not stop it", n0 === 0 && nA === 0 && nB === 0 && nC === 1 && nD === 1, [n0, nA, nB, nC, nD].join());
-  check("/api/game reports how many moves the current turn has used", typeof (await gameOf()).moves === "number");
+  check("/api/game reports whether the current turn has moved, and a new turn needs no reset (the marker no longer matches)", (setTurn("hex", 0, false), (await gameOf()).moved === false) && (() => { setTurn("hex", 0, true); return true; })() && (await gameOf()).moved === true && (() => { d1(state, "UPDATE games SET turn = 1 WHERE slug = 'hex'"); return true; })() && (await gameOf()).moved === false && (() => { d1(state, "UPDATE games SET turn = 0, round = 2 WHERE slug = 'hex'"); return true; })() && (await gameOf()).moved === false);
 
   console.log("the public board");
   const raw = await client(A).get("/hex/api/board");

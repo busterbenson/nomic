@@ -5,7 +5,7 @@ A modern interpretation of the game of nomic, powered by AI. (This repo is
 registered yet.)
 
 Nomic is a game where changing the rules is a move. In this version, players
-write their turns as plain-language prompts, and Chalant, the AI referee, turns each one
+write their turns as plain-language prompts, and Chalant, the AI moderator, turns each one
 into an exact rule change for the table to vote on, or carries it out if the
 rules already allow it.
 
@@ -111,7 +111,7 @@ two games is two unrelated players.
   player takes a proposal once play begins).
 - `/<slug>/api/game` is public and never contains emails, player ids or the join code.
 
-To start a game by hand (no referee yet):
+To start a game by hand (no moderator yet):
 `npx wrangler d1 execute DB --local --command "UPDATE games SET status='playing', round=1, turn=0 WHERE slug='demo'"`
 (add `--remote` against the deployed database).
 Once playing, the player whose turn it is (`games.turn` = their seat number, from 0) sees a "Your turn" box on the board and submits one prompt per round, and may also move their piece once (in either order). Proposing only records the turn; nothing advances `turn`, `round` or `moves` yet.
@@ -137,7 +137,7 @@ One sender, chosen at runtime (`src/lib/email.ts`):
 4. else join and log-in answer `503 email is not configured`. They never pretend to succeed.
 
 In production `wrangler.toml` `[vars]` sets `MAIL_FROM = "Chalant <chalant@promptocracy.us>"`
-(the sender is Chalant, the referee; Cloudflare Email Sending is set up for promptocracy.us) and
+(the sender is Chalant, the moderator; Cloudflare Email Sending is set up for promptocracy.us) and
 `SITE_URL = "https://promptocracy.us"` (email links and the Origin check). Local development and
 the tests blank both (`.dev.vars.example`, `tests/lib.mjs`) so email goes to the outbox and links use
 the local origin (`npm run dev` passes `--var MAIL_FROM: --var SITE_URL:`, which wins over `.dev.vars`; to test real email links locally, run `wrangler dev` yourself with your own `--var`s). Previews do not inherit `[vars]`: they have no `MAIL_FROM`, no `SITE_URL` and no

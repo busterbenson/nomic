@@ -16,8 +16,8 @@ export const get = async ({ env, data }: Ctx) => {
   return json({
     settings: S, // the board's rules as data: public, like the rules text
     // What a move may be, for the page to offer only legal ones (the server checks them all again).
-    rules: { move_distance: S["turn.move_distance"], diagonal_moves: DIAGONAL_MOVES, shared_tiles: SHARED_TILES },
-    game: { slug: g.slug, status: g.status, turn: g.turn, round: g.round, moves: g.moves },
+    rules: { move_distance: S["turn.move_distance"], moves_per_turn: 1, diagonal_moves: DIAGONAL_MOVES, shared_tiles: SHARED_TILES },
+    game: { slug: g.slug, status: g.status, turn: g.turn, round: g.round, moved: g.last_move === `${g.round}:${g.turn}` },
     // x, y, z are plain integers; `label` is the compass name ("3N 2E 1U"), which skips zero in all three.
     tiles: tiles.map((t) => ({ x: t.x, y: t.y, z: t.z, label: tileLabel(t.x, t.y, t.z) })),
     pieces: players.map((p) => ({

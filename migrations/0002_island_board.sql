@@ -16,12 +16,12 @@
 -- The game's board settings, as JSON: only the ones this game changes; the rest are the defaults in
 -- src/lib/settings.js (island size, chart radius, move distance). Validated by the code that reads them.
 ALTER TABLE games ADD COLUMN settings TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(settings) AND json_type(settings) = 'object');
--- Board moves made so far in the current turn (a turn holds at most one: MOVES_PER_TURN in src/lib/board-rules.js).
--- Whatever advances the turn must set it back to 0.
+-- Which turn the last board move was made in, as 'round:turn' (empty before any). A player has moved this turn
+-- exactly when it equals the current 'round:turn', so advancing the turn needs no reset: the key just stops matching.
 -- The seat limit moves from the `max_players` column into the settings (setting max_players, 1 to 8): the column
 -- is no longer read. Existing games keep their cap.
 UPDATE games SET settings = json_set(settings, '$.max_players', MIN(MAX(max_players, 1), 8));
-ALTER TABLE games ADD COLUMN moves INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE games ADD COLUMN last_move TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE players_new (
   id TEXT PRIMARY KEY,

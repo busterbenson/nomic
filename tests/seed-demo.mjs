@@ -25,7 +25,7 @@ try {
   await join(srv.base, "second", open.code, { email: "dee@example.com", name: "Dee", color: "saffron" });
   // in play, Ada's turn; her piece one step inside the island's east edge (x 2; the island is x -4..3), Bo's near the center
   const gid = d1(state, "SELECT id FROM games WHERE slug = 'first'")[0].id;
-  d1(state, "UPDATE games SET status = 'playing', round = 1, turn = 0, moves = 0 WHERE slug = 'first'");
+  d1(state, "UPDATE games SET status = 'playing', round = 1, turn = 0, last_move = '' WHERE slug = 'first'");
   d1(state, `UPDATE players SET x = 2, y = 0 WHERE game_id = '${gid}' AND turn_order = 0`);
   d1(state, `UPDATE players SET x = -1, y = -1 WHERE game_id = '${gid}' AND turn_order = 1`);
   const cookie = [...ada.jar].find(([k]) => k === "s|/first")[1];

@@ -7,5 +7,3 @@
 // P3  A new piece spawns only where the whole chart shape around it is already charted (see spawn in verify.ts).
 export const DIAGONAL_MOVES = true;
 export const SHARED_TILES = false;
-// At most one move per turn (a decided rule). Not a setting: nothing in the rules names it as a number.
-export const MOVES_PER_TURN = 1;

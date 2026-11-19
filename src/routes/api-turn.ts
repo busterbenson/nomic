@@ -1,6 +1,6 @@
 // POST /<slug>/api/turn {prompt}: the player whose turn it is submits their prompt.
 // This only RECORDS the turn. It does not advance games.turn: that happens when
-// the referee and the vote are built.
+// the moderator and the vote are built.
 import { getPlayer } from "../lib/auth";
 import { PROPOSAL_INSERT_SQL } from "../lib/proposal.js";
 import { notify } from "../lib/notify";
@@ -47,5 +47,5 @@ export const post = async (ctx: Ctx) => {
   } catch (e: any) {
     console.error("notify failed after turn:", e?.message || e);
   }
-  return json({ ok: true, status: "submitted", message: "Turn recorded. Waiting for Chalant (the referee)." });
+  return json({ ok: true, status: "submitted", message: "Turn recorded. Waiting for Chalant (the moderator)." });
 };

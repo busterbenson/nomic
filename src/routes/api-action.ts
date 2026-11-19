@@ -1,18 +1,18 @@
-// POST /<slug>/api/action: moves the site itself carries out (no referee).
+// POST /<slug>/api/action: moves the site itself carries out (no moderator).
 //   {kind:"move", x, y}   (or {kind:"move", label:"3N 2E"}; z is optional and must be the level you stand on)
 // Move your piece. Allowed only to the player whose turn it is, while the game is 'playing', at most once
-// per turn (MOVES_PER_TURN), to a CHARTED tile within the move distance (setting turn.move_distance).
+// per turn (games.last_move holds the 'round:turn' of the last move), to a CHARTED tile within the move distance (setting turn.move_distance).
 // A move is IN ADDITION to proposing a rule change: it neither ends the turn nor needs a proposal, and a
-// proposal made before or after it is unaffected. Turns still advance only when the referee is built.
+// proposal made before or after it is unaffected. Turns still advance only when the moderator is built.
 // After the move, every tile within the chart radius of the new position is charted (chartTile, a no-op
 // for tiles already charted).
 // Everything is written in ONE D1 batch, so a move can never half-apply. The first statement doubles as
-// the guard: it only inserts the log line if the turn, the round, the move count, the piece's position,
+// the guard: it only inserts the log line if the turn, the round, the last move, the piece's position,
 // the destination and its occupancy are still exactly as they were read, otherwise it violates NOT NULL
 // and the whole batch rolls back (two simultaneous requests: one wins, one gets a 409).
 import { getPlayer } from "../lib/auth";
 import { chartAroundStatements, ensureTiles } from "../lib/board";
-import { MOVES_PER_TURN, SHARED_TILES } from "../lib/board-rules.js";
+import { SHARED_TILES } from "../lib/board-rules.js";
 import { parseLabel, tileLabel, validCoord, withinSteps } from "../lib/geometry.js";
 import { getSettings } from "../lib/settings.js";
 import { Ctx, json, nowIso, readJson, who } from "../lib/util";
@@ -37,7 +37,8 @@ export const post = async (ctx: Ctx) => {
 
   if (game.status !== "playing") return json({ error: "The game has not started, so there are no turns yet." }, 409);
   if (player.turn_order !== game.turn) return json({ error: "It is not your turn." }, 403);
-  if (game.moves >= MOVES_PER_TURN) return json({ error: "You already moved this turn." }, 409);
+  const turnKey = `${game.round}:${game.turn}`;
+  if (game.last_move === turnKey) return json({ error: "You already moved this turn." }, 409);
 
   await ensureTiles(env, game);
   const me: any = await env.DB.prepare("SELECT x, y, z FROM players WHERE game_id = ? AND id = ?").bind(game.id, player.id).first();
@@ -59,19 +60,19 @@ export const post = async (ctx: Ctx) => {
   const stmts = [
     env.DB.prepare(
       `INSERT INTO events (game_id, kind, text, created_at)
-       SELECT g.id, 'piece_moved', CASE WHEN g.status = 'playing' AND g.turn = ? AND g.round = ? AND g.moves = ?
+       SELECT g.id, 'piece_moved', CASE WHEN g.status = 'playing' AND g.turn = ? AND g.round = ? AND g.last_move = ?
               AND EXISTS (SELECT 1 FROM players p WHERE p.game_id = g.id AND p.id = ? AND p.x = ? AND p.y = ? AND p.z = ?)
               AND EXISTS (SELECT 1 FROM tiles t WHERE t.game_id = g.id AND t.x = ? AND t.y = ? AND t.z = ?)
               AND (? = 1 OR NOT EXISTS (SELECT 1 FROM players o WHERE o.game_id = g.id AND o.id != ? AND o.x = ? AND o.y = ? AND o.z = ?))
               THEN ? ELSE NULL END, ?
        FROM games g WHERE g.id = ?`,
     ).bind(
-      game.turn, game.round, game.moves, player.id, me.x, me.y, me.z, x, y, z,
+      game.turn, game.round, game.last_move, player.id, me.x, me.y, me.z, x, y, z,
       SHARED_TILES ? 1 : 0, player.id, x, y, z, text, now, game.id,
     ),
     env.DB.prepare("UPDATE players SET x = ?, y = ?, z = ? WHERE game_id = ? AND id = ?").bind(x, y, z, game.id, player.id),
     ...chartAroundStatements(env, game, x, y, z, now),
-    env.DB.prepare("UPDATE games SET moves = moves + 1 WHERE id = ? AND turn = ? AND round = ? AND moves = ?").bind(game.id, game.turn, game.round, game.moves),
+    env.DB.prepare("UPDATE games SET last_move = ? WHERE id = ? AND turn = ? AND round = ? AND last_move = ?").bind(turnKey, game.id, game.turn, game.round, game.last_move),
   ];
   try {
     await env.DB.batch(stmts);
@@ -81,5 +82,5 @@ export const post = async (ctx: Ctx) => {
     console.error("move failed:", msg);
     return json({ error: "Could not record your move. Try again." }, 500);
   }
-  return json({ ok: true, kind: "move", at: { x, y, z, label: tileLabel(x, y, z) }, moves_left: MOVES_PER_TURN - game.moves - 1 });
+  return json({ ok: true, kind: "move", at: { x, y, z, label: tileLabel(x, y, z) } });
 };
