@@ -75,6 +75,7 @@ const dark = css.slice(css.indexOf("prefers-color-scheme: dark"));
 check("lavender is the moderator and UI accent: deep #6B50A4 on light, pale #B7A3EF on dark", /--accent: #6B50A4/.test(css.slice(0, css.indexOf("@media"))) && /--accent: #B7A3EF/.test(dark));
 check("the display face is Kyrios first, then Grenze Gotisch", /--font-display: "Kyrios", "AT Kyrios", "Grenze Gotisch"/.test(css));
 check("every color token has a dark value (the page is never half dark)", ["--sea", "--surface", "--line", "--ink", "--ink-muted", "--accent", "--on-accent", "--land", "--outline"].every((t) => new RegExp(t + ":").test(dark)));
+check("the board's size rule applies to the board svg only, not to the svg each piece is drawn in (a piece keeps its own width and height)", /\.board-wrap>svg\s*\{[^}]*width:100%/.test(read("public/site.css")) && !/\.board-wrap\s+svg\s*\{/.test(read("public/site.css")));
 check("the pages no longer ship the WebGL board: no three.js in public/ or the Worker's routes", !readdirSync(pjoin(ROOT, "public")).includes("vendor") && !/three/i.test(read("src/index.ts")));
 
 console.log(`\n${pass} passed, ${fail} failed`);

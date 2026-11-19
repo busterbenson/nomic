@@ -111,8 +111,9 @@ mark{background:color-mix(in srgb,var(--accent) 28%,transparent);color:inherit;b
 .banner{padding:10px 20px;border-bottom:1px solid var(--line);background:var(--accent-tint);font-size:.9rem}
 .playtop{display:grid;grid-template-columns:minmax(0,1fr) 270px;border-bottom:1.5px solid var(--ink);background:var(--sea)}
 .board-wrap{position:relative;user-select:none;-webkit-user-select:none;touch-action:pan-y;height:480px;overflow:hidden;background:var(--sea)}
-.board-wrap svg{display:block;width:100%;height:100%;cursor:grab;touch-action:none}
-.board-wrap svg.dragging{cursor:grabbing}
+/* the board itself only: each piece is a nested svg with its own size */
+.board-wrap>svg{display:block;width:100%;height:100%;cursor:grab;touch-action:none}
+.board-wrap>svg.dragging{cursor:grabbing}
 .sea-grid{stroke:var(--sea-line);stroke-width:1;fill:none}
 .foam{fill:var(--foam)}
 .fog{stroke:var(--sea-line);stroke-width:1.2;stroke-dasharray:3 3}
