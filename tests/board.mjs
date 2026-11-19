@@ -428,7 +428,7 @@ try {
   const lgLong = await cLong.form("/pilot/oauth/authorize", fields({ step: "login", email: "max@example.com", state: longState }), { origin: SITE });
   const lvLong = await finish(cLong, /href="([^"]+auth\/verify[^"]+)"/.exec(lgLong.text)?.[1]);
   const cjk = client(A);
-  const lgCjk = await cjk.form("/pilot/oauth/authorize", fields({ step: "login", email: "max@example.com", state: "\u5b57".repeat(500) }), { origin: SITE });
+  const lgCjk = await cjk.form("/pilot/oauth/authorize", fields({ step: "login", email: "mia@example.com", state: "\u5b57".repeat(500) }), { origin: SITE });
   const lvCjk = await finish(cjk, /href="([^"]+auth\/verify[^"]+)"/.exec(lgCjk.text)?.[1]);
   check("500 characters that each take nine bytes once encoded still make the whole trip (the return path allowance fits every accepted request)", lvCjk.status === 303 && /^\/pilot\/oauth\/authorize\?/.test(lvCjk.headers.get("location")) && (await cjk.get(lvCjk.headers.get("location"))).text.includes(">Allow<"), String(lvCjk.headers.get("location")).slice(0, 100));
   check("the longest state (500 characters) survives the trip through the log-in link to the consent page; a longer one is refused up front, not cut",
