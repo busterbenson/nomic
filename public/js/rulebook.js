@@ -16,7 +16,7 @@ export function parseRules(md) {
   let sec = null, rule = null, cl = null, para = [], list = null;
   const lines = md.split("\n");
   const target = () => cl || rule;
-  let at = 0, startAt = 0;   // the line being read, and the line the paragraph being collected began on
+  let startAt = 0;   // the line the paragraph being collected began on
   const pushPara = (p) => {
     const t = target();
     if (t) t.paras.push(p);
@@ -27,7 +27,6 @@ export function parseRules(md) {
   const warn = (i, t) => out.warnings.push("Line " + (i + 1) + ": " + t);
   const claim = (num, i) => { if (out.byNum[num]) warn(i, "Number " + num + " is used twice."); };
   for (let i = 0; i < lines.length; i++) {
-    at = i;
     const line = lines[i].trim();
     let m;
     if (/^# /.test(line)) { flush(); continue; }
@@ -74,7 +73,7 @@ const paraText = (p) => (p.t === "p" ? p.s : p.items.join(" "));
 const plainOf = (r) => [r.num, r.title, ...r.paras.map(paraText), ...r.clauses.map((c) => c.num + " " + c.paras.map(paraText).join(" "))].join(" ").replace(/\*\*|`/g, "").replace(/\[setting: ([\w.]+)\]/g, "$1 ");
 const settingText = (v) => (v && typeof v === "object" ? Object.values(v).join("×") : typeof v === "boolean" ? (v ? "on" : "off") : String(v));
 const previewOf = (r) => { const p = r.paras[0] || (r.clauses[0] && r.clauses[0].paras[0]); return p ? paraText(p).replace(/\*\*|`/g, "").replace(/\s*\[setting: [\w.]+\]/g, "").trim() : ""; };
-const hl = (html, q) => {
+export const hl = (html, q) => {
   if (!q) return html;
   const re = new RegExp("(" + q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ")", "gi");
   return html.split(/(<[^>]+>|&[a-z]+;|&#\d+;)/).map((seg) => (seg.startsWith("<") || seg.startsWith("&") ? seg : seg.replace(re, "<mark>$1</mark>"))).join("");
