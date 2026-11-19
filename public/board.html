@@ -351,7 +351,11 @@
     const r = await api("/api/action", body);
     if (r.ok) {
       await refresh();
-      const n = $("act-note"); n.textContent = r.data.harvest ? "Done. " + r.data.harvest : "Done. Your turn is over."; n.hidden = false;
+      const n = $("act-note"); const left = r.data.moves_left || 0;
+      n.textContent = (r.data.turn_over === false
+        ? `Done. You have ${left} more move${left === 1 ? "" : "s"} this turn: tap a tile.`
+        : "Done. Your turn is over.") + (r.data.harvest ? " " + r.data.harvest : "");
+      n.hidden = false;
       loadNotes(false);
       return;
     }

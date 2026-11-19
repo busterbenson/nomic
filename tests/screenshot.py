@@ -6,7 +6,7 @@ import sys
 from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
 
-base, out, cookie, code = sys.argv[1:5]
+base, out, cookie, code, cookie2 = sys.argv[1:6]
 host = urlparse(base).hostname
 SIZES = [(390, 844, "phone"), (1100, 800, "desktop")]
 failed = []
@@ -113,6 +113,16 @@ with sync_playwright() as p:
     page.click("#claim-btn"); page.wait_for_function("!document.getElementById('act-note').hidden && document.getElementById('act-note').textContent.indexOf('Done') === 0")
     check("claiming through the panel ends the turn", "is playing" in page.inner_text("#turn-box") and "Bo" in page.inner_text("#turn-box"), page.inner_text("#turn-box"))
     page.screenshot(path=f"{out}/after-claim-phone.png", full_page=True)
+    c.close()
+    # a game with two moves per turn: the confirmation says so instead of claiming the turn is over
+    c = b.new_context(viewport={"width": 390, "height": 844}, device_scale_factor=2)
+    c.add_cookies([{"name": "s", "value": cookie2, "domain": host, "path": "/multi"}])
+    page = c.new_page(); page.goto(base + "/multi/"); page.wait_for_selector("#board-wrap[data-renderer]"); page.wait_for_function("document.querySelectorAll('#tile-list li').length > 0"); page.wait_for_timeout(400)
+    click_tile(page, 5, 2); page.click("#claim-btn")
+    page.wait_for_function("!document.getElementById('act-note').hidden")
+    note = page.inner_text("#act-note")
+    check("two moves per turn: the first move's confirmation says one more move is left, not that the turn is over", "1 more move" in note and "turn is over" not in note, note)
+    check("and it is still your turn, with no proposal box offered", "Ada" in page.inner_text("#now") and page.locator("#turn-form").count() == 0, page.inner_text("#now"))
     c.close()
     b.close()
 
