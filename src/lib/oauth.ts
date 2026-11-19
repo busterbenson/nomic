@@ -31,7 +31,7 @@ export const preflight = () => new Response(null, { status: 204, headers: CORS }
 
 // The page a log-in link may send a person back to: this game's own consent page, nothing else.
 export function isConsentPath(slug: string, next: unknown): next is string {
-  if (typeof next !== "string" || next.length > 4000 || !next.startsWith("/") || next.startsWith("//") || /[\u0000-\u001f\\]/.test(next)) return false;
+  if (typeof next !== "string" || next.length > 8000 || !next.startsWith("/") || next.startsWith("//") || /[\u0000-\u001f\\]/.test(next)) return false;
   try {
     const u = new URL(next, "http://x.invalid");
     return u.origin === "http://x.invalid" && u.pathname === `/${slug}/oauth/authorize`;
@@ -63,13 +63,13 @@ export async function loadClient(env: Env, gameId: string, id: unknown): Promise
   try { return { id: row.id, name: row.name, redirect_uris: JSON.parse(row.redirect_uris) }; } catch { return null; }
 }
 
-// A new access + refresh pair for a player (the old refresh token, if any, was already claimed).
-export async function mintTokens(env: Env, t: { clientId: string; gameId: string; playerId: string }) {
+// A new access + refresh pair for a player (the old refresh token, if any, was already claimed; the new pair stays in its grant).
+export async function mintTokens(env: Env, t: { clientId: string; gameId: string; playerId: string; grantId: string }) {
   const access = randomToken(32), refresh = randomToken(32);
   const now = Date.now();
   const ins = (token: string, kind: string, ttl: number) =>
-    env.DB.prepare("INSERT INTO oauth_tokens (token_hash, kind, client_id, game_id, player_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .bind(token, kind, t.clientId, t.gameId, t.playerId, nowIso(now), nowIso(now + ttl));
+    env.DB.prepare("INSERT INTO oauth_tokens (token_hash, kind, grant_id, client_id, game_id, player_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(token, kind, t.grantId, t.clientId, t.gameId, t.playerId, nowIso(now), nowIso(now + ttl));
   const hashA = await sha256Hex(access), hashR = await sha256Hex(refresh);
   await env.DB.batch([ins(hashA, "access", ACCESS_TTL_MS), ins(hashR, "refresh", REFRESH_TTL_MS)]);
   return { access_token: access, token_type: "Bearer", expires_in: ACCESS_TTL_MS / 1000, refresh_token: refresh };

@@ -420,12 +420,17 @@ try {
   const code5 = new URL((await consent(A, "pilot", maxOut, cid, pk, undefined, "allow", SITE)).headers.get("location")).searchParams.get("code");
   const good2 = await exchange(A, "pilot", cid, code5, pk.verifier);
   const tokMax = good2.data.access_token;
+  check("replaying the first code again does not touch a later sign-in of the same app and player: only that grant's tokens go", (await exchange(A, "pilot", cid, code4, pk.verifier)).status === 400 && (await mcp(A, "pilot", tokMax, "tools/list", {})).status === 200);
   const mailed = d1(state, "SELECT body FROM outbox WHERE to_addr = 'max@example.com' ORDER BY id DESC LIMIT 1")[0]?.body ?? "";
   check("the log-in email says which host the AI client will be sent to", /connect an AI client at agent\.example\./.test(mailed), mailed.slice(0, 200));
   const longState = "s".repeat(500);
   const cLong = client(A);
   const lgLong = await cLong.form("/pilot/oauth/authorize", fields({ step: "login", email: "max@example.com", state: longState }), { origin: SITE });
   const lvLong = await finish(cLong, /href="([^"]+auth\/verify[^"]+)"/.exec(lgLong.text)?.[1]);
+  const cjk = client(A);
+  const lgCjk = await cjk.form("/pilot/oauth/authorize", fields({ step: "login", email: "max@example.com", state: "\u5b57".repeat(500) }), { origin: SITE });
+  const lvCjk = await finish(cjk, /href="([^"]+auth\/verify[^"]+)"/.exec(lgCjk.text)?.[1]);
+  check("500 characters that each take nine bytes once encoded still make the whole trip (the return path allowance fits every accepted request)", lvCjk.status === 303 && /^\/pilot\/oauth\/authorize\?/.test(lvCjk.headers.get("location")) && (await cjk.get(lvCjk.headers.get("location"))).text.includes(">Allow<"), String(lvCjk.headers.get("location")).slice(0, 100));
   check("the longest state (500 characters) survives the trip through the log-in link to the consent page; a longer one is refused up front, not cut",
     lvLong.status === 303 && /^\/pilot\/oauth\/authorize\?/.test(lvLong.headers.get("location")) && (await cLong.get(lvLong.headers.get("location"))).text.includes(">Allow<") &&
     new URL((await web.get(authUrl({ state: "s".repeat(501) }))).headers.get("location")).searchParams.get("error") === "invalid_request");

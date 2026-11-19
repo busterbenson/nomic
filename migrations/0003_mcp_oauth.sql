@@ -39,6 +39,9 @@ CREATE TABLE oauth_codes (
 CREATE TABLE oauth_tokens (
   token_hash TEXT PRIMARY KEY,
   kind TEXT NOT NULL CHECK (kind IN ('access','refresh')),
+  -- The authorization (the hash of the code that started it) this token descends from; a refresh keeps it.
+  -- Presenting a spent code again revokes exactly the tokens of that grant.
+  grant_id TEXT NOT NULL,
   client_id TEXT NOT NULL,
   game_id TEXT NOT NULL REFERENCES games(id),
   player_id TEXT NOT NULL,

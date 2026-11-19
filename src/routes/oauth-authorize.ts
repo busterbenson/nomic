@@ -8,7 +8,7 @@
 import { getPlayer } from "../lib/auth";
 import { emailMode } from "../lib/email";
 import { issueLink, tooManyLinks } from "../lib/links";
-import { CODE_TTL_MS, Client, MCP_OFF, issuerOf, loadClient, mcpEnabled, validChallenge } from "../lib/oauth";
+import { CODE_TTL_MS, Client, MCP_OFF, isConsentPath, issuerOf, loadClient, mcpEnabled, validChallenge } from "../lib/oauth";
 import { page } from "../lib/pages";
 import { Ctx, esc, nowIso, normEmail, randomToken, sha256Hex, siteUrl, validEmail } from "../lib/util";
 
@@ -95,10 +95,13 @@ export const post = async (ctx: Ctx) => {
     const email = validEmail(f("email")) ? normEmail(f("email")) : null;
     if (!email) return fail("That doesn't look like an email address.");
     if (await tooManyLinks(env, game.id, email)) return fail("Too many links requested. Wait 15 minutes and try again.", 429);
+    // The page the link returns to has to fit what the server will accept when the link is used.
+    const next = nextPath(game.slug, r);
+    if (!isConsentPath(game.slug, next)) return fail("That request is too long to carry through a log-in link.");
     const player = await env.DB.prepare("SELECT id FROM players WHERE game_id = ? AND email = ?").bind(game.id, email).first();
     // Same as /api/login: a token row is written either way, only a real player is emailed, the answer never says which.
     const link = await issueLink(ctx, game, {
-      email, purpose: "login", send: !!player, next: nextPath(game.slug, r),
+      email, purpose: "login", send: !!player, next,
       subject: `Your ${game.name} log-in link`, intro: `Click to log in to ${game.name} and connect an AI client at ${new URL(r.redirect_uri).host}.`,
     });
     if (!link) return fail("Too many links requested. Wait 15 minutes and try again.", 429);
