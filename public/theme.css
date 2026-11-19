@@ -1,37 +1,35 @@
-/* THE THEME: every color the site uses, in one file. Restyle the site by editing only this file.
-   Page and form colors are used by site.css and board.html. The --tile, --sea-*, --tile-*
-   and --pawn-* tokens are also read by the board's WebGL and SVG renderers (public/js/theme.js),
-   so the tiles, their grid and its pieces follow it too. Placeholder palette: neutral and calm. */
+/* THE THEME: every color and font the site uses, in one file. Palette v2: light and dark.
+   Lavender is the moderator / UI accent. Players' piece colors come from the game's data
+   (src/lib/pieces.json), not from here; the monster-only colors below are tokens for later. */
 :root {
-  --bg: #f6f1e7; --ink: #1f1b16; --muted: #6d6458; --line: #d8cfbf;
-  --card: #fffaf0; --track: #e9e0cf; --accent: #c47f2c;
+  /* Display face: Grenze Gotisch for now; Kyrios takes over when it is licensed and loaded. */
+  --font-display: "Kyrios", "AT Kyrios", "Grenze Gotisch", Georgia, serif; --display-weight: 800;
+  --font-body: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui, sans-serif;
+  --font-mono: "Martian Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
-  /* the board */
-  --board-bg: #e6edf0;            /* the sea behind the island */
-  --sea-line: #5b7480;            /* the faint endless grid (its strength fades out toward the view's edges) */
-  --sea-line-alpha: 0.32;
-  --tile: #e4dcc6;               /* a charted tile: they are all the same, blank */
-  --tile-select: #ffffff;         /* outline of the selected tile */
-  --tile-hover: #ffffff;
-  --pawn-ink: #1d1a16;            /* a piece's foot */
-  --board-label: #3d4a52;         /* the coordinate tag (3N 2E) */
-  --board-label-bg: rgba(255, 255, 255, 0.85);
-  --light-sky: #ffffff; --light-ground: #8d8f96;   /* WebGL lights */
-  --light-sky-strength: 1.5; --light-sun-strength: 1.5;
+  --sea: #E3ECEB; --sea-line: #C9D7D6; --foam: #F5FAF8; --surface: #F7F9F7; --surface-2: #DAE4E2;
+  --line: #C3D0CF; --ink: #18202B; --ink-muted: #55616E;
+  --accent: #6B50A4; --on-accent: #FFFFFF; --accent-tint: #E0D9F6;   /* lavender: moderator and UI */
+  --err: #A33A26;
+  --outline: #18202B;             /* ink around a piece */
+  --land: #F4EEDF;                /* a charted tile: they are all the same, blank */
+  --tile-seam: rgba(24, 32, 43, .16); --shade-1: rgba(24, 32, 43, .13); --shade-2: rgba(24, 32, 43, .30);
+  --fog: rgba(24, 32, 43, .07);
+
+  /* monster-only colors (never offered to players) */
+  --bog: #6E9A3C; --bog-shade: #3F5E27; --wraith: #471C47; --hex-pink: #AD1A6C;
+  color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #17140f; --ink: #efe7da; --muted: #a69a88; --line: #3a332a;
-    --card: #201c16; --track: #2c261e; --accent: #e0a050;
-
-    --board-bg: #1c2428;
-    --sea-line: #8fa8b4;
-    --sea-line-alpha: 0.28;
-    --tile: #5e5a4c;
-    --tile-select: #ffffff;
-    --tile-hover: #ffffff;
-    --board-label: #d5e0e5;
-    --board-label-bg: rgba(20, 26, 29, 0.85);
-    --light-sky-strength: 1.25; --light-sun-strength: 1.3;
+    --sea: #0F1724; --sea-line: #1F2C40; --foam: #2A3B53; --surface: #172133; --surface-2: #212C40;
+    --line: #2E3C55; --ink: #E8ECF1; --ink-muted: #9BA7B7;
+    --accent: #B7A3EF; --on-accent: #0F1724; --accent-tint: #312748;
+    --err: #FF9C86;
+    --outline: #0B1018; --land: #55637A;
+    --tile-seam: rgba(0, 0, 0, .28); --shade-1: rgba(5, 10, 20, .22); --shade-2: rgba(5, 10, 20, .42);
+    --fog: rgba(255, 255, 255, .05);
+    --hex-pink: #FF7BC5;
+    color-scheme: dark;
   }
 }

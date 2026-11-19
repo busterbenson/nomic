@@ -41,7 +41,7 @@ export const post = async (ctx: Ctx) => {
   const turnKey = `${game.round}:${game.turn}`;
 
   await ensureTiles(env, game);
-  const me: any = await env.DB.prepare("SELECT x, y, z FROM players WHERE game_id = ? AND id = ?").bind(game.id, player.id).first();
+  const me: any = await env.DB.prepare("SELECT x, y, z, mirrored FROM players WHERE game_id = ? AND id = ?").bind(game.id, player.id).first();
   if (!me) return json({ error: "Could not find your piece." }, 500);
   if (z !== me.z) return json({ error: "You can only move on the level you are standing on." }, 400);
   const S = getSettings(game.settings);
@@ -55,6 +55,8 @@ export const post = async (ctx: Ctx) => {
     if (taken) return json({ error: "Another piece is standing there." }, 409);
   }
 
+  const toRight = (x - me.x) - (y - me.y); // > 0 moves right on screen, < 0 left, 0 straight up or down
+  const facing = toRight > 0 ? 1 : toRight < 0 ? 0 : me.mirrored;
   const now = nowIso();
   const text = `${who(player.display_name, player.color)} moved to ${tileLabel(x, y, z)}.`;
   const stmts = [
@@ -70,7 +72,8 @@ export const post = async (ctx: Ctx) => {
       game.turn, game.round, game.last_move, player.id, me.x, me.y, me.z, x, y, z,
       SHARED_TILES ? 1 : 0, player.id, x, y, z, text, now, game.id,
     ),
-    env.DB.prepare("UPDATE players SET x = ?, y = ?, z = ? WHERE game_id = ? AND id = ?").bind(x, y, z, game.id, player.id),
+    // The piece turns to face the way it moved on screen: right on screen is east minus north (the board's one projection).
+    env.DB.prepare("UPDATE players SET x = ?, y = ?, z = ?, mirrored = ? WHERE game_id = ? AND id = ?").bind(x, y, z, facing, game.id, player.id),
     ...chartAroundStatements(env, game, x, y, z, now),
     env.DB.prepare("UPDATE games SET last_move = ? WHERE id = ? AND turn = ? AND round = ? AND last_move = ?").bind(turnKey, game.id, game.turn, game.round, game.last_move),
   ];

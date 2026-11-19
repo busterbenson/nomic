@@ -1,5 +1,6 @@
 // Small shared helpers for the Worker.
 import { getSettings } from "./settings.js";
+import PIECES from "./pieces.json";
 
 // Loose types: wrangler bundles this with esbuild and does not type-check.
 export type Env = {
@@ -23,23 +24,41 @@ export type Ctx = {
   data: { game?: any };
 };
 
-// The piece colours a player can claim at sign-up: eight, chosen to stay apart for
-// the common kinds of colour blindness (hue, lightness and a name to go with each).
-// A game seats at most this many players. `players.color` stores the key.
-export const PALETTE = [
-  { key: "vermilion", name: "Vermilion", hex: "#d55e00" },
-  { key: "saffron", name: "Saffron", hex: "#e8b200" },
-  { key: "moss", name: "Moss", hex: "#6f8f1f" },
-  { key: "teal", name: "Teal", hex: "#009e8e" },
-  { key: "cobalt", name: "Cobalt", hex: "#0059b3" },
-  { key: "violet", name: "Violet", hex: "#7b4fc0" },
-  { key: "rose", name: "Rose", hex: "#d97fae" },
-  { key: "graphite", name: "Graphite", hex: "#5a6270" },
-] as const;
-export const MAX_SEATS = PALETTE.length;
-export const colorInfo = (key: unknown) => PALETTE.find((c) => c.key === key) ?? null;
-// For replies: a row with an unknown color key (should not exist) still draws, in grey.
-export const colorOf = (key: unknown) => colorInfo(key) ?? { key: String(key), name: String(key), hex: "#888888" };
+// What a player chooses at sign-up: a COLOR (the player colors of palette v2) and a SHAPE (one of the
+// traced pieces, or the plain pawn). Both lists live in ONE data file, pieces.json, which the join page
+// and the API read; nothing is written out per color or per shape in code. A color is unique per game
+// (`players.color` stores its key); a shape is not (`players.shape`). Monster-only colors are not in the
+// file, so they cannot be offered.
+export const PALETTE: readonly { key: string; name: string; main: string; shade: string; tint: string; deep: string }[] = PIECES.colors;
+export const SHAPES: readonly { key: string; name: string }[] = PIECES.shapes;
+export const DEFAULT_SHAPE = "pawn";
+export const validShape = (key: unknown): key is string => typeof key === "string" && SHAPES.some((s) => s.key === key);
+// A game seats at most 8 players (the `max_players` setting, 1 to 8, and the island's spawn spots): the
+// number of colors does not set it.
+export const MAX_SEATS = 8;
+
+// The eight colors the first palette offered. Seats that took one keep it (the key is in `players.color`),
+// and it still draws; it is no longer offered.
+const LEGACY_COLORS: Record<string, { name: string; hex: string }> = {
+  vermilion: { name: "Vermilion", hex: "#d55e00" }, saffron: { name: "Saffron", hex: "#e8b200" }, moss: { name: "Moss", hex: "#6f8f1f" },
+  teal: { name: "Teal", hex: "#009e8e" }, cobalt: { name: "Cobalt", hex: "#0059b3" }, violet: { name: "Violet", hex: "#7b4fc0" },
+  rose: { name: "Rose", hex: "#d97fae" }, graphite: { name: "Graphite", hex: "#5a6270" },
+};
+const mixHex = (hex: string, to: number, f: number) =>
+  "#" + [1, 3, 5].map((i) => Math.round(parseInt(hex.slice(i, i + 2), 16) * (1 - f) + to * f).toString(16).padStart(2, "0")).join("");
+const legacyInfo = (key: string) => {
+  const l = Object.hasOwn(LEGACY_COLORS, key) ? LEGACY_COLORS[key] : null;
+  return l && { key, name: l.name, main: l.hex, shade: mixHex(l.hex, 0, 0.28), tint: mixHex(l.hex, 255, 0.45), deep: mixHex(l.hex, 0, 0.5) };
+};
+export const colorInfo = (key: unknown) => PALETTE.find((c) => c.key === key) ?? legacyInfo(String(key)) ?? null;
+export const isOfferedColor = (key: unknown) => PALETTE.some((c) => c.key === key);
+// For replies: a color object `{key, name, hex, shade, tint, deep}` (`hex` is the main color). A row with an unknown
+// color key (should not exist) still draws, in grey.
+export const colorOf = (key: unknown) => {
+  const c = colorInfo(key);
+  return c ? { key: c.key, name: c.name, hex: c.main, shade: c.shade, tint: c.tint, deep: c.deep }
+    : { key: String(key), name: String(key), hex: "#888888", shade: "#5c5c5c", tint: "#c2c2c2", deep: "#444444" };
+};
 // How a player is named in the log, emails and notifications: "Ana (Teal)".
 export const who = (name: string, colorKey: string) => `${name} (${colorInfo(colorKey)?.name ?? colorKey})`;
 

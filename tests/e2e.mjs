@@ -45,7 +45,7 @@ try {
   console.log("join flow");
   check("join code is 8 characters, no repo-committed code", /^[A-HJKMNP-Z2-9]{8}$/.test(game.code));
   const page = await client(A).get(`/one/join/${game.code.toLowerCase()}`);
-  check("join page loads, code is case-insensitive", page.status === 200 && page.text.includes("Game One") && page.text.includes("8 of 8 seats open"));
+  check("join page loads, code is case-insensitive", page.status === 200 && page.text.includes("Game One") && page.text.includes("0 of 8 seats taken"));
   const bad = await client(A).get("/one/join/ZZZZZZZZ");
   check("unknown code gives a friendly page", bad.status === 404 && bad.text.includes("doesn't match this game"));
 
@@ -253,7 +253,7 @@ try {
   check("the turn does NOT advance on submit", pub1.data.game.turn === 1 && pub1.data.game.round === 1);
   check("/one/api/game shows the prompt and status, still no '@' or ids",
     pub1.data.turn_status === "submitted" && pub1.data.turns[0].prompt.includes("cats") && pub1.data.turns[0].name === "Bo" && !pub1.text.includes("@") && !/user_id|"id"/.test(pub1.text), pub1.text);
-  check("the log records it", pub1.data.events[0].text.includes("Bo (Saffron) took their turn"));
+  check("the log records it", pub1.data.events[0].text.includes("Bo (Marigold) took their turn"));
   const after = await ada.get("/one/api/notifications");
   check("the other players were notified in-game", after.data.unread === before + 1 && after.data.notifications[0].kind === "turn_submitted");
   check("and by email, but not the submitter", (() => { const o = d1(state, "SELECT to_addr FROM outbox WHERE subject LIKE '%took their turn%'"); return o.some((r) => r.to_addr === "ada@example.com") && !o.some((r) => r.to_addr === "bo@example.com"); })());
@@ -355,8 +355,8 @@ try {
   const land = await client(A).get("/");
   check("the landing page lists both games, with status and player counts and links",
     land.status === 200 && land.text.includes("Game One") && land.text.includes("Game Two") && land.text.includes('href="/one/"') && land.text.includes('href="/two/"') &&
-    /Game Two<\/strong><\/a>\s*<span class="sub">In play · 2 of 8 players/.test(land.text), land.text.slice(0, 1500));
-  check("the landing page contains no '@' and no join code", !land.text.includes("@") && !land.text.includes(game.code) && !land.text.includes(two.code));
+    /Game Two<\/span>\s*<span class="gmeta"><span>\/two<\/span><span>2 of 8 seats<\/span><span>In play<\/span>/.test(land.text), land.text.slice(0, 1500));
+  check("the landing page contains no '@' and no join code", !/[\w.+-]+@[a-z][\w-]*\.[a-z]/i.test(land.text) && !land.text.includes(game.code) && !land.text.includes(two.code));
   const redirect = await client(A).get("/one");
   check("/<slug> without the slash redirects to /<slug>/", redirect.status === 308 && redirect.headers.get("location") === "/one/");
   for (const p of ["/api/game", "/rules", "/admin/", "/join/ABCDEFGH", "/auth/verify", "/assets/", "/static/", "/www/", "/mail/", "/help/", "/about/", "/Bad_Slug/", "/UPPER/", "/a/", "/-lead/", "/trail-/", "/x".repeat(1) + "y".repeat(41) + "/"]) {

@@ -5,7 +5,7 @@ export const get = async ({ env, data }: Ctx) => {
   const g = data.game!;
   const players = (
     await env.DB.prepare(
-      "SELECT display_name AS name, color, score, turn_order, is_host FROM players WHERE game_id = ? ORDER BY turn_order",
+      "SELECT display_name AS name, color, shape, score, turn_order, is_host FROM players WHERE game_id = ? ORDER BY turn_order",
     ).bind(g.id).all()
   ).results.map((p: any) => ({ ...p, color: colorOf(p.color), is_host: !!p.is_host }));
   const events = (

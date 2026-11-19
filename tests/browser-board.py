@@ -11,7 +11,7 @@ with sync_playwright() as p:
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.goto(f"{base}/{slug}/")
-    page.wait_for_function("document.getElementById('now').textContent.indexOf('Loading') < 0")
+    page.wait_for_function("document.getElementById('dock').textContent.trim().length > 0")
     page.wait_for_function("document.getElementById('rules').textContent.indexOf('Loading') < 0")
     got_title = page.inner_text("#title")
     rules_text = page.inner_text("#rules")

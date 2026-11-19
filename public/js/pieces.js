@@ -1,0 +1,72 @@
+// The traced pieces, recolored per player and grounded on a tile. Shared by the board and the join page.
+//   pieceSVG({ shape, color, scale, mirrored, clip })  markup for one piece whose FEET are at (0, 0)
+// A shape is drawn once, in its own source colors (pieces-data.js). recolor() swaps every fill that belongs to the
+// shape's main / shade / tint / deep family for the player color's matching step; a fill slightly off its family
+// keeps that offset, so the shading survives. Ink fills follow the page's --outline.
+import { TRACED, ROLES, FOOT, HEIGHT } from "/js/pieces-data.js";
+
+export const HW = 28, HH = HW * Math.sin(42 * Math.PI / 180), DEPTH = 9;   // a tile: half width, half height, slab depth
+
+const h2r = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+const r2h = (r) => "#" + r.map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("").toUpperCase();
+const mix = (a, b) => { const x = h2r(a), y = h2r(b); return r2h(x.map((v, i) => (v + y[i]) / 2)); };
+const ROLE_TOL = 40, INK = h2r("#18202B"), INK_EXACT = 14;
+const cache = new Map();
+
+export function recolor(shape, color) {
+  const t = TRACED[shape] || TRACED.pawn;
+  if (!color) return t.body;
+  const main = color.main || color.hex;
+  const ck = shape + "|" + main + "|" + color.shade;
+  if (cache.has(ck)) return cache.get(ck);
+  const roles = ROLES[shape] || ROLES.pawn;
+  const tgt = { main, shade: color.shade, tint: color.tint, deep: color.deep, mid: mix(main, color.shade) };
+  const body = t.body.replace(/fill="(#[0-9A-Fa-f]{6})"/g, (m, hex) => {
+    const f = h2r(hex);
+    let best = null, bd = 1e9;
+    for (const [role, src] of Object.entries(roles)) {
+      const s = h2r(src), d = Math.hypot(f[0] - s[0], f[1] - s[1], f[2] - s[2]);
+      if (d < bd) { bd = d; best = [role, s]; }
+    }
+    const di = Math.hypot(f[0] - INK[0], f[1] - INK[1], f[2] - INK[2]);
+    if (di < bd) return di <= INK_EXACT ? 'style="fill:var(--outline)"' : m;
+    if (!best || bd > ROLE_TOL) return m;
+    const to = h2r(tgt[best[0]] || tgt.main);
+    return 'fill="' + r2h(to.map((v, i) => v + (f[i] - best[1][i]))) + '"';
+  });
+  cache.set(ck, body);
+  return body;
+}
+
+// The shadow gradients and the tile clip every piece refers to, defined once per page.
+export function ensureDefs() {
+  if (document.getElementById("piece-defs")) return;
+  const d = document.createElement("div");
+  d.id = "piece-defs";
+  d.setAttribute("aria-hidden", "true");
+  d.innerHTML = `<svg width="0" height="0" style="position:absolute" focusable="false"><defs>
+<radialGradient id="gContact"><stop offset="0" stop-color="#000" stop-opacity=".72"/><stop offset=".62" stop-color="#000" stop-opacity=".52"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>
+<radialGradient id="gAO"><stop offset="0" stop-color="#000" stop-opacity=".30"/><stop offset=".5" stop-color="#000" stop-opacity=".16"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>
+<clipPath id="tt" clipPathUnits="userSpaceOnUse"><polygon points="-27.5,0 0,-17.8 27.5,0 0,17.8"/></clipPath>
+</defs></svg>`;
+  document.body.prepend(d);
+}
+
+// One piece with its feet centred on (0, 0): a contact shadow under it (clipped to the tile top), then the art.
+// `mirrored` turns the art to face the other way around the feet. Not offered a shape that does not exist: it is a pawn.
+export function pieceSVG({ shape, color, scale = 1.1, mirrored = false, clip = true }) {
+  const key = TRACED[shape] ? shape : "pawn";
+  const t = TRACED[key], H = HEIGHT[key] || 36, W = H * t.w / t.h, f = FOOT[key] || [0, .33];
+  const rx = f[1] * W, ry = rx * (key === "pawn" ? .36 : .52);
+  const shadow = `<ellipse cx="0" cy="${(ry * .1).toFixed(2)}" rx="${(rx * 1.9).toFixed(2)}" ry="${(ry * 1.9).toFixed(2)}" fill="url(#gAO)"/><ellipse cx="${(rx * .42).toFixed(2)}" cy="${(ry * .12).toFixed(2)}" rx="${(rx * 1.45).toFixed(2)}" ry="${(ry * 1.4).toFixed(2)}" fill="url(#gContact)" opacity=".5"/><ellipse cx="0" cy="${(ry * .06).toFixed(2)}" rx="${(rx * 1.18).toFixed(2)}" ry="${(ry * 1.3).toFixed(2)}" fill="url(#gContact)"/>`;
+  const art = `<svg x="${(-W / 2 - f[0] * W).toFixed(2)}" y="${(-H + ry).toFixed(2)}" width="${W.toFixed(2)}" height="${H}" viewBox="0 0 ${t.w} ${t.h}" preserveAspectRatio="xMidYMax meet" overflow="visible">${recolor(key, color)}</svg>`;
+  const flip = mirrored ? ' transform="scale(-1,1)"' : "";
+  return `<g${clip ? ' clip-path="url(#tt)"' : ""}><g transform="scale(${scale})">${shadow}</g></g><g transform="scale(${scale})"><g${flip}>${art}</g></g>`;
+}
+
+// A flat tile (for the join picker and the landing page): a charted tile at the page's colors.
+export function tileSVG() {
+  const D = DEPTH, l = [[-HW, 0], [0, HH], [0, HH + D], [-HW, D]], r = [[0, HH], [HW, 0], [HW, D], [0, HH + D]], top = [[-HW, 0], [0, -HH], [HW, 0], [0, HH]];
+  const p = (a) => a.map((v) => v[0].toFixed(1) + "," + v[1].toFixed(1)).join(" ");
+  return `<polygon points="${p(l)}" style="fill:var(--land)"/><polygon points="${p(l)}" style="fill:var(--shade-1)"/><polygon points="${p(r)}" style="fill:var(--land)"/><polygon points="${p(r)}" style="fill:var(--shade-2)"/><polygon points="${p(top)}" style="fill:var(--land);stroke:var(--tile-seam);stroke-width:1"/>`;
+}

@@ -17,8 +17,8 @@ board and by email.
 
 - `src/index.ts`: the Worker and its small hand-written router (no framework)
 - `src/routes/`, `src/lib/`: the page and API handlers, and shared code
-- `public/`: the static files: `board.html` (one board page for every game), `site.css`, `theme.css` (every color), `js/` (the board) and `vendor/` (three.js, pinned, no CDN)
-- `migrations/`: the D1 schema (`0001_init.sql`, `0002_island_board.sql`, `0003_mcp_oauth.sql`)
+- `public/`: the static files: `board.html` (one board page for every game), `site.css`, `theme.css` (every color and font: palette v2, light and dark), `js/` (`board.js` draws the board as SVG, `pieces.js` and `pieces-data.js` the traced pieces, `rulebook.js` the rulebook, `landing.js` the picture on the front page)
+- `migrations/`: the D1 schema (`0001_init.sql`, `0002_island_board.sql`, `0003_mcp_oauth.sql`, `0004_piece_shape.sql`)
 - `templates/RULES.md`: the starter ruleset a new game repo begins with
 - `scripts/create-game.sh`: creates a game and prints its join link
 - `tests/`: end-to-end tests and the screenshot script
@@ -38,13 +38,13 @@ board and by email.
 | `/<slug>/mcp` | the game's MCP server (Streamable HTTP, POST only, bearer token). See "The MCP server" below |
 | `/<slug>/oauth/{authorize,token,register}` | the OAuth sign-in for MCP clients (authorize is a page; token takes a form post; register takes JSON) |
 | `/.well-known/oauth-protected-resource/<slug>/mcp`, `/.well-known/oauth-authorization-server/<slug>` | the two discovery documents an MCP client reads after its first 401 |
-| `/js/*.js`, `/vendor/*.js`, `/theme.css`, `/site.css` | the board's scripts (three.js 0.186.1, vendored), and the styles |
+| `/js/*.js`, `/theme.css`, `/site.css` | the pages' scripts, and the styles (the only external request is Google Fonts) |
 
 A slug is 2 to 40 characters of `a-z`, `0-9` and `-`, starting and ending with a
 letter or digit. These are refused (they would collide with the site's own
 routes): api, auth, join, assets, static, site.css, theme.css, js, vendor, index.html, admin, www, mail,
 help, about, rules, board. An unknown slug is a friendly 404. The router
-(`src/index.ts`) is an allowlist: only `/`, `/site.css`, `/theme.css`, the board's scripts and the game routes answer;
+(`src/index.ts`) is an allowlist: only `/`, `/site.css`, `/theme.css`, the pages' scripts and the game routes answer;
 everything else is 404. Only `public/` is ever uploaded as static files (config,
 migrations, tests and `templates/` are not), and the Worker runs first for every
 request (`run_worker_first`), so a file in `public/` is served only if the router names it.
@@ -96,7 +96,7 @@ two games is two unrelated players.
 - A game has a **join code** (8 characters, made by `scripts/create-game.sh`
   when the game is created; it is never committed, because this repo is public).
   The join link is `https://<site>/<slug>/join/<CODE>`. A code opens only its own game.
-- Joining asks for an email, a display name and a piece color (one of eight, unique per game). Nothing is created
+- Joining asks for an email, a display name, a piece shape (one of nine: eight traced pieces and the pawn) and a piece color (one of the player colors of palette v2, unique per game; both lists are `src/lib/pieces.json`, and a color someone has is unavailable). Nothing is created
   until the person clicks the link we email them, so nobody can sign up someone else.
 - Log-in is a **magic link** by email, for that game: single use, expires in 15
   minutes. Limits: 3 links per (game, email) per 15 minutes, and 10 per email
@@ -123,7 +123,7 @@ Once playing, the player whose turn it is (`games.turn` = their seat number, fro
 
 Each game has an MCP server at `/<slug>/mcp`, so a player can connect an AI client (Claude, Cursor, the MCP
 Inspector...) and take their turn through it. It is **switched by the rules**: the game's setting `mcp_enabled`
-(default true, named in rule 210 of `templates/RULES.md`) is read from the game's row on every request, and when
+(default true, named in rule 204 of `templates/RULES.md`) is read from the game's row on every request, and when
 it is false every MCP and OAuth address answers 403 with a plain message that the rules disable MCP. Players change
 it the way they change any rule.
 

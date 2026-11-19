@@ -9,7 +9,7 @@ export const get = async ({ env, data }: Ctx) => {
   const g = data.game!;
   await ensureTiles(env, g);
   const players = (
-    await env.DB.prepare("SELECT display_name, color, score, turn_order, x, y, z FROM players WHERE game_id = ? ORDER BY turn_order").bind(g.id).all()
+    await env.DB.prepare("SELECT display_name, color, shape, mirrored, score, turn_order, x, y, z FROM players WHERE game_id = ? ORDER BY turn_order").bind(g.id).all()
   ).results as any[];
   const tiles = await loadTiles(env, g.id);
   const S = getSettings(g.settings);
@@ -21,7 +21,7 @@ export const get = async ({ env, data }: Ctx) => {
     // x, y, z are plain integers; `label` is the compass name ("3N 2E 1U"), which skips zero in all three.
     tiles: tiles.map((t) => ({ x: t.x, y: t.y, z: t.z, label: tileLabel(t.x, t.y, t.z) })),
     pieces: players.map((p) => ({
-      name: p.display_name, color: colorOf(p.color), score: p.score, turn_order: p.turn_order,
+      name: p.display_name, color: colorOf(p.color), shape: p.shape, mirrored: !!p.mirrored, score: p.score, turn_order: p.turn_order,
       at: { x: p.x, y: p.y, z: p.z, label: tileLabel(p.x, p.y, p.z) },
     })),
   });

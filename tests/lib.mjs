@@ -128,11 +128,12 @@ export function client(base) {
   return c;
 }
 
-export const COLORS = ["vermilion", "saffron", "moss", "teal", "cobalt", "violet", "rose", "graphite"];
+// Eight of the colors the join page offers (palette v2), by key.
+export const COLORS = ["vermilion", "marigold", "cobalt", "teal", "sky", "indigo", "orchid", "jade"];
 
 // Join through the real flow: request the link, follow it. Returns a client logged in to that game.
-export async function join(base, slug, code, { email, name, color }, c = client(base)) {
-  const r = await c.post(`/${slug}/api/join`, { code, email, name, color });
+export async function join(base, slug, code, { email, name, color, shape }, c = client(base)) {
+  const r = await c.post(`/${slug}/api/join`, { code, email, name, color, ...(shape ? { shape } : {}) });
   if (r.status !== 200) throw new Error(`join ${email}: ${r.status} ${r.text}`);
   const v = await finish(c, r.data.dev_link);
   if (v.status !== 303) throw new Error(`verify ${email}: ${v.status}`);
