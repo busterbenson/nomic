@@ -11,7 +11,7 @@ export const protectedResource = async ({ env, request, data }: Ctx) => {
   const g = data.game!;
   if (!mcpEnabled(g)) return off();
   const issuer = issuerOf(env, request, g);
-  return withCors(json({ resource: `${issuer}/mcp`, authorization_servers: [issuer], bearer_methods_supported: ["header"] }, 200, { "cache-control": "public, max-age=300" }));
+  return withCors(json({ resource: `${issuer}/mcp`, authorization_servers: [issuer], bearer_methods_supported: ["header"] }, 200));
 };
 
 export const authorizationServer = async ({ env, request, data }: Ctx) => {
@@ -27,5 +27,5 @@ export const authorizationServer = async ({ env, request, data }: Ctx) => {
     grant_types_supported: ["authorization_code", "refresh_token"],
     code_challenge_methods_supported: ["S256"],
     token_endpoint_auth_methods_supported: ["none"],
-  }, 200, { "cache-control": "public, max-age=300" }));
+  }, 200));
 };

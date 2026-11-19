@@ -28,13 +28,16 @@ export async function issueLink(
   const now = Date.now();
   // The limit checks and the insert are ONE statement, so concurrent requests
   // cannot all read "under the limit" and each insert a token.
+  // `next` (migration 0003) is written only when there is one, so ordinary join and log-in links keep working
+  // on a database that has not had that migration yet.
+  const hasNext = t.next !== undefined;
   const ins = await env.DB.prepare(
-    `INSERT INTO login_tokens (token_hash, game_id, email, purpose, display_name, color, created_at, expires_at, next)
-     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
+    `INSERT INTO login_tokens (token_hash, game_id, email, purpose, display_name, color, created_at, expires_at${hasNext ? ", next" : ""})
+     SELECT ?, ?, ?, ?, ?, ?, ?, ?${hasNext ? ", ?" : ""}
      WHERE (SELECT COUNT(*) FROM login_tokens WHERE game_id = ? AND email = ? AND created_at > ?) < ?
        AND (SELECT COUNT(*) FROM login_tokens WHERE email = ? AND created_at > ?) < ?`,
   )
-    .bind(await sha256Hex(token), game.id, t.email, t.purpose, t.name ?? null, t.color ?? null, nowIso(now), nowIso(now + TOKEN_TTL_MS), t.next ?? null,
+    .bind(await sha256Hex(token), game.id, t.email, t.purpose, t.name ?? null, t.color ?? null, nowIso(now), nowIso(now + TOKEN_TTL_MS), ...(hasNext ? [t.next] : []),
       game.id, t.email, nowIso(now - TOKEN_TTL_MS), MAX_LINKS_PER_WINDOW,
       t.email, nowIso(now - HOUR_MS), MAX_LINKS_PER_EMAIL_HOUR)
     .run();

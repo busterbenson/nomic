@@ -396,7 +396,7 @@ try {
   const lv = await finish(maxOut, lgLink);
   check("clicking Continue signs him in and sends him back to the consent page (not the board)", lv.status === 303 && lv.headers.get("location") === nextSaved && lv.headers.getSetCookie().some((c) => /^s=/.test(c)), lv.headers.get("location"));
   const cp = await maxOut.get(lv.headers.get("location"));
-  check("the consent page says who is asking and as whom, with Allow and Deny", cp.status === 200 && /Test Agent \(agent\.example\) wants to play as Max/.test(cp.text) && />Allow</.test(cp.text) && />Deny</.test(cp.text), cp.text.slice(-500));
+  check("the consent page puts the host the code goes to first, then the app's own name, and says as whom; with Allow and Deny", cp.status === 200 && /agent\.example \(Test Agent\) wants to play as Max/.test(cp.text) && />Allow</.test(cp.text) && />Deny</.test(cp.text), cp.text.slice(-500));
   const deny = await consent(A, "pilot", maxOut, cid, pk, undefined, "deny", SITE);
   check("Deny goes back to the client with access_denied and its state, and stores no code", deny.status === 303 && deny.headers.get("location") === "https://agent.example/cb?error=access_denied&state=st-1" && d1(state, "SELECT COUNT(*) AS n FROM oauth_codes")[0].n === 0, deny.headers.get("location"));
   const allow = await consent(A, "pilot", maxOut, cid, pk, undefined, "allow", SITE);
@@ -416,7 +416,22 @@ try {
   check("the right code and verifier give an access token (1 hour) and a refresh token; only hashes are stored", good.status === 200 && good.data.token_type === "Bearer" && good.data.expires_in === 3600 && !!good.data.access_token && !!good.data.refresh_token && d1(state, "SELECT token_hash FROM oauth_tokens").every((r) => /^[0-9a-f]{64}$/.test(r.token_hash)) && d1(state, `SELECT COUNT(*) AS n FROM oauth_tokens WHERE token_hash = '${good.data.access_token}'`)[0].n === 0);
   check("the same code cannot be used twice", (await exchange(A, "pilot", cid, code4, pk.verifier)).status === 400);
   check("a client of another game is not known here (401 invalid_client)", (await exchange(A, "prop", cid, code4, pk.verifier)).status === 401);
-  const tokMax = good.data.access_token;
+  check("and presenting a spent code again revokes what was issued from it", (await mcp(A, "pilot", good.data.access_token, "tools/list", {})).status === 401 && d1(state, `SELECT COUNT(*) AS n FROM oauth_tokens WHERE client_id = '${cid}'`)[0].n === 0);
+  const code5 = new URL((await consent(A, "pilot", maxOut, cid, pk, undefined, "allow", SITE)).headers.get("location")).searchParams.get("code");
+  const good2 = await exchange(A, "pilot", cid, code5, pk.verifier);
+  const tokMax = good2.data.access_token;
+  const mailed = d1(state, "SELECT body FROM outbox WHERE to_addr = 'max@example.com' ORDER BY id DESC LIMIT 1")[0]?.body ?? "";
+  check("the log-in email says which host the AI client will be sent to", /connect an AI client at agent\.example\./.test(mailed), mailed.slice(0, 200));
+  const longState = "s".repeat(500);
+  const cLong = client(A);
+  const lgLong = await cLong.form("/pilot/oauth/authorize", fields({ step: "login", email: "max@example.com", state: longState }), { origin: SITE });
+  const lvLong = await finish(cLong, /href="([^"]+auth\/verify[^"]+)"/.exec(lgLong.text)?.[1]);
+  check("the longest state (500 characters) survives the trip through the log-in link to the consent page; a longer one is refused up front, not cut",
+    lvLong.status === 303 && /^\/pilot\/oauth\/authorize\?/.test(lvLong.headers.get("location")) && (await cLong.get(lvLong.headers.get("location"))).text.includes(">Allow<") &&
+    new URL((await web.get(authUrl({ state: "s".repeat(501) }))).headers.get("location")).searchParams.get("error") === "invalid_request");
+  const code6 = new URL((await consent(A, "pilot", maxOut, cid, pk, undefined, "allow", SITE)).headers.get("location")).searchParams.get("code");
+  d1(state, `UPDATE oauth_codes SET expires_at = '2000-01-01T00:00:00.000Z' WHERE code_hash = '${sha256Hex(code6)}'`);
+  check("a code past its ten minutes is refused", (await exchange(A, "pilot", cid, code6, pk.verifier)).status === 400);
 
   // Mia is already signed in on the board: consent is one click.
   const mt = await connect(A, "pilot", mia, SITE);
@@ -492,6 +507,11 @@ try {
   check("a refresh token gives a new pair, and the new access token works", rf.status === 200 && rfd.access_token !== tokMia && rfd.refresh_token !== mt.refresh_token && (await mcp(A, "pilot", rfd.access_token, "tools/list", {})).status === 200);
   check("the old refresh token is spent (single use); another client cannot use one either", (await form(A, "/pilot/oauth/token", { grant_type: "refresh_token", client_id: mt.clientId, refresh_token: mt.refresh_token })).status === 400 && (await form(A, "/pilot/oauth/token", { grant_type: "refresh_token", client_id: cid, refresh_token: rfd.refresh_token })).status === 400);
   check("an unsupported grant is refused", (await (await form(A, "/pilot/oauth/token", { grant_type: "password", client_id: cid })).json()).error === "unsupported_grant_type");
+  d1(state, `UPDATE oauth_tokens SET expires_at = '2000-01-01T00:00:00.000Z' WHERE token_hash = '${sha256Hex(rfd.refresh_token)}'`);
+  check("an expired refresh token is refused", (await form(A, "/pilot/oauth/token", { grant_type: "refresh_token", client_id: mt.clientId, refresh_token: rfd.refresh_token })).status === 400);
+  const regIn = (slug) => fetch(`${A}/${slug}/oauth/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ redirect_uris: ["https://a.example/cb"] }) });
+  let regLast = 0; for (let i = 0; i < 21; i++) regLast = (await regIn("prop")).status;
+  check("registration is capped per address (20 an hour, then 429), per game: another game is not affected", regLast === 429 && d1(state, `SELECT COUNT(*) AS n FROM oauth_clients WHERE game_id = '${gidOf("prop")}'`)[0].n === 20 && (await regIn("hex")).status === 201);
   d1(state, `UPDATE oauth_tokens SET expires_at = '2000-01-01T00:00:00.000Z' WHERE token_hash = '${sha256Hex(rfd.access_token)}'`);
   check("an expired access token is refused (401)", (await mcp(A, "pilot", rfd.access_token, "tools/list", {})).status === 401);
   // A log-in link may carry `next`, but only this game's own consent page is honoured: the server checks it again.

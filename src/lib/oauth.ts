@@ -31,7 +31,7 @@ export const preflight = () => new Response(null, { status: 204, headers: CORS }
 
 // The page a log-in link may send a person back to: this game's own consent page, nothing else.
 export function isConsentPath(slug: string, next: unknown): next is string {
-  if (typeof next !== "string" || next.length > 2000 || !next.startsWith("/") || next.startsWith("//") || /[\u0000-\u001f\\]/.test(next)) return false;
+  if (typeof next !== "string" || next.length > 4000 || !next.startsWith("/") || next.startsWith("//") || /[\u0000-\u001f\\]/.test(next)) return false;
   try {
     const u = new URL(next, "http://x.invalid");
     return u.origin === "http://x.invalid" && u.pathname === `/${slug}/oauth/authorize`;

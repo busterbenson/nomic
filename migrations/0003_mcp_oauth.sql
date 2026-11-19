@@ -12,6 +12,8 @@ CREATE TABLE oauth_clients (
   game_id TEXT NOT NULL REFERENCES games(id),
   name TEXT NOT NULL,
   redirect_uris TEXT NOT NULL CHECK (json_valid(redirect_uris) AND json_type(redirect_uris) = 'array'),
+  -- A hash of the registering address, only to cap registrations per address.
+  ip_hash TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
 CREATE INDEX oauth_clients_game ON oauth_clients(game_id, created_at);

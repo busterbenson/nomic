@@ -30,8 +30,9 @@ async function parse(ctx: Ctx, get: (k: string) => string): Promise<Req | Respon
   const redirect_uri = get("redirect_uri");
   if (!client) return fail("This app is not registered with this game.");
   if (!client.redirect_uris.includes(redirect_uri)) return fail("That return address is not one this app registered.");
-  const state = get("state").slice(0, 500);
-  const bad = (error: string) => redirectBack(redirect_uri, { error, state });
+  const state = get("state");
+  const bad = (error: string) => redirectBack(redirect_uri, { error, state: state.length <= 500 ? state : "" });
+  if (state.length > 500) return bad("invalid_request");
   if (get("response_type") !== "code") return bad("unsupported_response_type");
   if (get("code_challenge_method") !== "S256" || !validChallenge(get("code_challenge"))) return bad("invalid_request");
   const resource = get("resource");
@@ -66,8 +67,9 @@ export const get = async (ctx: Ctx) => {
   <button class="primary" type="submit">Email me a log-in link</button>
 </form>`);
   }
+  // The host the code would be sent to comes first: the name is whatever the app called itself.
   const host = new URL(r.redirect_uri).host;
-  return page(game.name, `<h1>${esc(game.name)}</h1><div class="now">${esc(r.client.name)} (${esc(host)}) wants to play as ${esc(player.display_name)}.</div>
+  return page(game.name, `<h1>${esc(game.name)}</h1><div class="now">${esc(host)} (${esc(r.client.name)}) wants to play as ${esc(player.display_name)}.</div>
 <form method="POST" action="${action}" class="stack">${hidden(r)}<input type="hidden" name="step" value="decide">
   <button class="primary" type="submit" name="decision" value="allow">Allow</button>
   <button type="submit" name="decision" value="deny">Deny</button>
@@ -97,7 +99,7 @@ export const post = async (ctx: Ctx) => {
     // Same as /api/login: a token row is written either way, only a real player is emailed, the answer never says which.
     const link = await issueLink(ctx, game, {
       email, purpose: "login", send: !!player, next: nextPath(game.slug, r),
-      subject: `Your ${game.name} log-in link`, intro: `Click to log in to ${game.name} and connect an AI client.`,
+      subject: `Your ${game.name} log-in link`, intro: `Click to log in to ${game.name} and connect an AI client at ${new URL(r.redirect_uri).host}.`,
     });
     if (!link) return fail("Too many links requested. Wait 15 minutes and try again.", 429);
     const dev = emailMode(env) === "dev" ? `<p><a href="${esc(link)}">Log-in link</a></p>` : "";

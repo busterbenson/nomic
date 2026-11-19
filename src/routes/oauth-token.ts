@@ -22,7 +22,13 @@ export const post = async ({ env, request, data }: Ctx) => {
     const row: any = await env.DB.prepare(
       "UPDATE oauth_codes SET used_at = ? WHERE code_hash = ? AND game_id = ? AND used_at IS NULL AND expires_at > ? RETURNING *",
     ).bind(now, await sha256Hex(f("code")), game.id, now).first();
-    if (!row || row.client_id !== client.id || row.redirect_uri !== f("redirect_uri")) return err("invalid_grant", "That code is invalid, expired or already used.");
+    if (!row) {
+      // A code that was already used is being presented again: whatever was issued from it is revoked (RFC 6749 4.1.2).
+      const spent: any = await env.DB.prepare("SELECT client_id, player_id FROM oauth_codes WHERE code_hash = ? AND game_id = ? AND used_at IS NOT NULL").bind(await sha256Hex(f("code")), game.id).first();
+      if (spent) await env.DB.prepare("DELETE FROM oauth_tokens WHERE game_id = ? AND client_id = ? AND player_id = ?").bind(game.id, spent.client_id, spent.player_id).run();
+      return err("invalid_grant", "That code is invalid, expired or already used.");
+    }
+    if (row.client_id !== client.id || row.redirect_uri !== f("redirect_uri")) return err("invalid_grant", "That code is invalid, expired or already used.");
     if ((await pkceChallenge(f("code_verifier"))) !== row.code_challenge) return err("invalid_grant", "The code_verifier does not match.");
     const seat = await env.DB.prepare("SELECT 1 AS ok FROM players WHERE id = ? AND game_id = ?").bind(row.player_id, game.id).first();
     if (!seat) return err("invalid_grant", "That player no longer has a seat in this game.");
