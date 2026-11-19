@@ -101,7 +101,7 @@ export function renderMarkdown(md) {
 
 export function mountRulebook(root, md, { settings = {}, revisions = {} } = {}) {
   const RB = parseRules(md);
-  if (!RB.sections.length) { root.innerHTML = `<div class="rb-plain">${renderMarkdown(String(md || ""))}</div>`; return { rulebook: RB }; }
+  if (!RB.sections.length) { root.innerHTML = `<div class="rb-plain"><div class="rbhead"><h2>Rulebook</h2></div>${renderMarkdown(String(md || ""))}</div>`; return { rulebook: RB }; }
   const state = { q: "", open: new Set(RB.sections.flatMap((s) => s.rules.map((r) => r.num))), closedSec: new Set(), history: new Set() };
   const allNums = RB.sections.flatMap((s) => s.rules.map((r) => r.num));
   const inline = (s, q) => {
