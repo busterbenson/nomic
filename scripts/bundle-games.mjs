@@ -4,7 +4,7 @@
 //   games/<slug>/rules/<n>.ts         each game's rule modules, copied (the Worker bundler follows the imports)
 //   starter/rules/<n>.ts              the starter pack (templates/rules/), for games with no bundle
 //
-// For each game in games.manifest.json it finds the highest day-N tag of the game's PUBLIC repo
+// For each game in games.manifest.json it finds the highest day-N (or setup day-0.K) tag of the game's PUBLIC repo
 // (`git ls-remote --tags`, no token), fetches that tag (`git clone --depth 1`), and refuses to bundle it unless:
 //   * game.json says engine 1 and lists exactly the modules in rules/
 //   * every module passes the lint (src/engine/lint.js): it imports only "promptocracy/engine" and uses no
@@ -109,16 +109,28 @@ export function runTestFiles(files, dir, label, opts = {}) {
 const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "echo", GCM_INTERACTIVE: "never" };
 const git = (args, cwd) => execFileSync("git", args, { cwd, env: gitEnv, encoding: "utf8", timeout: 90_000, stdio: ["ignore", "pipe", "pipe"] });
 
-// The highest day-N tag of a public repo: {tag, day}. A repo with none is an error (merge order: tag the game first).
+// The tag of a public repo the build fetches: {tag, day}. A repo with none is an error (merge order: tag the game first).
+// Two kinds of tag count:
+//   day-N     the rules in effect on day N, tagged by the moderator when day N is processed (rule 107.8, later)
+//   day-0.K   a SETUP revision: while the game is being set up (before day 1, rule 203.1) its starter rules may be edited
+//             directly, and each edit that should go live gets the next K (day-0.1, day-0.2 ...). Tags are never moved,
+//             so this is how day 0 changes without moving day-0. Only day 0 has revisions: day-3.1 is not a tag the build
+//             reads, so once play starts only the moderator's day-N tags matter.
+// Order: by day, then revision (day-0 < day-0.1 < day-0.10 < day-1). Numbers: at most 6 digits for a day and 4 for a
+// revision (a longer tag is ignored, so day-99999999999999999999999 cannot turn into 1e+23 and block every deploy).
 export function latestDayTag(url) {
   let out;
   try { out = git(["ls-remote", "--tags", "--refs", url, "refs/tags/day-*"]); }
   catch (e) { fail(`could not list the tags of ${url} (is the repo public and reachable?): ${String(e.stderr || e.message).trim().split("\n").pop()}`); }
-  // day-N with at most 6 digits: a longer tag is not a day (and day-99999999999999999999999 must not turn into 1e+23).
-  const days = out.split("\n").map((l) => /refs\/tags\/day-(\d{1,6})$/.exec(l.trim())).filter(Boolean).map((m) => Number(m[1]));
-  if (!days.length) fail(`${url} has no day-N tag yet. Tag the game's main (for example day-0) before this build.`);
-  const day = Math.max(...days);
-  return { tag: `day-${day}`, day };
+  const tags = out.split("\n").map((l) => /refs\/tags\/(day-(\d{1,6})(?:\.(\d{1,4}))?)$/.exec(l.trim())).filter(Boolean)
+    .map((m) => ({ tag: m[1], day: Number(m[2]), rev: m[3] === undefined ? null : Number(m[3]) }))
+    // A revision is 1 or more and only on day 0; "day-00", "day-0.01" or "day-0.0" would sort like another tag, so only
+    // the plain spelling counts.
+    .filter((t) => (t.rev === null || (t.day === 0 && t.rev >= 1)) && t.tag === (t.rev === null ? `day-${t.day}` : `day-${t.day}.${t.rev}`))
+    .map((t) => ({ ...t, rev: t.rev ?? 0 }));
+  if (!tags.length) fail(`${url} has no day-N tag yet. Tag the game's main (for example day-0) before this build.`);
+  const best = tags.reduce((a, b) => (b.day > a.day || (b.day === a.day && b.rev > a.rev) ? b : a));
+  return { tag: best.tag, day: best.day };
 }
 
 function fetchGame(slug, repo, base, into) {

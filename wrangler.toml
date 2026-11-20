@@ -65,3 +65,8 @@ database_name = "promptocracy-preview"
 # Placeholder. `npx wrangler d1 create promptocracy-preview` prints the real id.
 # Keep wrangler.preview-migrations.toml pointing at the same database.
 database_id = "9f652287-3859-4597-9c1b-c92b9185d9a7"
+
+# The midnight run (src/lib/day.ts runMidnight): every 5 minutes, lock the days that have ended in each game's time zone,
+# process them and open the next. The lock itself does not wait for it: every write checks the clock (rule 107.1).
+[triggers]
+crons = ["*/5 * * * *"]

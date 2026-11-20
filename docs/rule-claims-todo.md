@@ -7,15 +7,15 @@ Every function that carries out the game should say which rule it implements, wi
 `src/` is only reported for now: these functions have no claim yet. Site plumbing such as sign-in and email goes
 under rule 101 or 102; a follow-up change claims them and moves `src/` into the strict set.
 
-130 of 130 functions outside `src/engine/` are unclaimed.
+126 of 153 functions outside `src/engine/` are unclaimed.
 
 ## src/index.ts (5)
 
-- line 47: `secure`
-- line 57: `notFound`
-- line 63: `run`
-- line 68: `route`
-- line 148: `fetch`
+- line 51: `secure`
+- line 61: `notFound`
+- line 67: `run`
+- line 72: `route`
+- line 152: `fetch`
 
 ## src/lib/auth.ts (6)
 
@@ -60,13 +60,12 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 - line 12: `tooManyLinks`
 - line 21: `issueLink`
 
-## src/lib/mcp-tools.ts (5)
+## src/lib/mcp-tools.ts (4)
 
-- line 22: `viaRoute`
-- line 37: `reply`
-- line 38: `asJson`
-- line 40: `registerTools`
-- line 67: `can`
+- line 23: `viaRoute`
+- line 38: `reply`
+- line 39: `asJson`
+- line 41: `registerTools`
 
 ## src/lib/notify.ts (1)
 
@@ -93,23 +92,20 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 - line 13: `page`
 
-## src/lib/settings.js (11)
+## src/lib/settings.js (12)
 
-- line 27: `isInt`
-- line 28: `isObj`
-- line 29: `evenInt`
-- line 33: `max_players`
-- line 37: `mcp_enabled`
-- line 39: `exactly`
-- line 48: `spawnSpots`
-- line 49: `inside`
-- line 57: `validateSettings`
-- line 77: `getSettings`
-- line 91: `settingsForSize`
-
-## src/lib/turn.ts (1)
-
-- line 11: `turnBlock`
+- line 36: `validTimeZone`
+- line 41: `isInt`
+- line 42: `isObj`
+- line 43: `evenInt`
+- line 47: `max_players`
+- line 51: `mcp_enabled`
+- line 54: `exactly`
+- line 63: `spawnSpots`
+- line 64: `inside`
+- line 72: `validateSettings`
+- line 92: `getSettings`
+- line 106: `settingsForSize`
 
 ## src/lib/util.ts (27)
 
@@ -141,17 +137,9 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 - line 160: `playersLine`
 - line 166: `seatLimit`
 
-## src/routes/api-action.ts (1)
+## src/routes/api-day.ts (1)
 
-- line 21: `post`
-
-## src/routes/api-board.ts (1)
-
-- line 8: `get`
-
-## src/routes/api-game.ts (1)
-
-- line 4: `get`
+- line 29: `can`
 
 ## src/routes/api-join.ts (1)
 
@@ -181,10 +169,6 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 - line 11: `text`
 - line 14: `get`
-
-## src/routes/api-turn.ts (1)
-
-- line 10: `post`
 
 ## src/routes/join-page.ts (1)
 

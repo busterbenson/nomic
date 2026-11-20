@@ -1,6 +1,7 @@
 // PUBLIC. Never include emails, player ids or the join code.
 import { Ctx, colorOf, json, seatLimit } from "../lib/util";
 
+/** @rule 102 */
 export const get = async ({ env, data }: Ctx) => {
   const g = data.game!;
   const players = (
@@ -13,27 +14,23 @@ export const get = async ({ env, data }: Ctx) => {
       .bind(g.id)
       .all()
   ).results;
-  // Prompts for the current round are public to the table. No emails or ids.
+  // Today's prompts are public to the table (turns.round holds the day). No emails or ids.
   const turns = (
     await env.DB.prepare(
       `SELECT p.display_name AS name, t.turn_index, t.prompt, t.status, t.created_at
        FROM turns t JOIN players p ON p.game_id = t.game_id AND p.id = t.player_id
        WHERE t.game_id = ? AND t.round = ? AND t.status != 'withdrawn' ORDER BY t.created_at`,
-    ).bind(g.id, g.round).all()
+    ).bind(g.id, g.day).all()
   ).results;
-  const current = players.find((p: any) => p.turn_order === g.turn);
-  const mine = turns.find((t: any) => t.turn_index === g.turn);
+  // The day and the lock (and what each player has done today) are in /api/day.
   return json({
-    turn_status: g.status === "playing" && current ? (mine ? (mine as any).status : "waiting") : null,
     turns,
     game: {
       slug: g.slug,
       name: g.name,
       repo: g.repo,
       status: g.status,
-      turn: g.turn,
-      round: g.round,
-      moved: g.last_move === `${g.round}:${g.turn}`,
+      day: g.day,
       winning_score: g.winning_score,
       max_players: seatLimit(g),
     },

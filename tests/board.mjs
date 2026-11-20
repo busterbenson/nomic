@@ -10,6 +10,7 @@ import { chartOffsets, chartedAround, coordLabel, diagonals, islandCoords, tileL
 import { DEFAULT_SETTINGS, getSettings, settingsForSize, spawnSpots, validateSettings } from "../src/lib/settings.js";
 import { DIAGONAL_MOVES, SHARED_TILES } from "../src/lib/board-rules.js";
 import { PROPOSAL_INSERT_SQL } from "../src/lib/proposal.js";
+import { dayOpenBinds } from "../src/lib/day-gate.js";
 
 const PIECES = JSON.parse(readText(pjoin(ROOT, "src/lib/pieces.json"), "utf8"));
 
@@ -116,7 +117,7 @@ console.log("migration 0002");
 
 // ---------------------------------------------------------------- settings
 console.log("settings");
-check("the default settings are valid; they are the seat limit, the island size, the chart radius, the move distance and whether MCP is on, nothing else", validateSettings(DEFAULT_SETTINGS).length === 0 && validateSettings(settingsForSize(16, 12)).length === 0 && J(Object.keys(DEFAULT_SETTINGS)) === '["max_players","board.island","board.chart_radius","turn.move_distance","mcp_enabled"]' && DEFAULT_SETTINGS.max_players === 8 && DEFAULT_SETTINGS["board.island"].width === 8 && DEFAULT_SETTINGS["board.chart_radius"] === 2 && DEFAULT_SETTINGS["turn.move_distance"] === 1 && DEFAULT_SETTINGS.mcp_enabled === true);
+check("the default settings are valid; they are the seat limit, the island size, the chart radius, the move distance, whether MCP is on and the time zone, nothing else", validateSettings(DEFAULT_SETTINGS).length === 0 && validateSettings(settingsForSize(16, 12)).length === 0 && J(Object.keys(DEFAULT_SETTINGS)) === '["max_players","board.island","board.chart_radius","turn.move_distance","mcp_enabled","game.timezone"]' && DEFAULT_SETTINGS["game.timezone"] === "America/Los_Angeles" && DEFAULT_SETTINGS.max_players === 8 && DEFAULT_SETTINGS["board.island"].width === 8 && DEFAULT_SETTINGS["board.chart_radius"] === 2 && DEFAULT_SETTINGS["turn.move_distance"] === 1 && DEFAULT_SETTINGS.mcp_enabled === true);
 const bad = (k, v) => validateSettings({ ...DEFAULT_SETTINGS, [k]: v }).length > 0;
 check("seats must fit the island: max_players above the spawn spots is refused (8x8 radius 2 leaves 16; 6x6 leaves 4; radius 3 on 8x8 leaves 4)", spawnSpots(8, 8, 2) === 16 && spawnSpots(6, 6, 2) === 4 && spawnSpots(8, 8, 3) === 4 && spawnSpots(4, 4, 2) === 0 && validateSettings(settingsForSize(6, 6)).length === 1 && /spawn spots/.test(validateSettings(settingsForSize(6, 6))[0]) && validateSettings(settingsForSize(6, 6, 4)).length === 0 && validateSettings({ ...DEFAULT_SETTINGS, max_players: 5, "board.chart_radius": 3 }).length === 1 && validateSettings({ ...DEFAULT_SETTINGS, max_players: 4, "board.chart_radius": 3 }).length === 0);
 check("bad values are refused: odd or tiny sizes, radii, distances, extra keys", bad("board.island", { width: 3, height: 8 }) && bad("board.island", { width: 7, height: 8 }) && bad("board.island", { width: 8 }) && bad("board.island", { width: 8, height: 8, depth: 1 }) && bad("board.chart_radius", 0) && bad("board.chart_radius", 2.5) && bad("max_players", 0) && bad("max_players", 9) && bad("max_players", 2.5) && bad("turn.move_distance", 0) && bad("turn.move_distance", "1") && validateSettings({ ...DEFAULT_SETTINGS, mystery: 1 }).length > 0);
@@ -128,13 +129,13 @@ const named = [...rulesText.matchAll(/\[setting: ([^\]]+)\]/g)].flatMap((m) => m
 const inRules = new Set(named), inCode = new Set(Object.keys(DEFAULT_SETTINGS));
 check("every [setting: x] named in templates/RULES.md exists in the default settings", named.length > 0 && [...inRules].every((n) => inCode.has(n)), [...inRules].filter((n) => !inCode.has(n)).join());
 check("and every default setting is named in templates/RULES.md", [...inCode].every((n) => inRules.has(n)), [...inCode].filter((n) => !inRules.has(n)).join());
-check("the starter rules are the old rules renumbered into hundreds blocks (100 Core, 200 Players and turns, 300 Proposals and rulings, 400 Points and winning, 500 The board), with no rule from the later parts (days, voting by ballot, hearts and monsters, making things)",
+check("the starter rules are in hundreds blocks (100 Core, 200 Players and turns, 300 Proposals and rulings, 400 Points and winning, 500 The board), with the day rules of step 1 (107 The night, 203 Days) and no rule from the later parts (voting by ballot, hearts and monsters, making things)",
   ["## 100. Core rules [unanimous]", "## 200. Players and turns [majority]", "## 300. Proposals and rulings [majority]", "## 400. Points and winning [majority]", "## 500. The board [majority]"].every((h) => rulesText.includes(h)) &&
-  ["101 Follow the rules", "102 Players", "103 Turns", "104 Voting", "105 The moderator", "201 Game size", "202 Your turn", "203 Time", "204 AI clients", "301 Overruling the moderator", "302 The board is part of the game", "401 Points", "402 Winning", "403 Paradox", "501 The grid", "502 Coordinates", "503 The island", "504 Moving and charting", "505 New players"].every((h) => rulesText.includes("### " + h + "\n")) &&
+  ["101 Follow the rules", "102 Players", "103 Prompts", "104 Voting", "105 The moderator", "107 The night", "201 Game size", "202 Your turn", "203 Days", "204 AI clients", "301 Overruling the moderator", "302 The board is part of the game", "401 Points", "402 Winning", "403 Paradox", "501 The grid", "502 Coordinates", "503 The island", "504 Moving and charting", "505 New players"].every((h) => rulesText.includes("### " + h + "\n")) &&
   !/^## (600|700)\./m.test(rulesText) && !/claim|harvest|terrain|meadow|forest|owner|heart|monster|catalog/i.test(rulesText.slice(rulesText.indexOf("## 500."))));
 const wrapped = rulesText.replace(/\s+/g, " ");
-const must = ["is infinite", "charted or uncharted", "8x8 charted island centered on the origin", "3N 2E", "no zero row or column", "5x5 square with its four corners cut off", "random unoccupied charted tile at least 2.5 tiles from any uncharted tile", "visible to everyone", "propose one rule change", "diagonals included", "at most once per turn", "no other piece stands on", "has at most 8 players"];
-check("the rules say what Buster decided: infinite grid, charted/uncharted, 8x8 centered island, 3N 2E, no zero, 5x5 minus corners, random unoccupied start 2.5 from uncharted, visible to everyone, propose and move, diagonals, once per turn, 8 players", must.every((w) => wrapped.includes(w)), must.filter((w) => !wrapped.includes(w)).join(" | "));
+const must = ["is infinite", "charted or uncharted", "8x8 charted island centered on the origin", "3N 2E", "no zero row or column", "5x5 square with its four corners cut off", "random unoccupied charted tile where a move would chart nothing new", "visible to everyone", "propose one rule change", "diagonals included", "at most once a day", "no other piece stands on", "has at most 8 players"];
+check("the rules say what Buster decided: infinite grid, charted/uncharted, 8x8 centered island, 3N 2E, no zero, 5x5 minus corners, random unoccupied start where a move charts nothing new, visible to everyone, propose and move, diagonals, once a day, 8 players", must.every((w) => wrapped.includes(w)), must.filter((w) => !wrapped.includes(w)).join(" | "));
 check("mcp_enabled is a boolean setting, true by default: anything else is refused, and a game that stores nothing for it has MCP on", !bad("mcp_enabled", false) && !bad("mcp_enabled", true) && bad("mcp_enabled", "yes") && bad("mcp_enabled", 1) && bad("mcp_enabled", null) && getSettings({}).mcp_enabled === true && getSettings({ max_players: 4 }).mcp_enabled === true && getSettings({ mcp_enabled: false }).mcp_enabled === false && getSettings('{"mcp_enabled":false}').mcp_enabled === false && getSettings({ mcp_enabled: "no" }).mcp_enabled === true);
 check("the rule that enables MCP is 204 in the template and names the setting (the sync checks above keep the two in step)", wrapped.includes("### 204 AI clients A player may connect an AI client to this game and take their own turns through it. [setting: mcp_enabled]") && inRules.has("mcp_enabled") && inCode.has("mcp_enabled"));
 
@@ -243,45 +244,54 @@ try {
   const gameOf = async (slug = "hex") => (await client(A).get(`/${slug}/api/game`)).data.game;
   const posOf = (slug, n) => playersOf(slug)[n];
   const setPos = (slug, n, x, y, z = 0) => d1(state, `UPDATE players SET x = ${x}, y = ${y}, z = ${z} WHERE game_id = '${gidOf(slug)}' AND turn_order = ${n}`);
-  const setTurn = (slug, turn = 0, moved = false, settings = "{}") => d1(state, `UPDATE games SET status = 'playing', round = 1, turn = ${turn}, last_move = '${moved ? `1:${turn}` : ""}', settings = '${settings}' WHERE slug = '${slug}'`);
+  // A game in play on an open day (day 1, ending far in the future: these tests run on the real clock), with nothing done
+  // yet today, or with player `turn` already moved. (There is no turn order any more; `turn` only picks that player.)
+  const setTurn = (slug, turn = 0, moved = false, settings = "{}") => d1(state, [
+    `UPDATE games SET status = 'playing', settings = '${settings}', day = CASE WHEN day = 0 THEN 1 ELSE day END, phase = 'open' WHERE slug = '${slug}'`,
+    `INSERT OR IGNORE INTO days (game_id, n, starts_at, ends_at, status) SELECT id, day, '2000-01-01T00:00:00.000Z', '2099-01-01T00:00:00.000Z', 'open' FROM games WHERE slug = '${slug}'`,
+    `DELETE FROM day_turns WHERE game_id = (SELECT id FROM games WHERE slug = '${slug}')`,
+    ...(moved ? [`INSERT INTO day_turns (game_id, day, player_id, moved_at) SELECT g.id, g.day, p.id, '2026-01-01T00:00:00.000Z' FROM games g JOIN players p ON p.game_id = g.id AND p.turn_order = ${turn} WHERE g.slug = '${slug}'`] : []),
+  ].join("; "));
+  const movedToday = (slug = "hex", n = 0) => d1(state, `SELECT COUNT(*) AS n FROM day_turns t JOIN games g ON g.id = t.game_id AND g.day = t.day JOIN players p ON p.id = t.player_id AND p.turn_order = ${n} WHERE g.slug = '${slug}' AND t.moved_at IS NOT NULL`)[0].n === 1;
   check("logged out is 401", (await post(client(A), { kind: "move", x: 0, y: 0 })).status === 401);
   const early = await post(ana, { kind: "move", x: 0, y: 0 });
   check("in setup, a move is refused (409) and nothing changes", early.status === 409 && /not started/i.test(early.data.error));
   setTurn("hex");
   setPos("hex", 0, 0, 0); setPos("hex", 1, 3, 3); setPos("hex", 2, -3, -3);
   check("an unknown kind is refused, including the removed claim and describe", (await post(ana, { kind: "teleport", x: 0, y: 0 })).status === 400 && (await post(ana, { kind: "claim", x: 0, y: 0 })).status === 400 && (await post(ana, { kind: "describe", x: 0, y: 0, name: "n", description: "d" })).status === 400 && (await post(ana, { x: 0, y: 0 })).status === 400);
-  const oot = await post(bo, { kind: "move", x: 3, y: 2 });
-  check("out of turn is refused (403) and the piece stays", oot.status === 403 && J([posOf("hex", 1).x, posOf("hex", 1).y]) === "[3,3]", oot.text);
+  const oot = await post(bo, { kind: "move", x: 2, y: 2 }); // inward, so it charts nothing the later checks rely on being blank
+  check("there is no order of play (rule 202.1): Bo, who joined second, moves the same day", oot.status === 200 && J([posOf("hex", 1).x, posOf("hex", 1).y]) === "[2,2]", oot.text);
+  setPos("hex", 1, 3, 3);
   check("not a label, or a label with a zero row or column, is refused (400)", (await post(ana, { kind: "move", label: "0N 1E" })).status === 400 && (await post(ana, { kind: "move", label: "A1" })).status === 400 && (await post(ana, { kind: "move", x: 0.5, y: 0 })).status === 400 && (await post(ana, { kind: "move" })).status === 400);
   const far = await post(ana, { kind: "move", x: 2, y: 0 });
-  check("two steps away is refused (400): the piece stays and no move is used", far.status === 400 && /step/.test(far.data.error) && posOf("hex", 0).x === 0 && (await gameOf()).moved === false, far.text);
+  check("two steps away is refused (400): the piece stays and no move is used", far.status === 400 && /step/.test(far.data.error) && posOf("hex", 0).x === 0 && !movedToday(), far.text);
   check("so is the tile you already stand on", (await post(ana, { kind: "move", x: 0, y: 0 })).status === 400);
   const lvl = await post(ana, { kind: "move", x: 1, y: 0, z: 1 });
   check("a different level is refused for now (400)", lvl.status === 400 && /level/.test(lvl.data.error), lvl.text);
   const logBefore = (await client(A).get("/hex/api/game")).data.events.length;
   const diag = await post(ana, { kind: "move", x: 1, y: 1 });
   check("a diagonal step succeeds (P1: diagonals count)", diag.status === 200 && diag.data.ok && diag.data.at.label === "2N 2E 1U" && J([posOf("hex", 0).x, posOf("hex", 0).y, posOf("hex", 0).z]) === "[1,1,0]", diag.text);
-  check("the move is logged, naming the tile, and the turn did NOT end (a move is in addition to proposing)", (await client(A).get("/hex/api/game")).data.events[0].text === "Ana (Teal) moved to 2N 2E 1U." && (await client(A).get("/hex/api/game")).data.events.length === logBefore + 1 && (await gameOf()).turn === 0 && (await gameOf()).moved === true && (await gameOf()).round === 1);
+  check("the move is logged, naming the tile, and the turn did NOT end (a move is in addition to proposing)", (await client(A).get("/hex/api/game")).data.events[0].text === "Ana (Teal) moved to 2N 2E 1U." && (await client(A).get("/hex/api/game")).data.events.length === logBefore + 1 && movedToday() && !(await ana.get("/hex/api/day")).data.you.ended);
   const again = await post(ana, { kind: "move", x: 2, y: 1 });
-  check("a second move in the same turn is refused (409), at most one per turn", again.status === 409 && /already moved/.test(again.data.error) && posOf("hex", 0).x === 1, again.text);
+  check("a second move the same day is refused (409), at most one a day", again.status === 409 && again.data.error === "You already moved today." && posOf("hex", 0).x === 1, again.text);
   const prp = await ana.post("/hex/api/turn", { prompt: "Let there be cats." });
   check("after moving, the same player can still propose a rule change this turn", prp.status === 200 && d1(state, `SELECT COUNT(*) AS n FROM turns WHERE game_id = '${gidOf("hex")}'`)[0].n === 1, prp.text);
-  check("and a proposal does not advance the turn", (await gameOf()).turn === 0);
+  check("and a proposal does not end the turn", !(await ana.get("/hex/api/day")).data.you.ended);
   // the other order: propose first, then move
   const pa = await join(A, "prop", prop.code, { email: "pa@example.com", name: "Pa", color: "vermilion" });
   const pb = await join(A, "prop", prop.code, { email: "pb@example.com", name: "Pb", color: "onyx" });
   setTurn("prop"); setPos("prop", 0, 0, 0); setPos("prop", 1, 1, 0);
   const prp2 = await pa.post("/prop/api/turn", { prompt: "Rain, but only on Tuesdays." });
   const mv2 = await post(pa, { kind: "move", x: -1, y: 1 }, "prop");
-  check("propose first, then move: both land in the same turn", prp2.status === 200 && mv2.status === 200 && posOf("prop", 0).x === -1 && (await gameOf("prop")).turn === 0, mv2.text);
+  check("propose first, then move: both land in the same turn", prp2.status === 200 && mv2.status === 200 && posOf("prop", 0).x === -1, mv2.text);
   setTurn("prop", 0, false); setPos("prop", 0, 0, 0); setPos("prop", 1, 1, 0);
   const occ = await post(pa, { kind: "move", x: 1, y: 0 }, "prop");
-  check("a move onto a tile another piece stands on is refused (409): two pieces cannot share a tile", occ.status === 409 && /another piece/i.test(occ.data.error) && posOf("prop", 0).x === 0 && (await gameOf("prop")).moved === false, occ.text);
-  check("and the other player is still not up", (await post(pb, { kind: "move", x: 2, y: 0 }, "prop")).status === 403);
+  check("a move onto a tile another piece stands on is refused (409): two pieces cannot share a tile", occ.status === 409 && /another piece/i.test(occ.data.error) && posOf("prop", 0).x === 0 && !movedToday("prop"), occ.text);
+  check("and the other player may move the same day", (await post(pb, { kind: "move", x: 2, y: 0 }, "prop")).status === 200);
   // uncharted destination
   setTurn("hex"); setPos("hex", 0, 3, 0);
   const unc = await post(ana, { kind: "move", x: 4, y: 0 }); // one step past the island's east edge (x 3): uncharted
-  check("moving onto an uncharted tile is refused (400) and uses no move", unc.status === 400 && /not charted/.test(unc.data.error) && (await gameOf()).moved === false && posOf("hex", 0).x === 3, unc.text);
+  check("moving onto an uncharted tile is refused (400) and uses no move", unc.status === 400 && /not charted/.test(unc.data.error) && !movedToday() && posOf("hex", 0).x === 3, unc.text);
   // seams: 1N 1W -> 1S 1E in one diagonal step, by label
   setTurn("hex"); setPos("hex", 0, -1, 0);
   const seam = await post(ana, { kind: "move", label: "1s 1e" });
@@ -323,18 +333,25 @@ try {
     const [r1, r2] = await Promise.all([post(ana, { kind: "move", x: 1, y: 0 }), post(ana, { kind: "move", x: 0, y: 1 })]);
     const ok = [r1.status, r2.status].filter((x) => x === 200).length === 1 && [r1, r2].filter((r) => r.status !== 200).every((r) => r.status === 409);
     const events = d1(state, `SELECT COUNT(*) AS n FROM events WHERE game_id = '${gidOf("hex")}' AND kind = 'piece_moved'`)[0].n;
-    if (!ok || !(await gameOf()).moved) { raceOk = false; raceWhy = `${r1.status} ${r1.text} | ${r2.status} ${r2.text} moved=${(await gameOf()).moved} events=${events}`; break; }
+    if (!ok || !movedToday()) { raceOk = false; raceWhy = `${r1.status} ${r1.text} | ${r2.status} ${r2.text} moved=${movedToday()} events=${events}`; break; }
   }
-  check("two simultaneous moves from one player, 6 times: exactly one lands, the other is refused 409, the turn is marked as moved", raceOk, raceWhy);
-  // the proposal INSERT: guarded on turn and round, not on moves
+  check("two simultaneous moves from one player, 6 times: exactly one lands, the other is refused 409, the day is marked as moved", raceOk, raceWhy);
+  // the proposal INSERT: guarded on the day (open, not past midnight) and the player's turn (not ended), not on moves
   const gidS = gidOf("prop"), pidS = d1(state, `SELECT id FROM players WHERE game_id = '${gidS}' AND turn_order = 0`)[0].id;
   const lit = (v) => (typeof v === "number" ? String(v) : `'${String(v).replace(/'/g, "''")}'`);
-  const cond = (turn, round, moves, status = "playing") => { d1(state, `UPDATE games SET last_move = '${moves ? "1:0" : ""}', status = '${status}' WHERE id = '${gidS}'`); d1(state, `DELETE FROM turns WHERE id LIKE 'tt%'`); const binds = [`tt${turn}${round}${moves}${status}`, pidS, "p", "n", "n", gidS, turn, round]; let i = 0; try { d1(state, PROPOSAL_INSERT_SQL.replace(/\?/g, () => lit(binds[i++]))); } catch { /* one live proposal per player and round */ } return d1(state, "SELECT COUNT(*) AS n FROM turns WHERE id LIKE 'tt%'")[0].n; };
-  d1(state, `DELETE FROM turns WHERE game_id = '${gidS}'`); setTurn("prop");
-  const n0 = cond(1, 1, 0), nA = cond(0, 2, 0), nB = cond(0, 1, 0, "setup"), nC = cond(0, 1, 1), nD = cond(0, 1, 0);
-  check("the proposal INSERT lands only if the game is playing and the turn and round are as read; a move made this turn does not stop it", n0 === 0 && nA === 0 && nB === 0 && nC === 1 && nD === 1, [n0, nA, nB, nC, nD].join());
-  check("/api/game reports whether the current turn has moved, and a new turn needs no reset (the marker no longer matches)", (setTurn("hex", 0, false), (await gameOf()).moved === false) && (() => { setTurn("hex", 0, true); return true; })() && (await gameOf()).moved === true && (() => { d1(state, "UPDATE games SET turn = 1 WHERE slug = 'hex'"); return true; })() && (await gameOf()).moved === false && (() => { d1(state, "UPDATE games SET turn = 0, round = 2 WHERE slug = 'hex'"); return true; })() && (await gameOf()).moved === false);
-
+  const cond = ({ day = 1, at = "2026-06-01T00:00:00.000Z", status = "playing", moved = false, ended = false } = {}) => {
+    setTurn("prop", 0, moved); d1(state, `UPDATE games SET status = '${status}' WHERE id = '${gidS}'`); d1(state, `DELETE FROM turns WHERE id LIKE 'tt%'`);
+    if (ended) d1(state, `INSERT INTO day_turns (game_id, day, player_id, ended_at) VALUES ('${gidS}', 1, '${pidS}', 'x') ON CONFLICT (game_id, day, player_id) DO UPDATE SET ended_at = 'x'`);
+    const binds = ["tt1", pidS, 0, "p", "n", "n", gidS, ...dayOpenBinds(day, Date.parse(at), pidS)]; let i = 0;
+    try { d1(state, PROPOSAL_INSERT_SQL.replace(/\?/g, () => lit(binds[i++]))); } catch { /* one live proposal per player and day */ }
+    return d1(state, "SELECT COUNT(*) AS n FROM turns WHERE id LIKE 'tt%'")[0].n;
+  };
+  d1(state, `DELETE FROM turns WHERE game_id = '${gidS}'`);
+  const n0 = cond({ day: 2 }), nA = cond({ at: "2099-01-01T00:00:00.000Z" }), nB = cond({ status: "setup" }), nE = cond({ ended: true }), nC = cond({ moved: true }), nD = cond();
+  d1(state, `DELETE FROM turns WHERE id LIKE 'tt%'`); setTurn("prop");
+  check("the proposal INSERT lands only if the game is playing on the day as read, before that day's midnight, and the turn is not ended; a move made today does not stop it", n0 === 0 && nA === 0 && nB === 0 && nE === 0 && nC === 1 && nD === 1, [n0, nA, nB, nE, nC, nD].join());
+  check("/api/day reports whether you have moved today, and a new day needs no reset (day_turns is per day)", (setTurn("hex", 0, false), (await ana.get("/hex/api/day")).data.you.moved === false) && (setTurn("hex", 0, true), (await ana.get("/hex/api/day")).data.you.moved === true) &&
+    (() => { d1(state, `INSERT OR IGNORE INTO days (game_id, n, starts_at, ends_at) VALUES ('${gidOf("hex")}', 2, '2099-01-01T00:00:00.000Z', '2099-01-02T00:00:00.000Z'); UPDATE games SET day = 2 WHERE slug = 'hex'`); return true; })() && (await ana.get("/hex/api/day")).data.you.moved === false && (d1(state, "UPDATE games SET day = 1 WHERE slug = 'hex'"), true));
   console.log("the public board");
   const raw = await client(A).get("/hex/api/board");
   const pb2 = raw.data;
@@ -354,8 +371,8 @@ try {
 
   d1(state, `DELETE FROM tiles WHERE game_id = '${gid}' AND x = -3 AND y IN (-2, -1, 0)`);
   check("a cut-short island is completed the next time the board is read (6x4 again, 24 tiles); a full one is left alone", tilesOf("old").length === 21 && (await client(A).get("/old/api/board")).data.tiles.length === 24 && tilesOf("old").length === 24 && (await client(A).get("/old/api/board")).data.tiles.length === 24);
-  const pg = (await client(A).get("/hex/api/game")).data.game;
-  check("/api/game and /api/board report `moved` (a boolean), not a move counter", typeof pg.moved === "boolean" && !("moves" in pg) && typeof (await client(A).get("/hex/api/board")).data.game.moved === "boolean" && !("moves" in (await client(A).get("/hex/api/board")).data.game));
+  const pg = (await client(A).get("/hex/api/game")).data.game, bg0 = (await client(A).get("/hex/api/board")).data.game;
+  check("/api/game and /api/board report the day, not the old turn model (no turn, round, moved or move counter)", pg.day === 1 && bg0.day === 1 && ["turn", "round", "moved", "moves"].every((k) => !(k in pg) && !(k in bg0)), J([pg, bg0]));
 
   // ---------------------------------------------------------------- the game's MCP server
   console.log("mcp server");
@@ -479,6 +496,7 @@ try {
   console.log("  the tools");
   const init = await mcp(A, "pilot", tokMia, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } });
   check("initialize answers, naming the game and the player", init.status === 200 && init.data.result.serverInfo.name === "promptocracy-pilot" && /Pilot game as Mia/.test(init.data.result.instructions), init.text);
+  const TOOLS = ["end_turn", "move", "my_state", "propose", "read_board", "read_day", "read_rules"];
   // The SDK's own client, as an AI app would use it: initialize, the initialized notification, list, call.
   const { Client: SdkClient } = await import("@modelcontextprotocol/sdk/client/index.js");
   const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
@@ -487,28 +505,34 @@ try {
     await sdk.connect(new StreamableHTTPClientTransport(new URL(`${A}/pilot/mcp`), { requestInit: { headers: { authorization: `Bearer ${tokMia}` } } }));
     const sdkTools = await sdk.listTools();
     const sdkState = await sdk.callTool({ name: "my_state", arguments: {} });
-    check("the SDK's own client connects with the token, lists the five tools and calls one", J(sdkTools.tools.map((t) => t.name).sort()) === J(["move", "my_state", "propose", "read_board", "read_rules"]) && JSON.parse(sdkState.content[0].text).you.name === "Mia" && sdk.getServerVersion()?.name === "promptocracy-pilot");
-  } catch (e) { check("the SDK's own client connects with the token, lists the five tools and calls one", false, String(e?.stack || e)); }
+    check("the SDK's own client connects with the token, lists the seven tools and calls one", J(sdkTools.tools.map((t) => t.name).sort()) === J(TOOLS) && JSON.parse(sdkState.content[0].text).you.name === "Mia" && sdk.getServerVersion()?.name === "promptocracy-pilot");
+  } catch (e) { check("the SDK's own client connects with the token, lists the seven tools and calls one", false, String(e?.stack || e)); }
   finally { await sdk.close().catch(() => {}); }
   const list = await mcp(A, "pilot", tokMia, "tools/list", {});
-  check("the tools are read_rules, read_board, my_state, propose, move: no voting, no catch-all action yet", J(list.data.result.tools.map((t) => t.name).sort()) === J(["move", "my_state", "propose", "read_board", "read_rules"]), list.text);
-  check("the read tools say they only read", ["read_rules", "read_board", "my_state"].every((n) => list.data.result.tools.find((t) => t.name === n).annotations.readOnlyHint === true) && list.data.result.tools.find((t) => t.name === "propose").annotations.readOnlyHint === false);
+  check("the tools are read_rules, read_board, read_day, my_state, propose, move, end_turn: no voting, no catch-all action yet", J(list.data.result.tools.map((t) => t.name).sort()) === J(TOOLS), list.text);
+  const annot = (n) => list.data.result.tools.find((t) => t.name === n).annotations;
+  check("the read tools say they only read; propose, move and end_turn do not", ["read_rules", "read_board", "read_day", "my_state"].every((n) => annot(n).readOnlyHint === true) && ["propose", "move", "end_turn"].every((n) => annot(n).readOnlyHint === false));
+  const toolText = (n) => list.data.result.tools.find((t) => t.name === n).description;
+  check("end_turn says it is final and has no undo; propose and move say once a day, not once per round", /final/i.test(toolText("end_turn")) && /no undo/i.test(toolText("end_turn")) && /once a day/i.test(toolText("propose")) && /once a day/i.test(toolText("move")) && !/round|on your turn/i.test(toolText("propose") + toolText("move")));
   const rules = await tool(A, "pilot", tokMia, "read_rules");
   check("read_rules returns what /api/rules returns", !rules.isError && rules.text === (await client(A).get("/pilot/api/rules")).text && rules.text === "# Rules\n", rules.text);
   const board = await tool(A, "pilot", tokMia, "read_board");
   check("read_board returns what /api/board returns, with no emails", !board.isError && J(JSON.parse(board.text)) === J((await client(A).get("/pilot/api/board")).data) && noLeak(board.text));
+  const dayWeb = (await mia.get("/pilot/api/day")).data;
+  const rd = await tool(A, "pilot", tokMia, "read_day");
+  const rdData = JSON.parse(rd.text);
+  check("read_day returns the day the web route returns: day 1, its end, the lock off, what I may do", !rd.isError && rdData.day === 1 && rdData.ends_at === dayWeb.ends_at && typeof rdData.timezone === "string" && rdData.locked === false && J(rdData.you) === J(dayWeb.you) && rdData.you.can.move.allowed === true && noLeak(rd.text), rd.text);
   const st = await tool(A, "pilot", tokMia, "my_state");
   const s1 = JSON.parse(st.text);
   const b1 = (await client(A).get("/pilot/api/board")).data;
-  check("my_state: who I am, whose turn it is, where my piece stands, what I can do now",
-    s1.you.name === "Mia" && s1.you.turn_order === 0 && s1.you.color === "Teal" && s1.you.score === 0 && s1.you.is_host === true && J(s1.you.at) === J(b1.pieces[0].at) && s1.game.status === "playing" && s1.game.round === 1 && s1.game.turn === 0 && s1.whose_turn.name === "Mia" && s1.your_turn === true && J(s1.you_can) === '{"propose":{"allowed":true},"move":{"allowed":true}}' && noLeak(st.text), st.text);
+  check("my_state: who I am, where my piece stands, the day and its end, the lock, what I did today, what I can do now",
+    s1.you.name === "Mia" && s1.you.turn_order === 0 && s1.you.color === "Teal" && s1.you.score === 0 && s1.you.is_host === true && J(s1.you.at) === J(b1.pieces[0].at) && s1.game.status === "playing" &&
+    s1.day.number === 1 && s1.day.ends_at === dayWeb.ends_at && s1.day.timezone === dayWeb.timezone && J(s1.lock) === J({ locked: false, processing_day: null, message: null }) &&
+    J(s1.today) === J({ moved: false, proposed: false, ended: false }) && J(s1.you_can) === J(dayWeb.you.can) && noLeak(st.text), st.text);
+  check("my_state has no turn order left: no whose_turn, your_turn, round or turn", !("whose_turn" in s1) && !("your_turn" in s1) && !("round" in s1.game) && !("turn" in s1.game));
   const s2 = JSON.parse((await tool(A, "pilot", tokMax, "my_state")).text);
-  const webOut = await max.post("/pilot/api/turn", { prompt: "Hello" });
-  const webOutMove = await max.post("/pilot/api/action", { kind: "move", x: 3, y: 2 });
-  check("out of turn: Max's my_state says so, with the web routes' own reasons", s2.you.name === "Max" && s2.your_turn === false && s2.whose_turn.name === "Mia" && s2.you_can.propose.reason === webOut.data.error && s2.you_can.move.reason === webOutMove.data.error && webOut.status === 403 && webOutMove.status === 403, J(s2.you_can));
-  const outP = await tool(A, "pilot", tokMax, "propose", { prompt: "Hello" });
-  const outM = await tool(A, "pilot", tokMax, "move", { x: 3, y: 2 });
-  check("and propose or move out of turn fail with the web's error, as an MCP tool error", outP.isError && outP.text === webOut.data.error && outM.isError && outM.text === webOutMove.data.error);
+  const maxDay = (await max.get("/pilot/api/day")).data;
+  check("Max has a turn today too (no order): his my_state says he may move, propose and end his turn, as the web does", s2.you.name === "Max" && J(s2.you_can) === J(maxDay.you.can) && s2.you_can.move.allowed === true && s2.you_can.propose.allowed === true && s2.you_can.end_turn.allowed === true, J(s2.you_can));
   const emptyP = await tool(A, "pilot", tokMia, "propose", { prompt: "   " });
   const webEmpty = await mia.post("/pilot/api/turn", { prompt: "   " });
   check("an empty prompt goes through the same validation as the web: same error, nothing recorded", emptyP.isError && emptyP.text === webEmpty.data.error && webEmpty.status === 400 && d1(state, `SELECT COUNT(*) AS n FROM turns WHERE game_id = '${gidOf("pilot")}'`)[0].n === 0);
@@ -524,26 +548,58 @@ try {
   const prop1 = await tool(A, "pilot", tokMia, "propose", { prompt: "Cats may vote." });
   const turnRow = d1(state, `SELECT prompt, status, round, turn_index FROM turns WHERE game_id = '${gidOf("pilot")}'`);
   const gm = (await client(A).get("/pilot/api/game")).data;
-  check("propose records the turn exactly as the web does: a submitted row, the log line, the same reply, the turn does not advance",
-    !prop1.isError && J(JSON.parse(prop1.text)) === J({ ok: true, status: "submitted", message: "Turn recorded. Waiting for Chalant (the moderator)." }) && turnRow.length === 1 && turnRow[0].prompt === "Cats may vote." && turnRow[0].status === "submitted" && turnRow[0].round === 1 && turnRow[0].turn_index === 0 &&
-    gm.events.length === eventsBefore + 1 && gm.events[0].kind === "turn_submitted" && gm.events[0].text === "Mia (Teal) took their turn." && gm.game.turn === 0 && gm.turn_status === "submitted");
+  check("propose records the proposal exactly as the web does: a submitted row for day 1, the log line, the same reply",
+    !prop1.isError && J(JSON.parse(prop1.text)) === J({ ok: true, status: "submitted", message: "Proposal recorded. Waiting for Chalant (the moderator)." }) && turnRow.length === 1 && turnRow[0].prompt === "Cats may vote." && turnRow[0].status === "submitted" && turnRow[0].round === 1 && turnRow[0].turn_index === 0 &&
+    gm.events.length === eventsBefore + 1 && gm.events[0].kind === "turn_submitted" && gm.events[0].text === "Mia (Teal) proposed a change." && gm.game.day === 1);
   const prop2 = await tool(A, "pilot", tokMia, "propose", { prompt: "Again." });
   const webTwice = await mia.post("/pilot/api/turn", { prompt: "Again." });
-  check("a second proposal in the round is refused with the web's error", prop2.isError && prop2.text === webTwice.data.error && webTwice.status === 409 && d1(state, `SELECT COUNT(*) AS n FROM turns WHERE game_id = '${gidOf("pilot")}'`)[0].n === 1);
+  check("a second proposal the same day is refused with the web's error: one proposal a day", prop2.isError && prop2.text === webTwice.data.error && prop2.text === "You already proposed today. One proposal a day." && webTwice.status === 409 && d1(state, `SELECT COUNT(*) AS n FROM turns WHERE game_id = '${gidOf("pilot")}'`)[0].n === 1);
   const s3 = JSON.parse((await tool(A, "pilot", tokMia, "my_state")).text);
-  check("my_state now says I have proposed and may still move", s3.you_can.propose.allowed === false && s3.you_can.propose.reason === webTwice.data.error && s3.you_can.move.allowed === true);
+  check("my_state now says I have proposed and may still move and end my turn", s3.today.proposed === true && s3.today.moved === false && s3.you_can.propose.allowed === false && s3.you_can.propose.reason === webTwice.data.error && s3.you_can.move.allowed === true && s3.you_can.end_turn.allowed === true);
   const mv = await tool(A, "pilot", tokMia, "move", { label: "1N 2E" });
   const mvData = JSON.parse(mv.text);
   const gm2 = (await client(A).get("/pilot/api/game")).data;
-  check("move goes through the web's rules: the piece moves, the log line is the web's, the reply is the web's, the turn does not end",
-    !mv.isError && mvData.ok === true && mvData.kind === "move" && mvData.at.label === "1N 2E 1U" && posOf("pilot", 0).x === 1 && posOf("pilot", 0).y === 0 && gm2.events[0].text === "Mia (Teal) moved to 1N 2E 1U." && gm2.game.turn === 0 && gm2.game.moved === true);
+  check("move goes through the web's rules: the piece moves, the log line is the web's, the reply is the web's",
+    !mv.isError && mvData.ok === true && mvData.kind === "move" && mvData.at.label === "1N 2E 1U" && posOf("pilot", 0).x === 1 && posOf("pilot", 0).y === 0 && gm2.events[0].text === "Mia (Teal) moved to 1N 2E 1U.");
   const mvB = await tool(A, "pilot", tokMia, "move", { x: 2, y: 0 });
   const webMv2 = await mia.post("/pilot/api/action", { kind: "move", x: 2, y: 0 });
-  check("a second move in the turn is refused with the web's error", mvB.isError && mvB.text === webMv2.data.error && webMv2.status === 409 && posOf("pilot", 0).x === 1);
+  check("a second move the same day is refused with the web's error", mvB.isError && mvB.text === webMv2.data.error && webMv2.status === 409 && posOf("pilot", 0).x === 1);
   const s4 = JSON.parse((await tool(A, "pilot", tokMia, "my_state")).text);
-  check("my_state agrees: nothing left to do this turn, and the piece is where the move put it", s4.you_can.move.allowed === false && s4.you_can.move.reason === webMv2.data.error && s4.you.at.x === 1 && s4.you.at.label === "1N 2E 1U");
+  check("my_state agrees: I have moved and proposed, the piece is where the move put it", s4.today.moved === true && s4.today.proposed === true && s4.you_can.move.allowed === false && s4.you_can.move.reason === webMv2.data.error && s4.you.at.x === 1 && s4.you.at.label === "1N 2E 1U");
   const bad2 = await tool(A, "pilot", tokMia, "no_such_tool");
   check("an unknown tool is an error, not a crash", bad2.rpc.status === 200 && (bad2.rpc.data.error || bad2.rpc.data.result?.isError));
+  // End turn: final. Once; then nothing more today.
+  const turnsBeforeEnd = d1(state, `SELECT COUNT(*) AS n FROM turns WHERE game_id = '${gidOf("pilot")}'`)[0].n;
+  const end1 = await tool(A, "pilot", tokMia, "end_turn");
+  const end1Data = JSON.parse(end1.text);
+  const gm3 = (await client(A).get("/pilot/api/game")).data;
+  check("end_turn ends my turn for today: the web's reply (day 1, when), and the log line", !end1.isError && end1Data.ok === true && end1Data.day === 1 && typeof end1Data.ended_at === "string" && gm3.events[0].kind === "turn_ended" && gm3.events[0].text === "Mia (Teal) ended their turn.");
+  const end2 = await tool(A, "pilot", tokMia, "end_turn");
+  const webEnd2 = await mia.post("/pilot/api/end-turn", {});
+  check("end_turn is final and works once: a second one is refused with the web's 409 message", end2.isError && end2.text === "Your turn has ended for today." && end2.text === webEnd2.data.error && webEnd2.status === 409);
+  const afterM = await tool(A, "pilot", tokMia, "move", { x: 2, y: 0 });
+  const afterP = await tool(A, "pilot", tokMia, "propose", { prompt: "One more." });
+  check("after End turn, move and propose answer 'Your turn has ended for today.' and nothing is written", afterM.isError && afterM.text === "Your turn has ended for today." && afterP.isError && afterP.text === "Your turn has ended for today." && posOf("pilot", 0).x === 1 && d1(state, `SELECT COUNT(*) AS n FROM turns WHERE game_id = '${gidOf("pilot")}'`)[0].n === turnsBeforeEnd);
+  const s5 = JSON.parse((await tool(A, "pilot", tokMia, "my_state")).text);
+  check("my_state after End turn: ended, and none of move, propose, end_turn allowed, each with the reason", s5.today.ended === true && ["move", "propose", "end_turn"].every((k) => s5.you_can[k].allowed === false && s5.you_can[k].reason === "Your turn has ended for today."), J(s5.you_can));
+  check("read_day agrees: Mia shows as ended in the players list", JSON.parse((await tool(A, "pilot", tokMia, "read_day")).text).players.find((p) => p.name === "Mia")?.ended === true && JSON.parse((await tool(A, "pilot", tokMax, "read_day")).text).players.find((p) => p.name === "Mia")?.ended === true);
+  // The midnight lock: the dev clock one second past the day's end, the cron NOT run. Every write answers the lock message.
+  const endsAt = (await client(A).get("/pilot/api/day")).data.ends_at;
+  const lockMsg = "Chalant is processing day 1. Play resumes when it's done.";
+  d1(state, "CREATE TABLE IF NOT EXISTS dev_controls (key TEXT PRIMARY KEY, value TEXT)");
+  d1(state, `INSERT OR REPLACE INTO dev_controls (key, value) VALUES ('clock', '${new Date(Date.parse(endsAt) + 1000).toISOString()}')`);
+  const turnsBeforeLock = d1(state, `SELECT COUNT(*) AS n FROM turns WHERE game_id = '${gidOf("pilot")}'`)[0].n;
+  const lockM = await tool(A, "pilot", tokMax, "move", { x: 3, y: 2 });
+  const lockP = await tool(A, "pilot", tokMax, "propose", { prompt: "Too late." });
+  const lockE = await tool(A, "pilot", tokMax, "end_turn");
+  check("during the lock (1 s past midnight, cron not run), move, propose and end_turn over MCP return the lock message",
+    lockM.isError && lockM.text === lockMsg && lockP.isError && lockP.text === lockMsg && lockE.isError && lockE.text === lockMsg, J([lockM.text, lockP.text, lockE.text]));
+  const webLock = await max.post("/pilot/api/action", { kind: "move", x: 3, y: 2 });
+  check("it is the web's own refusal (HTTP 423), nothing was written, and Max has not ended his turn", webLock.status === 423 && webLock.data.error === lockMsg && posOf("pilot", 1).x === 3 && d1(state, `SELECT COUNT(*) AS n FROM turns WHERE game_id = '${gidOf("pilot")}'`)[0].n === turnsBeforeLock && d1(state, `SELECT COUNT(*) AS n FROM day_turns WHERE game_id = '${gidOf("pilot")}' AND ended_at IS NOT NULL`)[0].n === 1);
+  const s6 = JSON.parse((await tool(A, "pilot", tokMax, "my_state")).text);
+  check("my_state during the lock: locked, the day being processed, the message, and every write refused with it", s6.lock.locked === true && s6.lock.processing_day === 1 && s6.lock.message === lockMsg && ["move", "propose", "end_turn"].every((k) => s6.you_can[k].allowed === false && s6.you_can[k].reason === lockMsg), J(s6.lock));
+  check("read_day during the lock says so too, and keeps working (read-only)", JSON.parse((await tool(A, "pilot", tokMax, "read_day")).text).locked === true && !(await tool(A, "pilot", tokMax, "read_board")).isError);
+  d1(state, "DELETE FROM dev_controls WHERE key = 'clock'");
   const sessionsBefore = d1(state, "SELECT COUNT(*) AS n FROM sessions")[0].n;
   const viaWeb = await fetch(`${A}/pilot/api/turn`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${tokMax}` }, body: JSON.stringify({ prompt: "sneaky" }) });
   check("the OAuth token works on /mcp only: the web API still wants a session cookie (401), and no session was created", viaWeb.status === 401 && (await fetch(`${A}/pilot/api/me`, { headers: { authorization: `Bearer ${tokMax}` } })).status === 401 && d1(state, "SELECT COUNT(*) AS n FROM sessions")[0].n === sessionsBefore);
@@ -614,10 +670,11 @@ try {
     check("/api/rules answers from the bundle (the fixture's text), not from the repo the game row names", rules.status === 200 && /rules of the bundled fixture game/.test(rules.text) && /markdown/.test(rules.headers.get("content-type")) && rules.headers.get("cache-control") === "public, max-age=60", rules.text.slice(0, 80));
     check("a game with no bundle still reads its rules from its repo, as before", (await client(A).get("/hex/api/rules")).text === "# Rules\n");
     check("the fixture's own spawn rule (505: the last open tile) placed the pieces on (1,1) and then (1,0), not on random tiles", J(playersOf("bundled").map((p) => [p.x, p.y])) === "[[1,1],[1,0]]", J(playersOf("bundled")));
-    d1(state, `UPDATE games SET status = 'playing', round = 1, turn = 0, last_move = '' WHERE slug = 'bundled'`);
+    setTurn("bundled");
     const mv = await bea.post("/bundled/api/action", { kind: "move", x: 0, y: 0 });
     check("the fixture's own rule 202 refuses the move (409), with its own words: the game's module, not the starter pack's, decides", mv.status === 409 && mv.data.error === "Moves are closed in the fixture game.", mv.text);
-    check("the engine's own gate still comes first: out of turn is 403 whatever the rule says", (await bob.post("/bundled/api/action", { kind: "move", x: 0, y: 0 })).status === 403);
+    const bobEnd = await bob.post("/bundled/api/end-turn", {}), bobMove = await bob.post("/bundled/api/action", { kind: "move", x: 0, y: 0 });
+    check("the engine's own gate still comes first: after End turn a move is 'Your turn has ended for today.' (409), whatever the rule says", bobEnd.status === 200 && bobMove.status === 409 && bobMove.data.error === "Your turn has ended for today.", bobMove.text);
     const turn = await bea.post("/bundled/api/turn", { prompt: "Make the fixture friendlier." });
     check("a proposal is not a move: the fixture's 202 lets it through", turn.status === 200 && turn.data.ok === true, turn.text);
     check("nothing moved", J(playersOf("bundled").map((p) => [p.x, p.y])) === "[[1,1],[1,0]]");
@@ -627,7 +684,7 @@ try {
   {
     const tg = await createGame(state, { slug: "throwing", name: "Throwing", max: 2, ...R });
     const tia = await join(A, "throwing", tg.code, { email: "tia@example.com", name: "Tia", color: "teal" });
-    d1(state, `UPDATE games SET status = 'playing', round = 1, turn = 0, last_move = '' WHERE slug = 'throwing'`);
+    setTurn("throwing");
     const tp = await tia.post("/throwing/api/turn", { prompt: "Anything." });
     check("a proposal whose rule 202 throws answers 500 with a plain message (not a stack trace), and records no turn", tp.status === 500 && tp.data.error === "A rule could not be checked. Try again later." && !/boom|Error|at /.test(tp.text) && d1(state, `SELECT COUNT(*) AS n FROM turns WHERE game_id = '${gidOf("throwing")}'`)[0].n === 0, tp.text);
     const tm = await tia.post("/throwing/api/action", { kind: "move", x: 0, y: 1 });

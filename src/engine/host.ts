@@ -38,25 +38,28 @@ export function rulesFor(game: { slug: string }) {
 type PlayerRow = { id: string; color: string; score: number; x: number; y: number; z: number };
 /** @rule 102 */
 const playersOf = (rows: PlayerRow[]) => rows.map((p) => ({ ref: p.id, color: p.color, score: p.score, x: p.x, y: p.y, z: p.z }));
-/** @rule 202.2 */
-const turnOf = (game: any) => ({ round: game.round, turn: game.turn, moved: game.last_move === `${game.round}:${game.turn}` });
+// The acting player's turn today (rule 202.1: one turn a day each). `turn.moved` is whether they have moved in it; the
+// legacy round/turn numbers stay in ctx for the modules written against them (the engine is additive only).
+type Today = { moved?: boolean } | null | undefined;
+/** @rule 202.1, 202.2 */
+const turnOf = (game: any, today: Today) => ({ round: game.round, turn: game.turn, moved: !!today?.moved });
 
 // A context with no board in it: enough for the questions the turn guard asks (may this player move at all?).
 /** @rule 202.2 */
-export function lightContext(game: any) {
-  return makeContext({ now: nowIso(), settings: getSettings(game.settings), turn: turnOf(game) });
+export function lightContext(game: any, today?: Today) {
+  return makeContext({ day: game.day || null, now: nowIso(), settings: getSettings(game.settings), turn: turnOf(game, today) });
 }
 
 // The full context for a move or a spawn: the settings, every piece and every charted tile.
 /** @rule 501 */
-export async function boardContext(env: Env, game: any) {
+export async function boardContext(env: Env, game: any, today?: Today) {
   const [tiles, pieces] = await Promise.all([
     loadTiles(env, game.id),
     env.DB.prepare("SELECT id, color, score, x, y, z FROM players WHERE game_id = ?").bind(game.id).all(),
   ]);
   return makeContext({
-    now: nowIso(), settings: getSettings(game.settings), players: playersOf(pieces.results as PlayerRow[]),
-    tiles: makeTiles(tiles), turn: turnOf(game), rng: cryptoRng(),
+    day: game.day || null, now: nowIso(), settings: getSettings(game.settings), players: playersOf(pieces.results as PlayerRow[]),
+    tiles: makeTiles(tiles), turn: turnOf(game, today), rng: cryptoRng(),
   });
 }
 

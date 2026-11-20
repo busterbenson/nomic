@@ -27,6 +27,15 @@ export function d1(state, sql) {
   return parsed[0]?.results ?? [];
 }
 
+// Put a game in play on day 1, an open day that ends far in the future, so a test running on the real clock near
+// midnight is never caught by the midnight lock. (A playing game with no day would get a real day 1 on its first request.)
+export function startPlaying(state, slug) {
+  d1(state, [
+    `UPDATE games SET status = 'playing', day = CASE WHEN day = 0 THEN 1 ELSE day END, phase = 'open' WHERE slug = '${slug}'`,
+    `INSERT OR IGNORE INTO days (game_id, n, starts_at, ends_at, status) SELECT id, day, '2000-01-01T00:00:00.000Z', '2099-01-01T00:00:00.000Z', 'open' FROM games WHERE slug = '${slug}'`,
+  ].join("; "));
+}
+
 export function migrate(state) {
   execFileSync(WRANGLER, ["d1", "migrations", "apply", "DB", "--local", "--persist-to", state],
     { cwd: ROOT, env, encoding: "utf8", timeout: 60000, stdio: "pipe" });
@@ -63,7 +72,8 @@ export async function createGame(state, o) {
 
 export async function startServer(state, port, bindings = []) {
   if (!existsSync(WRANGLER)) throw new Error("Run `npm install` first.");
-  const args = ["dev", "--port", String(port), "--persist-to", state, "--ip", "127.0.0.1"];
+  // --test-scheduled: GET /__scheduled runs the Worker's cron (the midnight run) once, so tests can fire it.
+  const args = ["dev", "--port", String(port), "--persist-to", state, "--ip", "127.0.0.1", "--test-scheduled"];
   // wrangler.toml [vars] holds the PRODUCTION MAIL_FROM and SITE_URL. Local runs blank both
   // (email goes to the outbox, links use the local origin) unless a test sets its own.
   const given = new Set(bindings.map((b) => b.split("=")[0]));

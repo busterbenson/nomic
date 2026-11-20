@@ -22,7 +22,21 @@ export const DEFAULT_SETTINGS = {
   // Whether players may connect an AI client to the game's MCP server (/<slug>/mcp). The server reads this on
   // every request and refuses with a plain message when it is false.
   mcp_enabled: true,
+  // The game's time zone (an IANA name): a day runs from midnight to midnight there (rule 203.1), so a day with a
+  // daylight-saving change is 23 or 25 hours long. A change takes effect at the next midnight in the old zone, because
+  // each day's end is fixed when the day begins.
+  "game.timezone": "America/Los_Angeles",
 };
+
+// Settings added after engine 1 shipped. A game's settings.json may leave these out (its tagged files predate them),
+// and then the default applies. Present, they are validated like any other, and RULES.md must name them.
+export const OPTIONAL_SETTINGS = Object.freeze(["game.timezone"]);
+
+// Is this an IANA time zone the runtime knows? (Intl throws a RangeError for anything else.)
+export function validTimeZone(v) {
+  if (typeof v !== "string" || !v || v.length > 64) return false;
+  try { new Intl.DateTimeFormat("en-US", { timeZone: v }); return true; } catch { return false; }
+}
 
 const isInt = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -35,6 +49,7 @@ const VALIDATORS = {
   "board.chart_radius": (v) => (isInt(v, 1, 5) ? null : "must be a whole number from 1 to 5"),
   "turn.move_distance": (v) => (isInt(v, 1, 5) ? null : "must be a whole number from 1 to 5"),
   mcp_enabled: (v) => (typeof v === "boolean" ? null : "must be true or false"),
+  "game.timezone": (v) => (validTimeZone(v) ? null : "must be a time zone name like America/Los_Angeles"),
 };
 function exactly(v, keys) {
   if (!isObj(v)) return "must be an object";
@@ -59,7 +74,7 @@ export function validateSettings(s) {
   const errors = [];
   for (const k of Object.keys(s)) if (!Object.hasOwn(VALIDATORS, k)) errors.push(`unknown setting ${k}`);
   for (const k of Object.keys(VALIDATORS)) {
-    if (!Object.hasOwn(s, k)) { errors.push(`missing setting ${k}`); continue; }
+    if (!Object.hasOwn(s, k)) { if (!OPTIONAL_SETTINGS.includes(k)) errors.push(`missing setting ${k}`); continue; }
     const e = VALIDATORS[k](s[k]);
     if (e) errors.push(`${k}: ${e}`);
   }

@@ -1,15 +1,16 @@
 // The MCP tools. A THIN ADAPTER: each tool builds a Request for the matching web route and calls that route's
-// own handler (api-rules, api-board, api-me, api-game, api-turn, api-action), so validation, guards, log lines
+// own handler (api-rules, api-board, api-me, api-game, api-day, api-turn, api-action, api-end-turn), so validation, guards, log lines
 // and notifications are the web's, and a change to the turn model reaches MCP with no change here.
 // The player is attached to the internal Request (actAs); no cookie or token is forged.
 // NOT here yet: voting, and a catch-all "take an action". They arrive with the moderator.
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { Player, actAs } from "./auth";
-import { turnBlock } from "./turn";
 import { Ctx } from "./util";
 import * as apiAction from "../routes/api-action";
 import * as apiBoard from "../routes/api-board";
+import * as apiDay from "../routes/api-day";
+import * as apiEndTurn from "../routes/api-end-turn";
 import * as apiGame from "../routes/api-game";
 import * as apiMe from "../routes/api-me";
 import * as apiRules from "../routes/api-rules";
@@ -51,42 +52,42 @@ export function registerTools(server: McpServer, ctx: Ctx, player: Player) {
     annotations: read,
   }, async () => reply(await viaRoute(ctx, player, apiBoard.get, "GET", "board")));
 
+  server.registerTool("read_day", {
+    description: "Read today: the day number, when it ends (midnight in the game's time zone), whether the midnight lock is on, what each player has done today, and what you may still do.",
+    annotations: read,
+  }, async () => reply(await viaRoute(ctx, player, apiDay.get, "GET", "day")));
+
   server.registerTool("my_state", {
-    description: "Who you are in this game, whose turn it is, where your piece stands, and what you may do right now (propose, move).",
+    description: "Who you are in this game, where your piece stands, today's day and the midnight lock, what you have done today (moved, proposed, ended your turn) and what you may do right now (move, propose, end_turn).",
     annotations: read,
   }, async () => {
-    const [me, g, board] = await Promise.all([
+    const [me, g, board, day] = await Promise.all([
       viaRoute(ctx, player, apiMe.get, "GET", "me"), viaRoute(ctx, player, apiGame.get, "GET", "game"), viaRoute(ctx, player, apiBoard.get, "GET", "board"),
+      viaRoute(ctx, player, apiDay.get, "GET", "day"),
     ]);
-    const bad = [me, g, board].find((r) => r.status >= 400);
+    const bad = [me, g, board, day].find((r) => r.status >= 400);
     if (bad) return reply(bad);
-    // turnBlock is the same guard the propose and move routes apply.
-    const fresh = game;
     const piece = board.data.pieces.find((p: any) => p.turn_order === player.turn_order);
-    const current = g.data.players.find((p: any) => p.turn_order === fresh.turn);
-    const can = (kind: "propose" | "move") => {
-      const blocked = turnBlock(fresh, player, kind);
-      if (blocked) return { allowed: false, reason: blocked.error };
-      if (kind === "propose" && g.data.turn_status !== "waiting") return { allowed: false, reason: "You already took your turn this round." };
-      return { allowed: true };
-    };
+    const d = day.data, you = d.you;
+    // you.can comes from the day route, which runs the same turnBlock the move, propose and end-turn routes apply.
     return { content: [{ type: "text" as const, text: asJson({
       you: { name: me.data.user.name, turn_order: player.turn_order, color: me.data.player.color.name, score: me.data.player.score, is_host: me.data.player.is_host, at: piece?.at ?? null },
-      game: { name: g.data.game.name, slug: g.data.game.slug, status: fresh.status, round: fresh.round, turn: fresh.turn, winning_score: g.data.game.winning_score },
-      whose_turn: fresh.status === "playing" && current ? { name: current.name, turn_order: current.turn_order, color: current.color.name } : null,
-      your_turn: fresh.status === "playing" && player.turn_order === fresh.turn,
-      you_can: { propose: can("propose"), move: can("move") },
+      game: { name: g.data.game.name, slug: g.data.game.slug, status: d.status, winning_score: g.data.game.winning_score },
+      day: { number: d.day, ends_at: d.ends_at, timezone: d.timezone },
+      lock: { locked: d.locked, processing_day: d.processing_day, message: d.message },
+      today: { moved: you?.moved ?? false, proposed: you?.proposed ?? false, ended: you?.ended ?? false },
+      you_can: you?.can ?? null,
     }) }] };
   });
 
   server.registerTool("propose", {
-    description: "Take your turn by submitting your prompt: what you want to change in the rules or the site, in your own words (1 to 2000 characters). The moderator drafts it into exact text. Only on your turn, once per round.",
+    description: "Propose a change today: your prompt says what you want to change in the rules or the site, in your own words (1 to 2000 characters). The moderator drafts it into exact text. Once a day; not after you end your turn; not during the midnight lock.",
     inputSchema: { prompt: z.string().describe("Your prompt for this turn") },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   }, async ({ prompt }) => reply(await viaRoute(ctx, player, apiTurn.post, "POST", "turn", { prompt })));
 
   server.registerTool("move", {
-    description: "Move your piece to a charted tile within your move distance, once per turn, in addition to proposing. Name the tile by label (like \"3N 2E\") or by integer x and y.",
+    description: "Move your piece to a charted tile within your move distance. Once a day; not after you end your turn; not during the midnight lock. Name the tile by label (like \"3N 2E\") or by integer x and y.",
     inputSchema: {
       label: z.string().optional().describe("Tile label, row first, like \"3N 2E\""),
       x: z.number().int().optional().describe("Column, if you are not giving a label"),
@@ -94,4 +95,9 @@ export function registerTools(server: McpServer, ctx: Ctx, player: Player) {
     },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   }, async ({ label, x, y }) => reply(await viaRoute(ctx, player, apiAction.post, "POST", "action", { kind: "move", ...(label !== undefined ? { label } : { x, y }) })));
+
+  server.registerTool("end_turn", {
+    description: "End your turn for today. FINAL: there is no undo. Whatever you have not done today (your move, your proposal) is skipped, and you cannot move, propose or vote until the next day. Not during the midnight lock.",
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+  }, async () => reply(await viaRoute(ctx, player, apiEndTurn.post, "POST", "end-turn", {})));
 }
