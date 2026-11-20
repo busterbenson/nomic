@@ -23,7 +23,6 @@ import { Ctx, json, nowIso, readJson, who } from "../lib/util";
 /** @rule 202.2, 504.3 */
 export const post = async (ctx: Ctx) => {
   const { env, request } = ctx;
-  const nowMs = await clockNow(env);
   const player = await getPlayer(env, request, ctx.data.game!);
   if (!player) return json({ error: "Log in to play." }, 401);
   const body = await readJson(request);
@@ -39,6 +38,9 @@ export const post = async (ctx: Ctx) => {
   } else ({ x, y, z = 0 } = body);
   if (!validCoord(x, y, z)) return json({ error: "Name a tile by its label (like 3N 2E) or by integer x and y." }, 400);
 
+  // The write is timed now, after its body has arrived, not when the request began (a body still streaming at midnight
+  // must meet the lock).
+  const nowMs = await clockNow(env);
   const { game, day, turn } = await loadToday(env, ctx.data.game!, nowMs, player.id);
   const blocked = turnBlock(game, day, turn, player, "move", nowMs);
   if (blocked) return json(refusalBody(blocked), blocked.status);

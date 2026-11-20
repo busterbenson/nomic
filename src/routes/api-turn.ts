@@ -12,13 +12,15 @@ import { Ctx, json, nowIso, readJson, siteUrl, who } from "../lib/util";
 /** @rule 202.2 */
 export const post = async (ctx: Ctx) => {
   const { env, request } = ctx;
-  const nowMs = await clockNow(env);
   const player = await getPlayer(env, request, ctx.data.game!);
   if (!player) return json({ error: "Log in to play a turn." }, 401);
   const body = await readJson(request);
   const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
   if (!prompt || [...prompt].length > 2000) return json({ error: "Your prompt needs 1 to 2000 characters." }, 400);
 
+  // The write is timed now, after its body has arrived, not when the request began (a body still streaming at midnight
+  // must meet the lock).
+  const nowMs = await clockNow(env);
   const { game, day, turn } = await loadToday(env, ctx.data.game!, nowMs, player.id);
   const blocked = turnBlock(game, day, turn, player, "propose", nowMs);
   if (blocked) return json(refusalBody(blocked), blocked.status);

@@ -146,6 +146,22 @@ try {
   console.log("the midnight lock is exact (by the clock, before the cron runs)");
   setClock("2026-03-09T06:59:59.000Z");
   check("one second before midnight Bo may still propose", (await bo.get("/day/api/day")).data.you.can.propose.allowed === true);
+  // A write is timed when its body has arrived, not when the request began: a proposal whose body is still streaming
+  // when midnight passes is refused (Codex P2 on #13).
+  {
+    const enc = new TextEncoder();
+    let push;
+    const body = new ReadableStream({ start(c) { push = c; } });
+    const pending = fetch(`${A}/day/api/turn`, { method: "POST", body, duplex: "half", signal: AbortSignal.timeout(20000), headers: { "content-type": "application/json", cookie: bo.cookieFor("/day/api/turn") } });
+    push.enqueue(enc.encode('{"prompt": '));
+    await new Promise((r) => setTimeout(r, 1500));
+    setClock("2026-03-09T07:00:01.000Z");
+    push.enqueue(enc.encode('"A body that arrives after midnight."}'));
+    push.close();
+    const slow = await pending, slowText = await slow.text();
+    check("a proposal whose body finishes arriving after midnight is refused with the lock (423), though the request began before it",
+      slow.status === 423 && JSON.parse(slowText).error === LOCK1 && d1(state, `SELECT COUNT(*) AS n FROM turns WHERE prompt LIKE 'A body that arrives%'`)[0].n === 0, slow.status + " " + slowText);
+  }
   setClock("2026-03-09T07:00:01.000Z"); // 1 s after midnight; the cron has NOT run
   const lp = await bo.post("/day/api/turn", { prompt: "Just after midnight." });
   const le = await ana.post("/day/api/end-turn", {});
