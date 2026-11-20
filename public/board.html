@@ -257,7 +257,7 @@
     return `proposed ${what}. ${need}`;
   }
   const ballotList = () => (PROP ? PROP.onBallot() : []);
-  const votedCount = () => 0;   // votes come with PR 4 (the ballot-vote slots); until then none can be cast
+  const votedCount = () => (DAY && DAY.you ? Number(DAY.you.voted) || 0 : 0);   // how many of today's ballot items you have voted on (/api/day); the Yes / No boxes go in the ballot-vote slots
   const pointsFor = () => { const r = BOOK && BOOK.rulebook.byNum["401"]; const m = r && /gets (\d+) points?/.exec(JSON.stringify(r.paras.concat(...r.clauses.map(c => c.paras)))); return m ? Number(m[1]) : null; };
 
   function proposeCard() {
