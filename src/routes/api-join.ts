@@ -1,4 +1,6 @@
+import { clockNow } from "../lib/day";
 import { emailMode } from "../lib/email";
+import { joinLock } from "../lib/invite";
 import { issueLink, tooManyLinks } from "../lib/links";
 import { Ctx, DEFAULT_SHAPE, PALETTE, cleanName, json, normCode, normEmail, playersLine, readJson, seatLimit, seatsTaken, validEmail, validShape } from "../lib/util";
 
@@ -13,6 +15,8 @@ export const post = async (ctx: Ctx) => {
   // The code must be THIS game's code: another game's code does not open this one.
   if (!normCode(body.code) || normCode(body.code) !== game.join_code) return json({ error: "That code doesn't match this game." }, 404);
   if (game.status === "over") return json({ error: "This game is over, so it's closed to new players." }, 409);
+  const lockedDay = await joinLock(env, game, await clockNow(env));
+  if (lockedDay) return json({ error: `Chalant is processing day ${lockedDay}. You can join when it's done.` }, 423);
   const taken = await seatsTaken(env, game.id);
   if (taken.length >= seatLimit(game)) return json({ error: "This game is full." }, 409);
   const color = PALETTE.find((c) => c.key === body.color)?.key;

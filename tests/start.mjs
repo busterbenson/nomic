@@ -24,6 +24,7 @@ try {
   const g = await createGame(state, { slug: "start", name: "Start Game", max: 3, ...R });
   const solo = await createGame(state, { slug: "solo", name: "Solo Game", ...R });
   const mg = await createGame(state, { slug: "mcpg", name: "Mcp Game", ...R });
+  const lg = await createGame(state, { slug: "lockg", name: "Lock Game", max: 4, ...R });
   srv = await startServer(state, PORT + 1, ["DEV_MODE=1", `SITE_URL=${SITE}`, `RULES_BASE_URL=${stub.base}`]);
   const A = srv.base;
   const gid = (slug) => d1(state, `SELECT id FROM games WHERE slug = '${slug}'`)[0].id;
@@ -120,6 +121,22 @@ try {
   check("the host's start_game starts the game: day 1 begins", !okH.isError && gameRow("mcpg").status === "playing" && gameRow("mcpg").day === 1 && days("mcpg")[0].electorate === 2 && started("mcpg") === 1, okH.text);
   const againH = await tool(A, "mcpg", th.access_token, "start_game");
   check("start_game on a game already started is refused with the reason", againH.isError && againH.text === "The game has already started.", againH.text);
+
+  console.log("joining waits out the midnight lock (rule 107.1)");
+  setClock("2026-03-09T08:00:00.000Z");   // 01:00 PDT; this game's day 1 ends at 07:00Z the next day
+  const hal = await join(A, "lockg", lg.code, { email: "hal@example.com", name: "Hal", color: "teal" });
+  check("(Hal, the host of a fourth game, starts it)", (await hal.post("/lockg/api/start", {})).status === 200 && gameRow("lockg").day === 1);
+  const open1 = await client(A).post("/lockg/api/join", { code: lg.code, email: "zoe@example.com", name: "Zoe", color: "cobalt" });
+  const playersOf = () => d1(state, `SELECT COUNT(*) AS n FROM players WHERE game_id = '${gid("lockg")}'`)[0].n;
+  setClock("2026-03-10T07:00:05.000Z");   // 5 seconds after midnight; the cron has NOT run
+  const lockedJoin = await client(A).post("/lockg/api/join", { code: lg.code, email: "yan@example.com", name: "Yan", color: "sky" });
+  check("after midnight, before the cron, asking to join is refused 423 with the day being processed", lockedJoin.status === 423 && lockedJoin.data.error === "Chalant is processing day 1. You can join when it's done.", lockedJoin.text);
+  const lockedVerify = await finish(client(A), open1.data.dev_link);
+  check("a link asked for before midnight and opened after it does not join (a redirect with a notice) and the roster stays at 1", lockedVerify.status === 303 && /notice=join-locked/.test(lockedVerify.headers.get("location")) && playersOf() === 1, lockedVerify.headers.get("location"));
+  check("the lock is the clock's, not the flag's: the game row still says open until the cron runs", gameRow("lockg").phase === "open");
+  check("the midnight run opens day 2", (await cron()) === 200 && gameRow("lockg").day === 2);
+  const lateVerify = await finish(client(A), open1.data.dev_link);
+  check("once the night is processed the same link joins (it was not spent), and Zoe, who joined after day 2 began, is not in its electorate (rule 102.4)", lateVerify.status === 303 && /notice=joined/.test(lateVerify.headers.get("location")) && playersOf() === 2 && J(electors("lockg", 2)) === J(["Hal"]), lateVerify.headers.get("location") + J(electors("lockg", 2)));
 } catch (e) {
   fail++;
   console.log("  FAIL  harness error:", e?.stack || e, e?.cause);

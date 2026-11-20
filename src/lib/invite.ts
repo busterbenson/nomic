@@ -1,6 +1,7 @@
 // Invite links (rule 102.3). Each player has their own link: the game's join link plus ?from=<their invite code>, so the
 // join page can say who invited you. The code is derived, not stored: a hash of the game's join code and the player's id,
 // so nobody can name a player as their inviter without having that player's link, and no migration is needed.
+import { isLocked, loadToday } from "./day";
 import { Env, Ctx, seatLimit, seatsTaken, sha256Hex, siteUrl } from "./util";
 
 /** @rule 102.3 */
@@ -24,3 +25,14 @@ export async function inviteUrl(ctx: Ctx, playerId: string): Promise<string> {
   const game = ctx.data.game!;
   return `${siteUrl(ctx.env, ctx.request)}/${game.slug}/join/${game.join_code}?from=${await inviteCodeOf(game, playerId)}`;
 }
+
+/** The day being processed when joining is locked, else null. A game in setup is never locked; a game in play is, like every
+ *  write, from midnight until the night is processed (rule 107.1): the roster and the board do not change under the moderator.
+ *  @rule 102.3, 107.1 */
+export async function joinLock(env: Env, game: any, nowMs: number): Promise<number | null> {
+  if (game.status !== "playing") return null;
+  const { game: g, day } = await loadToday(env, game, nowMs);
+  return day && isLocked(g, day, nowMs) ? day.n : null;
+}
+/** The same gate in SQL (the game row aliased g), for the guard of the insert that adds a player; one bind: now, as ISO. @rule 102.3, 107.1 */
+export const joinOpenSql = `(g.status = 'setup' OR (g.phase = 'open' AND EXISTS (SELECT 1 FROM days d WHERE d.game_id = g.id AND d.n = g.day AND d.status = 'open' AND d.ends_at > ?)))`;

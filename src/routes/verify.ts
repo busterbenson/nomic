@@ -8,6 +8,8 @@
 //       browser form post (not JSON), it is guarded by an Origin check: the Origin
 //       header must match SITE_URL (or the request's own origin when SITE_URL is unset).
 import { createSession } from "../lib/auth";
+import { clockNow } from "../lib/day";
+import { joinLock, joinOpenSql } from "../lib/invite";
 import { RuleError, chooseSpawn } from "../engine/host";
 import { ensureTiles } from "../lib/board";
 import { notify } from "../lib/notify";
@@ -95,6 +97,13 @@ export const post = async (ctx: Ctx) => {
   const existing: any = await env.DB.prepare("SELECT id FROM players WHERE game_id = ? AND email = ?").bind(game.id, t.email).first();
   if (existing) return back(game.slug, "welcome-back", await createSession(env, game, existing.id));
 
+  // Joining a game in play waits out the midnight lock like every other write (rule 107.1). The link is not spent: it works
+  // again once the night is processed, if it has not expired.
+  const nowMs = await clockNow(env);
+  if (await joinLock(env, game, nowMs)) {
+    await env.DB.prepare("UPDATE login_tokens SET used_at = NULL WHERE token_hash = ?").bind(hash).run();
+    return back(game.slug, "join-locked");
+  }
   // The board has to exist before anyone can be placed on it.
   await ensureTiles(env, game);
   // The game's spawn rule (505 in the starter rules) picks the tile; one statement then checks "setup", "not full",
@@ -114,10 +123,10 @@ export const post = async (ctx: Ctx) => {
                 (SELECT COUNT(*) FROM players WHERE game_id = g.id),
                 (SELECT COUNT(*) = 0 FROM players WHERE game_id = g.id), ?, ?, ?, ?
          FROM games g
-         WHERE g.id = ? AND g.status IN ('setup', 'playing') AND (SELECT COUNT(*) FROM players WHERE game_id = g.id) < ?
+         WHERE g.id = ? AND g.status IN ('setup', 'playing') AND ${joinOpenSql} AND (SELECT COUNT(*) FROM players WHERE game_id = g.id) < ?
            AND EXISTS (SELECT 1 FROM tiles t WHERE t.game_id = g.id AND t.x = ? AND t.y = ? AND t.z = ?)
            AND (SELECT COUNT(*) FROM players o WHERE o.game_id = g.id AND o.x = ? AND o.y = ? AND o.z = ?) = ?`,
-      ).bind(playerId, t.email, t.display_name, color, shape, now, x, y, z, game.id, seatLimit(game), x, y, z, x, y, z, spawn.occupants).run();
+      ).bind(playerId, t.email, t.display_name, color, shape, now, x, y, z, game.id, nowIso(nowMs), seatLimit(game), x, y, z, x, y, z, spawn.occupants).run();
       joined = (r.meta?.changes ?? 0) > 0;
       if (!joined) {
         // Ask again only if the seat is still there (the game is in setup and not full): a lost race for a tile.
