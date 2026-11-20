@@ -48,6 +48,7 @@ try {
     out.status === 401 && notHost.status === 403 && notHost.data.error === "Only the host can start the game." && gameRow("start").status === "setup" && gameRow("start").day === 0 && days("start").length === 0, out.text + notHost.text);
   const botBy = await bo.post("/start/api/start", { host: true, is_host: 1 });
   check("a body claiming to be the host changes nothing: the host is who the database says", botBy.status === 403 && gameRow("start").status === "setup");
+  check("the refused Start attempts (401, 403) wrote no notification", d1(state, `SELECT COUNT(*) AS n FROM notifications WHERE game_id = '${gid("start")}' AND kind = 'game_started'`)[0].n === 0);
   const [s1, s2] = await Promise.all([ana.post("/start/api/start", {}), ana.post("/start/api/start", {})]);
   check("the host's Start puts the game in play and begins day 1 (200); two presses at once give one 200 and one 409 'already started'",
     [s1.status, s2.status].sort().join() === "200,409" && [s1, s2].some((r) => r.status === 409 && r.data.error === "The game has already started.") && J(gameRow("start")) === J({ status: "playing", day: 1, phase: "open" }), s1.text + s2.text);

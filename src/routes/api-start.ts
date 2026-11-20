@@ -20,6 +20,11 @@ export const post = async (ctx: Ctx) => {
   await startDayOne(env, game, await clockNow(env));
   // In-app only (no email): every other player hears it; the host who pressed Start does not. Only the Start press that
   // won the guard above reaches this line, so a second attempt adds nothing.
-  await notify(env, ctx, game, { kind: "game_started", body: `${player.display_name} started the game. Day 1 is open.`, skipPlayerId: player.id });
+  // The game is already in play: a notification problem must not turn the host's Start into a failure (as in verify.ts).
+  try {
+    await notify(env, ctx, game, { kind: "game_started", body: `${player.display_name} started the game. Day 1 is open.`, skipPlayerId: player.id });
+  } catch (e: any) {
+    console.error("notify failed after start:", e?.message || e);
+  }
   return json({ ok: true, day: 1 });
 };

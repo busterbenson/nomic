@@ -28,7 +28,7 @@ def new_page(b, w, h, scheme, touch=False):
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.on("console", lambda m: errors.append("console: " + m.text) if m.type == "error" else None)
-    page.goto(base + f"/{SLUG}/")
+    page.goto(base + f"/{SLUG}/", wait_until="domcontentloaded")
     page.wait_for_selector("#scores li"); page.wait_for_selector("#board-wrap[data-renderer]")
     page.wait_for_function("document.getElementById('rules').textContent.indexOf('Loading') < 0")
     page.wait_for_selector("#bell"); page.wait_for_selector("#sday .dstep")
@@ -508,7 +508,7 @@ with sync_playwright() as pw:
     # ================= two players with the same name: turn state follows the color, not the name =================
     c = b.new_context(viewport={"width": 1280, "height": 900}); c.add_cookies([{"name": "s", "value": sam_cookie, "domain": host, "path": "/dupes"}]); page = c.new_page()
     errors = []; page.on("pageerror", lambda e: errors.append(str(e)))
-    page.goto(base + "/dupes/"); page.wait_for_selector("#scores li"); page.wait_for_function("document.getElementById('rules').textContent.indexOf('Loading') < 0"); page.wait_for_timeout(400)
+    page.goto(base + "/dupes/", wait_until="domcontentloaded"); page.wait_for_selector("#scores li"); page.wait_for_function("document.getElementById('rules').textContent.indexOf('Loading') < 0"); page.wait_for_timeout(400)
     page.locator("#scores li .prow >> nth=0").click(); page.wait_for_selector("#mroot .mcard")
     first = text(page, "#mroot .cstats"); you = "(you)" in text(page, "#mroot h2"); page.keyboard.press("Escape")
     page.locator("#scores li .prow >> nth=1").click(); page.wait_for_selector("#mroot .mcard")
@@ -523,7 +523,7 @@ with sync_playwright() as pw:
         c = b.new_context(viewport={"width": w, "height": h}, color_scheme=scheme, permissions=["clipboard-read", "clipboard-write"])
         c.add_cookies([{"name": "s", "value": ck, "domain": host, "path": "/" + slug}]); page = c.new_page()
         errors = []; page.on("pageerror", lambda e: errors.append(str(e))); page.on("console", lambda m: errors.append("console: " + m.text) if m.type == "error" else None)
-        page.goto(base + f"/{slug}/"); page.wait_for_selector("#scores li"); page.wait_for_selector("#me-chip"); page.wait_for_selector("#movebar .mb"); page.wait_for_timeout(500)
+        page.goto(base + f"/{slug}/", wait_until="domcontentloaded"); page.wait_for_selector("#scores li"); page.wait_for_selector("#me-chip"); page.wait_for_selector("#movebar .mb"); page.wait_for_timeout(500)
         return c, page, errors
     for w, h, scheme in [(1280, 900, "light"), (1280, 900, "dark"), (390, 844, "light"), (390, 844, "dark")]:
         tag = f"{w} {scheme}"
@@ -569,7 +569,7 @@ with sync_playwright() as pw:
                 # the person who opens that link, logged out: the join page says who invited them
                 c = b.new_context(viewport={"width": w, "height": h}, color_scheme=scheme); page = c.new_page()
                 errors = []; page.on("pageerror", lambda e: errors.append(str(e))); page.on("console", lambda m: errors.append("console: " + m.text) if m.type == "error" else None)
-                page.goto(val); page.wait_for_selector("form#f"); page.wait_for_timeout(400)
+                page.goto(val, wait_until="domcontentloaded"); page.wait_for_selector("form#f"); page.wait_for_timeout(400)
                 check(f"join {tag}: opened from Dee's own link, the page says 'Dee invited you' and shows the seats", text(page, ".invitedby") == "Dee invited you" and "2 of 8 players" in text(page, ".seatchip"), text(page, "body")[:200])
                 sideways(page, w, f"join {tag}")
                 if out != "-": page.screenshot(path=f"{out}/join-invited-{w}-{scheme}.png", clip={"x": 0, "y": 0, "width": w, "height": min(h, 700)})
@@ -591,7 +591,7 @@ with sync_playwright() as pw:
     # ================= logged out, and a game still being set up =================
     c = b.new_context(viewport={"width": 1280, "height": 900}); page = c.new_page()
     errors = []; page.on("pageerror", lambda e: errors.append(str(e))); page.on("console", lambda m: errors.append("console: " + m.text) if m.type == "error" and "401" not in m.text else None)   # logged out, /api/me answers 401 by design: the browser logs it
-    page.goto(base + f"/{SLUG}/"); page.wait_for_selector("#scores li"); page.wait_for_function("document.getElementById('rules').textContent.indexOf('Loading') < 0"); page.wait_for_selector("#sday"); page.wait_for_timeout(400)
+    page.goto(base + f"/{SLUG}/", wait_until="domcontentloaded"); page.wait_for_selector("#scores li"); page.wait_for_function("document.getElementById('rules').textContent.indexOf('Loading') < 0"); page.wait_for_selector("#sday"); page.wait_for_timeout(400)
     check("logged out: Log in in the header, the move bar has no log-in nudge, the ballot is readable, there is no Propose card", page.locator("#login-btn").count() == 1 and "Log in" not in text(page, "#movebar") and "P1" in text(page, "#sballot") and page.locator("#spropose").count() == 0)
     check("logged out: nothing proposes: no Propose card, no banner, no Propose a change, no Add a rule, no vote or End turn buttons, and no hint in their place", page.locator("#spropose, #rb-banner, .proposeact, .bcard.add, [data-p], .vbtn, [data-endturn]").count() == 0 and "Log in to propose" not in text(page, "body"))
     check("logged out: the ballot still shows turnout and who has voted, read-only", re.search(r"\d of 3 voted", text(page, "#sballot")) is not None and page.locator("#sballot .vturn").count() == 2)
@@ -601,13 +601,13 @@ with sync_playwright() as pw:
     check("logged out: the Rulebook reads, with no Add a rule and no banner", page.locator(".bcard[data-card]").count() > 10 and page.locator(".bcard.add").count() == 0 and page.locator("#rb-banner").count() == 0)
     page.locator('.bcard[data-card="401"]').click(); page.wait_for_selector("#mroot .mcard")
     check("logged out: a rule card has no Propose and no action", page.locator("#mroot .proposeact").count() == 0 and page.locator("#mroot .pbtn").count() == 0)
-    page.goto(base + f"/{SLUG}/#r-301"); page.wait_for_selector("#mroot .mcard"); page.wait_for_timeout(200)
+    page.goto(base + f"/{SLUG}/#r-301", wait_until="domcontentloaded"); page.wait_for_selector("#mroot .mcard"); page.wait_for_timeout(200)
     check("a link to a rule (#r-301) opens the Rulebook tab with that rule's card", "301" in text(page, "#mroot .mnum") and page.locator("#tab-rules").get_attribute("aria-selected") == "true")
     check("logged out: no page errors", not errors, str(errors))
     c.close()
     c = b.new_context(viewport={"width": 1280, "height": 900}); page = c.new_page()
     errors = []; page.on("pageerror", lambda e: errors.append(str(e))); page.on("console", lambda m: errors.append("console: " + m.text) if m.type == "error" and "401" not in m.text else None)
-    page.goto(base + "/setup/"); page.wait_for_selector("#scores li"); page.wait_for_function("document.getElementById('rules').textContent.indexOf('Loading') < 0"); page.wait_for_timeout(400)
+    page.goto(base + "/setup/", wait_until="domcontentloaded"); page.wait_for_selector("#scores li"); page.wait_for_function("document.getElementById('rules').textContent.indexOf('Loading') < 0"); page.wait_for_timeout(400)
     check("a game being set up: 'Setting up. 2 players of 8 joined.', no Start button for a visitor, no day strip, no lock bar", "Setting up. 2 players of 8 joined." in text(page, "#movebar") and page.locator("#start-game").count() == 0 and page.locator("#sday").is_hidden() and page.locator("#lockbar").is_hidden(), text(page, "#movebar"))
     check("a game being set up: no page errors, no sideways scroll", not errors and page.evaluate("document.documentElement.scrollWidth") <= 1280, str(errors))
     c.close()
