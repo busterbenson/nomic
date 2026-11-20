@@ -113,7 +113,7 @@ export function mountRulebook(root, md, { settings = {}, revisions = {}, propose
   const state = { q: "", grid: new Set() };
   const inline = (s, q) => {
     let h = esc(s).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>");
-    h = h.replace(/\[setting: ([\w.]+)\]/g, (m, k) => `<span class="setting">${k} <b>${esc(settingText(settings[k] === undefined ? "?" : settings[k]))}</b></span>`);
+    h = h.replace(/\[setting: ([\w.]+)\]/g, (m, k) => `<span class="setting">${k} <b>${esc(settingText(Object.hasOwn(settings, k) ? settings[k] : "?"))}</b></span>`);
     h = h.replace(/\b(rules?|block) (\d{3}(?:\.\d+)?)\b/gi, (m, w, n) => (RB.byNum[n] ? `${w} <button type="button" class="xref" data-seecard="${n}" data-clause="${n}" aria-haspopup="dialog" aria-label="Preview ${n}">${n}</button>` : m));
     return hl(h, q);
   };
@@ -189,7 +189,7 @@ ${RB.warnings.length ? `<div class="sheet" role="alert"><b>This file has ${RB.wa
   let onCount = null;
 
   // ---- a card -----------------------------------------------------------------------------------------------------
-  const nodeFor = (key) => RB.byNum[key] || null;
+  const nodeFor = (key) => (Object.hasOwn(RB.byNum, key) ? RB.byNum[key] : null);
   function historyHTML(it, open) {
     const rows = [];
     if (it.rule) {
@@ -255,8 +255,9 @@ ${text}${box}${act ? `<div class="mact" data-slot="rule-action">${act}</div>` : 
   draw();
 
   function goto(num) {
-    const base = num.split(".")[0], n = RB.byNum[base];
+    const base = num.split(".")[0], n = nodeFor(base);
     state.q = ""; $("#rb-q").value = "";
+    if (!n) return;
     if (n && n.kind === "block") { draw(); const el = document.getElementById(id(num)); if (el) el.scrollIntoView({ block: "start" }); return; }
     draw();
     const el = document.getElementById(id(base)); if (el) el.scrollIntoView({ block: "center" });
@@ -286,8 +287,8 @@ ${text}${box}${act ? `<div class="mact" data-slot="rule-action">${act}</div>` : 
     if (cards) { cards.root.addEventListener("input", (e) => P.input(e.target)); cards.root.addEventListener("change", (e) => P.input(e.target)); }
   }
   $("#rb-q").addEventListener("input", (e) => { state.q = e.target.value; draw(); });
-  $("#rb-q").addEventListener("keydown", (e) => { if (e.key === "Enter" && RB.byNum[state.q.trim()]) { e.preventDefault(); goto(state.q.trim()); } });
-  const fromHash = () => { if (location.hash.startsWith("#r-")) { const n = location.hash.slice(3).replace(/-/g, "."); if (RB.byNum[n]) { goto(n); return true; } } return false; };
+  $("#rb-q").addEventListener("keydown", (e) => { if (e.key === "Enter" && nodeFor(state.q.trim())) { e.preventDefault(); goto(state.q.trim()); } });
+  const fromHash = () => { if (location.hash.startsWith("#r-")) { const n = location.hash.slice(3).replace(/-/g, "."); if (nodeFor(n)) { goto(n); return true; } } return false; };
   window.addEventListener("hashchange", fromHash);
   return { rulebook: RB, goto, redraw: draw, describe, items, openRule, preview, count, fromHash, onCount: (fn) => { onCount = fn; fn(count()); }, find };
 }

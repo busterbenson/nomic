@@ -105,7 +105,7 @@ export function createProposer({ api, me, day, refresh, pill }) {
   /** The card a proposal opens: a new rule's own (ghost) card, else the rule it changes. A change to a block has no card. */
   const cardKey = (p) => (p.kind === "add" ? p.new_num || p.n : p.kind === "mark" && S.RB && S.RB.byNum[p.target] && S.RB.byNum[p.target].kind === "block" ? null : String(p.target).split(".")[0]);
   /** @rule 103.2 */
-  const pPill = (p) => (p.n ? (cardKey(p) ? `<button type="button" class="ppill" data-seecard="${esc(cardKey(p))}" data-keeptab="1" aria-label="Open proposal ${esc(p.n)}">${esc(p.n)}</button>` : `<span class="ppill">${esc(p.n)}</span>`) : "");
+  const pPill = (p) => (p.n ? (cardKey(p) ? `<button type="button" class="ppill" data-seecard="${esc(cardKey(p))}" aria-label="Open proposal ${esc(p.n)}">${esc(p.n)}</button>` : `<span class="ppill">${esc(p.n)}</span>`) : "");
 
   // A proposal drawn as a tracked change on its rule: today's ballot (no voting yet), or yours, waiting for tomorrow.
   /** @rule 103.2, 103.3 */
@@ -236,7 +236,7 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
     let html;
     if (m) html = `<p>You proposed ${pPill(m)} today. It is on tomorrow's ballot (rule ${rpill("103.2")}).</p>`;
     else if (!c.allowed) html = `<p>${esc(c.reason || "You can't propose right now.")}</p>`;
-    else html = `<p><b>You haven't proposed a change today.</b> Pick a rule to change, or propose a new one.</p><button type="button" class="btn small" data-p="pickblock">Propose a new rule</button>`;
+    else html = `<p><b>You haven't proposed a change today.</b> Pick a rule to change, or propose a new one.</p><button type="button" class="btn ghost small" data-p="pickblock">Propose a new rule</button>`;
     return `<div class="rbanner${m || !c.allowed ? " done" : ""}" id="rb-banner">${html}</div>`;
   }
 
@@ -325,14 +325,12 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
     else if (el.id === "pfTo") S.ui.to = el.value;
   }
   /** @rule 103.1 */
-  function escape() { if (S.ui && !S.ui.busy) { S.ui = null; S.redraw(); return true; } return false; }
-  /** @rule 103.1 */
   const cancelFlow = () => { if (S.ui && !S.ui.busy) S.ui = null; };
   /** @rule 103.2 */
   const mineTouches = (rule) => { const p = S.list.find((q) => q.mine && q.status === "confirmed" && touches(q, rule.num)); return p ? p.n : null; };
 
   return {
-    load, click, input, escape, cancelFlow, mineTouches, bannerHTML, proposeHTML, blockMarksHTML, addCardHTML, addFlowHTML, pickHTML, boxHTML, ageChip, onBallotRule,
+    load, click, input, cancelFlow, mineTouches, bannerHTML, proposeHTML, blockMarksHTML, addCardHTML, addFlowHTML, pickHTML, boxHTML, ageChip, onBallotRule,
     chgFor: chgHTML, cardKey, rpill, pPill, mine, onBallot: () => onBallot(), canPropose: () => can(),
     ghostsOf: (sec) => ghosts(sec),
     ghostCount: () => (S.RB ? S.RB.sections.reduce((n, s) => n + ghosts(s).length, 0) : 0),

@@ -70,6 +70,26 @@ def click_tile(page, x, y):
 with sync_playwright() as pw:
     b = pw.chromium.launch()
 
+    # ================= the screenshot set: five screens, 1280 and 390, light and dark (before anyone acts) =================
+    if out != "-":
+        for w, h, scheme in [(1280, 900, "light"), (1280, 900, "dark"), (390, 844, "light"), (390, 844, "dark")]:
+            c, page, errors = new_page(b, w, h, scheme)
+            tag = f"{w}-{scheme}"
+            shot(page, f"after-summary-{tag}", full_page=True)
+            page.click("#tab-rules"); page.wait_for_timeout(300); shot(page, f"after-rulebook-{tag}", full_page=True)
+            page.locator('.bcard[data-card="103"]').click(); page.wait_for_selector("#mroot .mcard")
+            page.locator("#mroot .mtext .xref").first.click(); page.click("#rprev [data-fromprev]"); page.wait_for_timeout(250)
+            shot(page, f"after-rule-card-back-{tag}")
+            page.keyboard.press("Escape")
+            page.locator('.bcard[data-card="401"]').click(); page.wait_for_selector("#mroot .mcard"); page.wait_for_timeout(200)
+            shot(page, f"after-rule-card-ballot-{tag}"); page.keyboard.press("Escape")
+            page.locator("#scores li .prow", has_text="Bo").click(); page.wait_for_selector("#mroot .mcard"); page.wait_for_timeout(200)
+            shot(page, f"after-player-card-{tag}"); page.keyboard.press("Escape")
+            page.click("#me-chip"); page.wait_for_selector("#acct:not([hidden])"); page.wait_for_timeout(150)
+            shot(page, f"after-account-menu-{tag}", clip={"x": 0, "y": 0, "width": w, "height": 330})
+            check(f"shots {tag}: no page errors", not errors, str(errors))
+            c.close()
+
     # ================= phone, dark: layout, order, nothing wider than the screen =================
     c, page, errors = new_page(b, 390, 844, "dark", touch=True)
     pos = lambda sel: box(page, sel)["y"]
@@ -91,14 +111,13 @@ with sync_playwright() as pw:
     page.click("#undo-move")
     pw_ = page.evaluate("[...document.querySelectorAll('#scores li')].map(l => l.getBoundingClientRect().width)")
     check("phone S1-PLY-01: the Players list wraps as chips (each row narrower than the page)", all(w < 300 for w in pw_), str(pw_))
-    shot(page, "summary-phone-dark", full_page=True)
     sideways(page, 390, "phone summary")
-    page.click("#tab-rules"); page.wait_for_timeout(200); shot(page, "rulebook-phone-dark", full_page=True); sideways(page, 390, "phone rulebook")
-    page.click('.bcard[data-card="401"]'); page.wait_for_selector("#mroot .mcard"); page.wait_for_timeout(200); shot(page, "card-phone-dark")
+    page.click("#tab-rules"); page.wait_for_timeout(200); sideways(page, 390, "phone rulebook")
+    page.click('.bcard[data-card="401"]'); page.wait_for_selector("#mroot .mcard"); page.wait_for_timeout(200)
     check("phone S1-RUL-03: the rule card fits the screen", box(page, ".mcard")["w"] <= 390 and box(page, ".mcard")["x"] >= 0)
     page.keyboard.press("Escape")
-    page.click('#scores li .prow'); page.wait_for_selector("#mroot .mcard"); shot(page, "player-phone-dark"); page.keyboard.press("Escape")
-    page.click("#me-chip"); page.wait_for_selector("#acct:not([hidden])"); shot(page, "account-phone-dark"); page.click("#me-chip")
+    page.click('#scores li .prow'); page.wait_for_selector("#mroot .mcard"); page.keyboard.press("Escape")
+    page.click("#me-chip"); page.wait_for_selector("#acct:not([hidden])"); page.click("#me-chip")
     sideways(page, 390, "phone with a card open")
     check("phone: no page errors (dark)", not errors, str(errors))
     c.close()
@@ -112,7 +131,6 @@ with sync_playwright() as pw:
     am = text(page, "#acct")
     check("S1-ACC-01: the menu has the name, color and points, Your player card and Log out", "Ada" in am and "Teal · 0 points" in am and "Your player card" in am and "Log out" in am, am)
     check("S1-ACC-02: no Invite or Connect your AI in the menu, the header or the Players aside; no Settings (invite links per player have no backend yet)", not re.search(r"Invite|Connect your AI|Settings", text(page, "header") + text(page, "aside")), text(page, "header"))
-    shot(page, "account-desktop-light", clip={"x": 700, "y": 0, "width": 580, "height": 330})
     page.click("#bell"); page.wait_for_timeout(200)
     check("S1-ACC-03: opening the bell closes the account menu", page.locator("#acct").is_hidden() and page.locator("#notes-panel").is_visible())
     page.keyboard.press("Escape"); page.wait_for_timeout(200)
@@ -191,7 +209,6 @@ with sync_playwright() as pw:
     check("S1-PLY-04: the rows carry rule chips: Points 401 402, Today 202, Piece 504", all(page.locator("#mroot .rref", has_text=n).count() >= 1 for n in ["401", "402", "202", "504"]))
     check("S1-PLY-07: no turn-order row", not re.search(r"turn order|Turn order", ct) and "Order" not in ct)
     check("S1-PLY-08: the Piece row: name, where it stands, speed", re.search(r"Pawn.*At 1S 1W\. Moves one space a day, diagonals included, and charts the tiles within 2\.", ct) is not None, ct)
-    shot(page, "player-desktop-light")
     page.click('#mroot .mx'); page.wait_for_timeout(100)
     p = tile(page, -1, -1)
     page.mouse.click(p["x"], p["y"]); page.wait_for_timeout(300)
@@ -213,7 +230,6 @@ with sync_playwright() as pw:
     check("ballot-vote slots are in place under each proposal and empty (votes are PR 4)", page.locator('#sballot [data-slot="ballot-vote"]').count() == 2 and all(page.locator('#sballot [data-slot="ballot-vote"]').nth(i).inner_text() == "" for i in range(2)))
     pr = text(page, "#spropose")
     check("S1-SUM-08: the Propose card: 'Propose a change', '0 of 1 today', '+10 if it passes', Rulebook (count, + Change or add a rule), Catalog (count, + Propose a thing)", "Propose a change" in pr and "0 of 1 today" in pr and "+10 if it passes" in pr and re.search(r"Rulebook\s*\d+ rules\s*\+ Change or add a rule", pr) and re.search(r"Catalog\s*0 entries\s*\+ Propose a thing", pr), pr)
-    shot(page, "summary-desktop-light", full_page=True)
     page.click('#sday [data-jump="ballot"]'); page.wait_for_timeout(700)
     check("S1-SUM-04: Vote jumps to the first ballot item", page.evaluate("(() => { const r = document.querySelector('#sballot li').getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight; })()"))
     page.click('#sday [data-jump="propose"]'); page.wait_for_timeout(700)
@@ -245,7 +261,6 @@ with sync_playwright() as pw:
     check("S1-RUL-02: no use arcs or seal rings; a rule changed lately is warm (none has changed yet, so no row is)", page.locator(".bcard.w1, .bcard.w2").count() == 0)
     TOTAL = page.locator("#rules .bcard:not(.add)").count()
     check("S1-RUL-13: the tab says N rules, counting the new rule on the ballot (a ghost card), the same N the card nav uses", page.locator('.bcard.ghost').count() == 1 and re.match(rf"Rulebook\s*{TOTAL} rules", text(page, "#tab-rules")) is not None, f"{TOTAL} {text(page, '#tab-rules')}")
-    shot(page, "rulebook-desktop-light", full_page=True)
     page.click('.gtog >> nth=0'); page.wait_for_timeout(100)
     check("S1-RUL-01: a block's All N toggles to a grid and back to a Row", page.locator(".brow.grid").count() == 1 and "Row" in text(page, ".gtog >> nth=0"))
     page.click('.gtog >> nth=0')
@@ -260,6 +275,8 @@ with sync_playwright() as pw:
     check("a word finds the rule by its text", page.locator(".bcard[data-card]").count() == 1 and "403" in text(page, ".bcard"))
     page.fill("#rb-q", "zzzz"); page.wait_for_timeout(200)
     check("no match says so", page.locator(".bcard[data-card]").count() == 0 and "No rule matches" in text(page, "#rb-body"))
+    page.fill("#rb-q", "constructor"); page.keyboard.press("Enter"); page.wait_for_timeout(200)
+    check("a search for an inherited object key (constructor) finds nothing and opens nothing", page.locator("#mroot .mcard").count() == 0 and page.evaluate("location.hash") != "#r-constructor" and "No rule matches" in text(page, "#rb-body"))
     page.fill("#rb-q", ""); page.wait_for_timeout(200)
 
     # ---- the rule card
@@ -279,7 +296,6 @@ with sync_playwright() as pw:
     check("S1-RUL-06: History is collapsed again on the next card", page.locator("#mroot .hist").count() == 0 and "HISTORY" in text(page, "#mroot .mhist"))
     page.click('#mroot [data-mnav="-1"]')
     check("S1-RUL-13: the card nav counts rules plus the ghost rule", f"of {TOTAL}" in text(page, "#mroot .mnav"))
-    shot(page, "card-desktop-light")
     page.keyboard.press("Escape"); page.wait_for_timeout(100)
     check("S1-RUL-11: Esc closes the card, and focus returns to the card that opened it", page.locator("#mroot .mcard").count() == 0 and page.evaluate("document.activeElement && document.activeElement.dataset.card") in ("401", "301", "402", "403", "400"), page.evaluate("document.activeElement && document.activeElement.outerHTML.slice(0, 80)"))
     page.locator('.bcard[data-card="103"]').click(); page.wait_for_selector("#mroot .mcard")
@@ -312,6 +328,19 @@ with sync_playwright() as pw:
     page.keyboard.press("Escape")
     page.click('[data-p="pickblock"]'); page.wait_for_selector("#mroot .pmenu")
     check("the banner's 'Propose a new rule' opens a 'Which block?' card", "Which block?" in text(page, "#mroot .mcard") and page.locator("#mroot .pmi").count() == 5)
+    page.keyboard.press("Escape")
+    # a card keeps what you were writing when it closes (Esc, backdrop); focus stays inside the card after a menu click
+    page.locator('.bcard[data-card="401"]').click(); page.wait_for_selector("#mroot .mcard")
+    page.click('#mroot [data-p="open"]'); page.click('#mroot [data-p="kind"][data-k="addclause"]'); page.wait_for_selector("#pfWords")
+    check("after a menu click the focus is still inside the card (not dropped to the page)", page.evaluate("document.querySelector('.mcard').contains(document.activeElement)"))
+    page.fill("#pfWords", "Ties go to the older player.")
+    page.keyboard.press("Escape"); page.wait_for_timeout(100)
+    page.locator('.bcard[data-card="401"]').click(); page.wait_for_selector("#mroot .mcard"); page.wait_for_timeout(150)
+    check("closing a card keeps the words being written: they are there when it opens again", page.locator("#pfWords").count() == 1 and page.input_value("#pfWords") == "Ties go to the older player.")
+    page.click('#mroot [data-p="cancel"]'); page.wait_for_timeout(100)
+    check("Cancel drops them", page.locator("#pfWords").count() == 0)
+    page.click("#mroot [data-mhist]"); page.wait_for_timeout(100)
+    check("the History toggle keeps focus on its own button", page.evaluate("document.activeElement && document.activeElement.hasAttribute('data-mhist')"))
     page.keyboard.press("Escape")
     page.locator('.bcard[data-card="403"]').click(); page.wait_for_selector("#mroot .mcard")
     page.click('#mroot [data-p="open"]'); page.click('#mroot [data-p="kind"][data-k="repeal"]')
@@ -364,24 +393,16 @@ with sync_playwright() as pw:
     sideways(page, 1280, "desktop")
     c.close()
 
-    # ================= desktop, dark: the same screens =================
+    # ================= desktop, dark: no page errors =================
     c, page, errors = new_page(b, 1280, 900, "dark")
-    shot(page, "summary-desktop-dark", full_page=True)
-    page.click("#tab-rules"); page.wait_for_timeout(200); shot(page, "rulebook-desktop-dark", full_page=True)
-    page.locator('.bcard[data-card="401"]').click(); page.wait_for_selector("#mroot .mcard"); page.wait_for_timeout(200)
-    page.locator("#mroot .mtext .xref").first.click() if page.locator("#mroot .mtext .xref").count() else None
-    page.keyboard.press("Escape"); shot(page, "card-desktop-dark")
-    page.keyboard.press("Escape")
-    page.locator('#scores li .prow').first.click(); page.wait_for_selector("#mroot .mcard"); shot(page, "player-desktop-dark"); page.keyboard.press("Escape")
-    page.click("#me-chip"); shot(page, "account-desktop-dark", clip={"x": 700, "y": 0, "width": 580, "height": 330})
+    page.click("#tab-rules"); page.locator('.bcard[data-card="401"]').click(); page.wait_for_selector("#mroot .mcard"); page.keyboard.press("Escape")
     check("desktop: no page errors (dark)", not errors, str(errors))
     c.close()
 
     # ================= phone, light: the moved state and the rule card with Back =================
     c, page, errors = new_page(b, 390, 844, "light")
-    shot(page, "summary-phone-light", full_page=True)
     page.click("#tab-rules"); page.locator('.bcard[data-card="103"]').click(); page.wait_for_selector("#mroot .mcard")
-    page.locator("#mroot .mtext .xref").first.click(); page.click("#rprev [data-fromprev]"); page.wait_for_timeout(200); shot(page, "card-back-phone-light")
+    page.locator("#mroot .mtext .xref").first.click(); page.click("#rprev [data-fromprev]"); page.wait_for_timeout(200)
     check("phone: a rule card with Back stays on screen", box(page, ".mcard")["w"] <= 390 and page.locator("#mroot .mbackbtn").count() == 1)
     sideways(page, 390, "phone with the Back card")
     page.keyboard.press("Escape")

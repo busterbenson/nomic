@@ -103,7 +103,7 @@
   const myKey = () => (ME && ME.player ? ME.player.color.key : null);
   const players = () => (DATA && DATA.players) || [];
   const shapeOf = c => { const p = players().find(q => q.color.key === c.key); return p ? p.shape : "pawn"; };
-  const pill = (by, mine) => playerPill(by, { you: !!mine || (!!ME && !!ME.player && by.color.key === myKey()), shapeOf });
+  const pill = (by, mine) => !by ? "" : playerPill(by, { you: !!mine || (!!ME && !!ME.player && by.color.key === myKey()), shapeOf });
   const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
   const noLevel = l => String(l || "").replace(/ 1U$/, "");   // the ground level is the only one in use: "3N 2E", not "3N 2E 1U"
   const pieceName = k => String(k || "pawn").replace(/[-_]/g, " ").replace(/^./, c => c.toUpperCase());
@@ -209,7 +209,7 @@
   // ---- loading ----------------------------------------------------------------------------------------------------
   async function load() {
     showNotice();
-    CARDS = createCards({ root: $("mroot"), describe, onClose: () => { if (PROP) PROP.cancelFlow(); if (PROP) PROP.redraw(); } });
+    CARDS = createCards({ root: $("mroot"), describe });   // closing a card keeps what you were writing: it is there when the card opens again
     PROP = createProposer({ api, me: () => ME, day: () => DAY, pill, refresh: async () => { await refresh(); loadNotes(); } });
     drawTabs(); drawBook();
     loadMe();
@@ -218,8 +218,8 @@
     else drawGame(g.data);
     // the rulebook shows each rule's settings, so it waits for the board's reply (which carries them)
     const [rules] = await Promise.all([fetch(BASE + "/api/rules").then(async r => { if (!r.ok) throw new Error("rules " + r.status); return r.text(); }).catch(() => null), boardLoaded]);
-    if (rules === null) { $("rules").innerHTML = '<p class="err" style="padding:20px 28px">Rules unavailable right now.</p>'; return; }
     await PROP.load();
+    if (rules === null) { $("rules").innerHTML = '<p class="err" style="padding:20px 28px">Rules unavailable right now.</p>'; drawBook(); return; }
     BOOK = mountRulebook($("rules"), rules, { settings: (BOARD && BOARD.settings) || {}, proposer: PROP, cards: CARDS, action: ruleAction });
     BOOK.onCount(() => { drawTabs(); drawBook(); });
     RULES_OK = true;
@@ -266,10 +266,11 @@
     if (mine) return `<section class="sw pro" id="spropose" aria-label="Your proposal"><div class="swh"><h2>Your proposal, 1 of 1 today</h2></div>${PROP.chgFor(mine)}</section>`;
     const ended = !!(DAY && DAY.you && DAY.you.ended);
     if (ended || (DAY && DAY.locked)) return `<section class="sw pro" id="spropose" aria-label="No proposal today"><div class="swh"><h2>No proposal today</h2><span class="m">0 of 1 today</span></div></section>`;
-    const off = active && c.allowed ? "" : ` disabled title="${esc(active ? c.reason : "Log in to propose.")}"`;
+    const why = active ? c.reason : ME ? "The game has not started yet." : "Log in to propose.";
+    const off = active && c.allowed ? "" : ` disabled title="${esc(why)}"`;
     return `<section class="sw pro" id="spropose" aria-label="Propose a change"><div class="swh"><h2>Propose a change</h2><span class="m">0 of 1 today</span>${win}</div>
       <div class="ptiles"><button type="button" class="ptile" data-tab="rules"${off}><span class="pt2">Rulebook</span><span class="pm2">${BOOK && BOOK.count() ? plural(BOOK.count(), "rule") : ""}</span><span class="pa2">+ Change or add a rule</span></button>
-      <button type="button" class="ptile" data-tab="catalog" disabled title="Things you can make arrive in a later step."><span class="pt2">Catalog</span><span class="pm2">0 entries</span><span class="pa2">+ Propose a thing</span></button></div>${!active || c.allowed ? "" : `<p class="mnote">${esc(c.reason)}</p>`}</section>`;
+      <button type="button" class="ptile" data-tab="catalog" disabled><span class="pt2">Catalog</span><span class="pm2">0 entries</span><span class="pa2">+ Propose a thing</span></button></div><p class="mnote">${active && !c.allowed ? esc(c.reason) : "Catalog proposals are not open yet."}</p></section>`;
   }
   function summaryHTML() {
     const bl = ballotList();
@@ -384,7 +385,7 @@
     const today = ended ? (ended.ended ? "Turn ended" : [ended.moved ? "moved" : "", ended.proposed ? "proposed" : ""].filter(Boolean).join(" · ") || "Nothing yet") : "";
     const rows = [row("Points", esc(p.score), chip("401") + chip("402"), "", "points-text"),
       row("Today", esc(today), chip("202"), "", "player-today"),
-      row("Piece", esc(pieceName(p.shape)), chip("504"), board ? `At ${esc(noLevel(board.at.label))}. Moves ${R.move_distance === 1 ? "one space" : (R.move_distance || 1) + " spaces"} a day${R.diagonal_moves ? ", diagonals included" : ""}, and charts the tiles within ${S["board.chart_radius"] || 2}.` : "")];
+      row("Piece", esc(pieceName(p.shape)), chip("504"), board ? `At ${esc(noLevel(board.at.label))}. Moves ${Number(R.move_distance) === 1 ? "one space" : (Number(R.move_distance) || 1) + " spaces"} a day${R.diagonal_moves ? ", diagonals included" : ""}, and charts the tiles within ${Number(S["board.chart_radius"]) || 2}.` : "")];
     return { cls: "crit", label: p.name, backLabel: p.name,
       html: `<div class="mtop"><div class="cart">${mini(p, "cartico")}</div><h2>${esc(p.name)}${me ? ' <span class="you">(you)</span>' : ""}</h2><span class="mmeta">${esc(p.color.name)} · player</span><span class="mpill">Living</span></div><dl class="cstats">${rows.join("")}</dl>` };
   }
@@ -440,6 +441,7 @@
     if (!box) return;
     const move = myMove(), t = SEL && tileAt(SEL.x, SEL.y), pend = t && move.ok && canMoveTo(t) ? t : null;
     const me = myPiece(), g = DATA && DATA.game;
+    if (!BOARD) { box.innerHTML = ""; return; }
     let lead = "";
     if (pend) lead = `<div class="mb"><span><b>Move to ${esc(noLevel(pend.label))}</b> · <span class="charted-note">${tilesText(newlyCharted(pend))}</span></span><button class="btn small" id="make-move" type="button">Make this move</button><button class="btn ghost small" id="undo-move" type="button">Undo</button></div>`;
     else if (DAY && DAY.you && DAY.you.moved && me) lead = `<div class="mb"><span class="ok" aria-hidden="true">✓</span><span><b>Moved to ${esc(noLevel(me.at.label))}</b> today${LASTMOVE && LASTMOVE.day === DAY.day && LASTMOVE.n != null ? ` · <span class="charted-note">${tilesText(LASTMOVE.n)}</span>` : ""}</span></div>`;

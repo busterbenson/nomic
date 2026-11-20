@@ -18,18 +18,22 @@ export function createCards({ root, describe, onClose }) {
   const isOpen = () => !!S.cur;
   function hidePreview() { const e = document.getElementById("rprev"); if (e) e.remove(); }
 
+  // What had focus inside the card, so a redraw (a menu click, a toggle) can give it back to the same control.
+  const sig = (el) => (el && root.contains(el) && el.closest(".mcard") ? { tag: el.tagName, id: el.id, ds: JSON.stringify({ ...el.dataset }), cls: el.className } : null);
+  const refind = (k) => [...root.querySelectorAll(k.tag.toLowerCase())].find((e) => e.id === k.id && JSON.stringify({ ...e.dataset }) === k.ds && e.className === k.cls);
   function draw(focusClose) {
     const d = S.cur ? describe(S.cur) : null;
     if (!d) { S.cur = null; S.stack = []; return shut(); }
-    const was = !root.hidden, prev = root.querySelector(".mcard"), top = prev ? prev.scrollTop : 0;
+    const was = !root.hidden, prev = root.querySelector(".mcard"), top = prev ? prev.scrollTop : 0, keep = was && !focusClose ? sig(document.activeElement) : null;
     const back = S.stack.length ? describe(S.stack[S.stack.length - 1]) : null;
-    root.innerHTML = `<div class="mback" data-mclose></div><div class="mcard ${d.cls || ""}" role="dialog" aria-modal="true" aria-label="${esc(d.label)}">${X}${back ? `<button type="button" class="mbackbtn" data-mback>← Back to ${esc(back.backLabel || back.label)}</button>` : ""}${d.html}</div>`;
+    root.innerHTML = `<div class="mback" data-mclose></div><div class="mcard ${d.cls || ""}" role="dialog" aria-modal="true" tabindex="-1" aria-label="${esc(d.label)}">${X}${back ? `<button type="button" class="mbackbtn" data-mback>← Back to ${esc(back.backLabel || back.label)}</button>` : ""}${d.html}</div>`;
     root.hidden = false;
     document.body.style.overflow = "hidden";
     const c = root.querySelector(".mcard"), key = S.cur.kind + ":" + S.cur.key;
     if (was && S.key === key) c.scrollTop = top;
     S.key = key;
     if (focusClose || !was) { const x = root.querySelector(".mx"); if (x) x.focus({ preventScroll: true }); }
+    else if (keep) { const e = refind(keep) || c; e.focus({ preventScroll: true }); }   // the same control, or the card itself (Tab goes on from there)
   }
   function shut() {
     hidePreview();
@@ -42,8 +46,9 @@ export function createCards({ root, describe, onClose }) {
     hidePreview();
     if (isOpen()) { if (push && S.cur && !(S.cur.kind === spec.kind && S.cur.key === spec.key)) S.stack.push(S.cur); else if (!push) S.stack = []; }
     else { S.stack = []; S.opener = document.activeElement && document.activeElement !== document.body ? document.activeElement : null; }
+    const same = isOpen() && S.cur.kind === spec.kind && S.cur.key === spec.key;   // the History toggle: same card, keep focus where it is
     S.cur = spec;
-    draw(true);
+    draw(!same);
   }
   function back() { hidePreview(); const p = S.stack.pop(); if (p) { S.cur = p; draw(true); } }
   function close() {
