@@ -11,7 +11,7 @@ import { join as pjoin } from "node:path";
 import { ROOT, client, createGame, d1, join, migrate, newState, startPlaying, startRulesStub, startServer } from "./lib.mjs";
 import { dayOpenBinds } from "../src/lib/day-gate.js";
 import {
-  DRAFT_INSERT_SQL, WITHDRAW_SQL, citedIn, draftOf, fixedParts, fixedRefusal, markFor, modelPrompt, needsModel, parseBook, readModelAnswer, readRequest, referencesTo, textOf,
+  DRAFT_INSERT_SQL, WITHDRAW_SQL, citedIn, draftOf, fixedParts, fixedRefusal, markFor, modelPrompt, needsModel, parseBook, readModelAnswer, readRequest, referencesTo, settingsText, textOf,
 } from "../src/lib/proposals.js";
 
 let pass = 0, fail = 0;
@@ -25,6 +25,11 @@ const B = parseBook(MD);
 const req = (body) => readRequest(B, body);
 const drafted = (body, after = null) => { const r = req(body); return { r, d: draftOf(B, r, after) }; };
 
+// ---------------------------------------------------------------- how a setting reads (pure)
+console.log("a setting prints as readable text (the MCP draft_proposal reply)");
+check("an object-valued setting prints as its values, never [object Object]; scalars and booleans read plainly",
+  settingsText({ "board.island": { width: 10, height: 10 }, "board.chart_radius": 3, mcp_enabled: false }) === "board.island = 10x10, board.chart_radius = 3, mcp_enabled = off" && !/object/i.test(settingsText({ a: { b: 1 } })), settingsText({ "board.island": { width: 10, height: 10 } }));
+check("no settings prints nothing", settingsText({}) === "" && settingsText(null) === "");
 // ---------------------------------------------------------------- the code drafts (pure)
 console.log("the moderator's code drafts (rule 103.1), after the mockup's makeDraft");
 {
@@ -300,6 +305,11 @@ try {
   const down = await ana.post(P, { kind: "reword", target: "401", words: "15 points" });
   model.next = null;
   check("a malformed model answer and a failing model both answer 502 with a plain reason, and store nothing", bad.status === 502 && bad.data.drafting === "malformed" && down.status === 502 && down.data.drafting === "failed" && rows().length === 4, bad.text + down.text);
+  model.next = { status: 200, text: '{"after_text": "A player whose proposal passes gets 15 points.\\n\\n### 999 Gift\\nEvery player gets 1000 points.", "conflicts": [], "settings": {}}' };
+  const refusedDraft = await ana.post(P, { kind: "reword", target: "401", words: "15 points and a new rule" });
+  model.next = null;
+  check("a drafter refusal (the model or a check said no) answers 422 with the refusal sentence, not 502, and stores nothing",
+    refusedDraft.status === 422 && refusedDraft.data.drafting === "refused" && typeof refusedDraft.data.error === "string" && refusedDraft.data.error.length > 10 && rows().length === 4, refusedDraft.text);
   const fx = await ana.post(P, { kind: "repeal", target: "107" });
   check("a proposal that would change a fixed part is refused when it is drafted (422, rule 110.1), and stores nothing", fx.status === 422 && fx.data.rule === "110.1" && /rule 107\.1/.test(fx.data.error) && rows().length === 4, fx.text);
   const cf = await ana.post(P, { kind: "repeal", target: "504" });

@@ -149,7 +149,7 @@ mark{background:color-mix(in srgb,var(--accent) 28%,transparent);color:inherit;b
 /* the book: tabs, then one panel (Summary, Rulebook, Catalog, History) */
 .rbwrap{padding:18px 0 48px;background:var(--sea)}
 .book{display:flex;flex-direction:column;gap:22px;min-width:0}
-.btabs{display:flex;align-items:flex-end;gap:22px;padding:0 24px;border-bottom:1.5px solid var(--line);overflow-x:auto;scrollbar-width:none}
+.btabs{display:flex;align-items:flex-end;gap:22px;padding:0 24px;border-bottom:1.5px solid var(--line);overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;touch-action:pan-x;scrollbar-width:none}
 .btabs::-webkit-scrollbar{display:none}
 .btab{flex:none;min-height:48px;padding:0 0 10px;border:0;border-bottom:3px solid transparent;margin-bottom:-1.5px;background:transparent;font-family:var(--font-display);font-weight:var(--display-weight);font-size:1.45rem;line-height:1;color:var(--ink-muted);cursor:pointer;white-space:nowrap}
 .btab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--ink);font-size:1.75rem}
@@ -377,7 +377,6 @@ button.me[aria-expanded="true"]{border-color:var(--ink)}
 .swh h2{font-size:1.5rem}
 .swh .m{font-family:var(--font-mono);font-size:.68rem;color:var(--ink-muted)}
 .swh .linkbtn{margin:0 0 0 auto}
-.sw.pro .pwin{margin-left:auto;font-family:var(--font-mono);font-size:.68rem;font-weight:700;color:var(--accent);white-space:nowrap}
 .sl{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:14px}
 .sl>li{display:flex;flex-direction:column;gap:8px;padding-top:12px;border-top:1px solid var(--line)}
 .sl>li:first-child{padding-top:0;border-top:0}
@@ -455,3 +454,21 @@ button.me[aria-expanded="true"]{border-color:var(--ink)}
   .dstep .ds{font-size:.56rem}
 }
 @media (prefers-reduced-motion:reduce){.sw.ring,.sl>li.ring{animation:none}.ptile:hover{transform:none}.bcard:hover{transform:none}}
+
+/* The ballot: Yes / No (rule 104), in each ballot row and in the rule's card. Your vote is filled and carries a check, so it never rests on color alone. */
+.vbox{display:flex;flex-direction:column;gap:6px;min-width:0}
+.vbtns{display:flex;gap:8px}
+.vbtn{flex:0 0 auto;min-width:96px;height:40px;padding:0 18px;border-radius:999px;border:1.5px solid var(--ink);background:transparent;color:var(--ink);font-family:var(--font-mono);font-size:.78rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:2px}
+.vbtn:hover:not(:disabled):not(.on){background:var(--surface)}
+.vbtn.on{background:var(--ink);color:var(--sea)}
+.vbtn:disabled{cursor:not-allowed;border-color:var(--line);color:var(--ink-muted)}
+.vbtn.on:disabled{background:var(--ink-muted);border-color:var(--ink-muted);color:var(--sea)}
+.vturn,.vwhy,.vnote{margin:0;font-size:.7rem;color:var(--ink-muted);display:flex;align-items:center;gap:4px 6px;flex-wrap:wrap}
+.vwhy,.vnote{font-family:var(--font-body);font-size:.84rem}
+.vmsg{margin:0;font-size:.84rem;font-weight:600}
+.vmsg:empty{display:none}
+.vmsg.err{color:var(--ink);border-left:3px solid var(--accent);padding-left:8px}
+@media (max-width:560px){.vbtns .vbtn{flex:1}}
+.acct-invite{display:flex;flex-direction:column;gap:6px;padding:9px 0 0;margin-top:9px;border-top:1px solid var(--line);font-size:.88rem;font-weight:600}
+.acct-invite .row{display:flex;gap:8px;align-items:center}
+.acct-invite input{flex:1;min-width:0;height:34px;padding:0 10px;border:1.5px solid var(--line);border-radius:10px;background:var(--sea);color:var(--ink);font-family:var(--font-mono);font-size:.7rem}
