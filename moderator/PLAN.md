@@ -162,11 +162,14 @@ what the Worker's bundle reads; the platform default if the file has none), and 
 (rule 203.1); the deadline is `DEADLINE_HOUR` in `src/lib/day-gate.js` (2:00); the deploy grace is `DEPLOY_GRACE_MINUTES` in
 `src/lib/votes.js` (30). Both are platform constants today, not game settings. Each input is recorded with where it came from.
 
-**Schedule:** `moderator/schedule.mjs` turns the register into `StartCalendarInterval` entries (two per game) in the Mac's own
-time zone, between `schedule:begin` / `schedule:end` markers in the launchd plist, replacing `StartInterval`. It rewrites the
-plist, and reloads the job (a detached helper: `bootout`, `bootstrap` retried, then a check that the job is back, with a
-notification file if it is not), **only when the entries changed**, and never loads a job that isn't loaded. Rickshaw today
-(Pacific game, Pacific mini): 00:02 and 01:00.
+**Schedule: one launchd job per game.** launchd does not start a job that is still running, so a game's hours-long main run must not
+share a job with another game's starts. `moderator/schedule.mjs` writes `com.chalant.promptocracy-moderator.<slug>.plist` per game
+(its own two `StartCalendarInterval` entries in the Mac's time zone, its own logs, `run.sh <slug>`) into `~/chalantbot/launchd/`, where
+`scripts/install-launchd.sh` picks them up. It rewrites a plist and reloads that one job (a detached helper: `bootout`, `bootstrap`
+retried, then a check that the job is back, with a notification file if it is not) **only when that game's entries changed**, and never
+loads a job that isn't loaded: a new game's plist is written and reported as needing the installer. A moderator plist for a label no
+longer in the register (a game that left, or the old single job `com.chalant.promptocracy-moderator`) is moved to the trash with its
+`~/Library/LaunchAgents` link and the job is booted out. Rickshaw today (Pacific game, Pacific mini): 00:02 and 01:00.
 
 **Daylight saving:** an entry is a wall-clock time, so the entries are the union of every night's real times over the next 400
 days, read on the Mac's clock. For a Pacific game on a Pacific mini nothing changes: the main run is 2 real minutes after
@@ -177,9 +180,7 @@ Pacific, plus 23:00 the night the East falls back before the West). An extra tim
 
 **Keeping it current:** a night that was claimed (or resumed as deploying, or whose rules were re-tagged) leaves
 `reschedule.flag` in the state dir; `run.sh` runs `schedule.mjs` after the last game's run. A passed rule that changes the time
-zone changes the entries and the job is reloaded. Chalant also runs it at install: `node moderator/schedule.mjs` (writes
-`~/chalantbot/launchd/com.chalant.promptocracy-moderator.plist`, which `~/Library/LaunchAgents` links to), then
-`scripts/install-launchd.sh`. If the Mac's own time zone changes, run it again.
+zone changes the entries and the job is reloaded. Chalant also runs it at install (below). If the Mac's own time zone changes, run it again.
 
 **Missed runs:** launchd runs a `StartCalendarInterval` job missed while the Mac slept once, on wake (`launchd.plist(5)`: "launchd
 will start the job the next time the computer wakes up"; several missed events are coalesced into one). That run is a single
@@ -194,7 +195,7 @@ proposal for good.
 **Gap to know about:** outside the two runs nothing retries. A deploy trigger that still fails at the deploy deadline, or a
 `pendingDeploy` left by a failed reconcile deploy, waits for the next night's main run (a notification file says so).
 
-**One launchd job for all games:** launchd does not start a job that is still running, and `run.sh` is one job. With one game (today) that is exactly what keeps the backstop off a live main run. With two games whose nights are at different clock times on the Mac, one game's main run could hold the job through the other's start; that would need one job per game. Not built (no second game yet).
+**Install / migration (Chalant, after merge):** `node moderator/schedule.mjs` (writes the per-game plists to `~/chalantbot/launchd/`, retires the old single job: its plist and `~/Library/LaunchAgents` link go to the trash and the job is booted out), then `scripts/install-launchd.sh` to link and load the new jobs. Check: `launchctl print gui/$UID/com.chalant.promptocracy-moderator.rickshaw-1`. The old label `com.chalant.promptocracy-moderator` is retired for good.
 
 ## Not in this PR
 - the stale-bundle re-lock (`GAMES[slug].day < games.rules_day`), the `code-status` route (PR 8), the recap UI (PR 6).

@@ -3,11 +3,11 @@
 // repo is a local bare repo, and the reload is a stand-in.
 //   node moderator/schedule.test.mjs
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { symlinkSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { ROOT } from "./process-day.mjs";
-import { applySchedule, buildRegister, CRON_SLACK_MINUTES, lintPlist, isMainRun, moderatedSlugs, nightWindow, readGameInputs, refreshSchedule, reloadJob, reloadNow, scheduleBlock } from "./schedule.mjs";
+import { buildRegister, CRON_SLACK_MINUTES, lintPlist, isMainRun, moderatedSlugs, nightWindow, readGameInputs, refreshSchedule, reloadJob, reloadNow } from "./schedule.mjs";
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = "") => { if (ok) pass++; else { fail++; console.log(`FAIL ${name}${detail ? `\n     ${detail}` : ""}`); } };
@@ -62,63 +62,49 @@ console.log("the register");
   check("isMainRun: follows the game's zone (New York main run is 05:02 UTC, not 08:02) and the spring-forward night's own midnight", isMainRun(moved, "g", Date.parse("2026-11-21T05:02:00Z")) && !isMainRun(moved, "g", Date.parse("2026-11-21T08:02:00Z")) && isMainRun(reg, "rickshaw-1", Date.parse("2026-03-08T08:02:00Z")));
 }
 
-console.log("the plist");
+console.log("one launchd job per game");
 {
-  const reg = buildRegister({ games: [{ slug: "rickshaw-1", repo: "busterbenson/promptocracy-rickshaw", tag: "day-3", sha: "a".repeat(40), settings: { "game.timezone": PT } }], hostTz: PT, now: NOW });
-  const live = readFileSync(join(ROOT, "moderator", "com.chalant.promptocracy-moderator.plist"), "utf8");
-  const block = scheduleBlock(reg);
-  check("the block has one StartCalendarInterval dict per entry, and no double hyphen inside the comment (invalid XML)", (block.match(/<dict>/g) ?? []).length === 2 && !/--/.test(block.replace(/<!--|-->/g, "")), block.slice(0, 400));
-  check("the committed plist's schedule is what the generator makes for Rickshaw on a Pacific mini (so a changed constant shows up here)", live.includes(block) && !/<key>StartInterval<\/key>/.test(live), "run: node moderator/schedule.mjs --plist moderator/com.chalant.promptocracy-moderator.plist --dry-run, or regenerate it");
-  const old = '<plist><dict>\n    <key>Label</key>\n    <string>x</string>\n    <key>StartInterval</key>\n    <integer>120</integer>\n    <key>Other</key>\n    <string>y</string>\n</dict></plist>\n';
-  const once = applySchedule(old, block);
-  check("applySchedule replaces StartInterval with the block and keeps the rest", !/StartInterval/.test(once) && /StartCalendarInterval/.test(once) && /<key>Other<\/key>/.test(once) && /<key>Label<\/key>/.test(once));
-  const again = applySchedule(once, block);
-  check("applying the same block again changes nothing (idempotent)", again === once);
-  const other = applySchedule(once, scheduleBlock(buildRegister({ games: [{ slug: "r", repo: "o/r", tag: "day-1", sha: "a".repeat(40), settings: { "game.timezone": "America/New_York" } }], hostTz: PT, now: NOW })));
-  check("a different schedule replaces the marked block whole, not appended", (other.match(/schedule:begin/g) ?? []).length === 1 && (other.match(/<key>StartCalendarInterval<\/key>/g) ?? []).length === 1 && /<key>Hour<\/key><integer>21<\/integer>/.test(other) && !/<key>Hour<\/key><integer>0<\/integer><key>Minute<\/key><integer>2</.test(other));
-  let threw = false; try { applySchedule("<plist><dict></dict></plist>", block); } catch { threw = true; }
-  check("a plist with neither markers nor StartInterval is refused, not guessed at", threw);
-  let linted = true; try { lintPlist(live); } catch (e) { linted = false; console.log(e.message); }
-  check("the committed plist lints", linted);
-  let bad = false; try { lintPlist(live.replace("</dict>\n</plist>", "")); } catch { bad = true; }
-  check("a malformed plist does not lint", bad);
-  const empty = scheduleBlock({ ...reg, entries: [], games: {} });
-  check("no game with a token: the block has no entries (the job then never fires)", !/StartCalendarInterval/.test(empty) && /no game has a token/.test(empty));
+  const mkInputs = (zones) => (url) => ({ tag: "day-3", sha: "a".repeat(40), settings: { "game.timezone": zones[url] } });
+  const manifest = { engine: 1, games: { "rickshaw-1": { repo: "o/r" }, "ny-1": { repo: "o/ny" } } };
+  const dirs = (n) => ({ launchdDir: join(TMP, `${n}-launchd`), agentsDir: join(TMP, `${n}-agents`), trashDir: join(TMP, `${n}-trash`), stateDir: join(TMP, `${n}-state`) });
+  for (const d of ["launchdDir", "agentsDir", "trashDir"]) mkdirSync(dirs("a")[d], { recursive: true });
+  const D = dirs("a");
+  const zones = { r: PT, ny: "America/New_York" };
+  const reloads = [], retired = [];
+  const common = { manifest, ...D, hostTz: PT, now: NOW, urlOf: (sl) => (sl === "rickshaw-1" ? "r" : "ny"), readInputs: (u) => mkInputs(zones)(u), lint: () => {}, reload: ({ label }) => { reloads.push(label); return true; }, retire: ({ label }) => { retired.push(label); } };
+  const r1 = await refreshSchedule({ ...common, slugs: ["rickshaw-1", "ny-1"] });
+  const pa = join(D.launchdDir, "com.chalant.promptocracy-moderator.rickshaw-1.plist"), pb = join(D.launchdDir, "com.chalant.promptocracy-moderator.ny-1.plist");
+  const A = readFileSync(pa, "utf8"), B = readFileSync(pb, "utf8");
+  check("each game gets its own plist (its own label), written to the launchd dir given", existsSync(pa) && existsSync(pb) && /<key>Label<\/key>\s*<string>com\.chalant\.promptocracy-moderator\.rickshaw-1<\/string>/.test(A) && /<string>com\.chalant\.promptocracy-moderator\.ny-1<\/string>/.test(B), "");
+  check("each runs run.sh with ITS slug, and has its own log files", /run\.sh<\/string>\s*<string>rickshaw-1<\/string>/.test(A) && /run\.sh<\/string>\s*<string>ny-1<\/string>/.test(B) && /launchd\.rickshaw-1\.out\.log/.test(A) && !/ny-1/.test(A) && /launchd\.ny-1\.err\.log/.test(B));
+  const hours = (t) => [...t.matchAll(/<key>Hour<\/key><integer>(\d+)<\/integer><key>Minute<\/key><integer>(\d+)<\/integer>/g)].map((m) => `${m[1].padStart(2, "0")}:${m[2].padStart(2, "0")}`);
+  check("two games in different zones schedule independently: Pacific 00:02 and 01:00, New York 21:02, 22:00 (and the fall-back night's 23:00)", JSON.stringify(hours(A)) === JSON.stringify(["00:02", "01:00"]) && JSON.stringify(hours(B)) === JSON.stringify(["21:02", "22:00", "23:00"]), JSON.stringify([hours(A), hours(B)]));
+  check("a new game's plist is written but not loaded (install-launchd.sh does that): reported as needing install, nothing reloaded", r1.installNeeded.length === 2 && reloads.length === 0, JSON.stringify(r1.installNeeded));
+  const regKeys = JSON.parse(readFileSync(join(D.stateDir, "register.json"), "utf8"));
+  check("the register keeps each game's own entries", JSON.stringify(regKeys.games["rickshaw-1"].entries) === '["00:02","01:00"]' && regKeys.games["ny-1"].entries.length === 3);
+  const m = statSync(pa).mtimeMs;
+  const r2 = await refreshSchedule({ ...common, slugs: ["rickshaw-1", "ny-1"] });
+  check("a second run with the same inputs rewrites and reloads nothing", r2.changed.length === 0 && reloads.length === 0 && statSync(pa).mtimeMs === m);
+  zones.ny = "Europe/London";
+  const r3 = await refreshSchedule({ ...common, slugs: ["rickshaw-1", "ny-1"] });
+  check("a rule that moves one game's zone rewrites and reloads only THAT game's job; the other's file is byte-identical and never touched", JSON.stringify(r3.changed) === '["ny-1"]' && JSON.stringify(reloads) === '["com.chalant.promptocracy-moderator.ny-1"]' && readFileSync(pa, "utf8") === A && statSync(pa).mtimeMs === m);
+  check("a still-running main run of one game cannot delay the other: they are separate launchd labels, so launchd decides 'still running' per label", A.match(/<key>Label<\/key>\s*<string>([^<]+)/)[1] !== readFileSync(pb, "utf8").match(/<key>Label<\/key>\s*<string>([^<]+)/)[1]);
+  const r4 = await refreshSchedule({ ...common, slugs: ["rickshaw-1"], dryRun: true });
+  check("--dry-run reports what it would retire and touches nothing", existsSync(pb) && retired.length === 0 && r4.retired.length === 1);
+  // retirement: a game that left the register, and the old single job
+  const oldSingle = join(D.launchdDir, "com.chalant.promptocracy-moderator.plist");
+  writeFileSync(oldSingle, "<plist/>");
+  symlinkSync(oldSingle, join(D.agentsDir, "com.chalant.promptocracy-moderator.plist"));
+  symlinkSync(pb, join(D.agentsDir, "com.chalant.promptocracy-moderator.ny-1.plist"));
+  const r5 = await refreshSchedule({ ...common, slugs: ["rickshaw-1"] });
+  check("a game no longer in the register, and the old single-job label, are retired: files and LaunchAgents links moved to the trash (not deleted), the jobs booted out", JSON.stringify(r5.retired.sort()) === JSON.stringify(["com.chalant.promptocracy-moderator", "com.chalant.promptocracy-moderator.ny-1"]) && !existsSync(pb) && !existsSync(oldSingle) && !existsSync(join(D.agentsDir, "com.chalant.promptocracy-moderator.plist")) && readdirSync(D.trashDir).length === 4 && retired.sort().join() === "com.chalant.promptocracy-moderator,com.chalant.promptocracy-moderator.ny-1" && existsSync(pa), JSON.stringify([r5.retired, readdirSync(D.trashDir)]));
+  check("the plist lints", (() => { try { lintPlist(A); return true; } catch { return false; } })());
+  check("run.sh takes the slug as its argument and runs that one game (no loop over the manifest)", /SLUG="\$\{1:\?/.test(readFileSync(join(ROOT, "moderator", "run.sh"), "utf8")) && !/for slug in/.test(readFileSync(join(ROOT, "moderator", "run.sh"), "utf8")));
+  const w = join(TMP, "w.guard");
+  check("guard: nothing here wrote under ~/chalantbot", !D.launchdDir.startsWith(join(homedir(), "chalantbot")) && !D.stateDir.startsWith(join(homedir(), "chalantbot")) && w.length > 0);
 }
 
-console.log("reload only on change");
-{
-  const plist = join(TMP, "job.plist"), stateDir = join(TMP, "state");
-  copyFileSync(join(ROOT, "moderator", "com.chalant.promptocracy-moderator.plist"), plist);
-  // start from the old StartInterval form, as the live plist is today
-  writeFileSync(plist, readFileSync(plist, "utf8").replace(/\n[ \t]*<!-- schedule:begin[\s\S]*?schedule:end -->/, "\n    <key>StartInterval</key>\n    <integer>120</integer>"));
-  const manifest = { engine: 1, games: { "rickshaw-1": { repo: "busterbenson/promptocracy-rickshaw" } } };
-  let tz = PT, reloads = 0, tag = "day-3";
-  const common = { manifest, slugs: ["rickshaw-1"], stateDir, plist, hostTz: PT, now: NOW, readInputs: () => ({ tag, sha: "a".repeat(40), settings: { "game.timezone": tz } }), reload: () => { reloads++; return true; } };
-  const r1 = await refreshSchedule(common);
-  check("first run: StartInterval becomes the calendar schedule, and the job is reloaded", r1.changed && r1.reloaded && reloads === 1 && !/StartInterval/.test(readFileSync(plist, "utf8")) && (readFileSync(plist, "utf8").match(/<dict><key>Hour/g) ?? []).length === 2);
-  const reg1 = readFileSync(join(stateDir, "register.json"), "utf8");
-  const m1 = statSync(plist).mtimeMs;
-  const r2 = await refreshSchedule({ ...common, now: NOW + 3600_000 });
-  check("second run, same inputs: no rewrite, no reload, the register file is untouched", !r2.changed && !r2.reloaded && reloads === 1 && statSync(plist).mtimeMs === m1 && readFileSync(join(stateDir, "register.json"), "utf8") === reg1);
-  tag = "day-4"; // a new tag, same time zone: the register notes the tag but the entries are the same
-  const r3 = await refreshSchedule({ ...common, now: NOW + 7200_000 });
-  check("a new tag with the same zone: the register is rewritten (the tag changed), the plist and the job are not", !r3.changed && reloads === 1 && /"tag": "day-4"/.test(readFileSync(join(stateDir, "register.json"), "utf8")));
-  tz = "America/New_York";
-  const r4 = await refreshSchedule({ ...common, now: NOW + 7200_000 });
-  check("a rule that moves the time zone: the plist changes and the job is reloaded again", r4.changed && r4.reloaded && reloads === 2 && /<key>Hour<\/key><integer>21<\/integer>/.test(readFileSync(plist, "utf8")));
-  tz = PT;
-  const r5 = await refreshSchedule({ ...common, noReload: true });
-  check("--no-reload rewrites the plist but never reloads", r5.changed && !r5.reloaded && reloads === 2);
-  tz = "Europe/London";
-  const before = readFileSync(plist, "utf8");
-  const r6 = await refreshSchedule({ ...common, dryRun: true });
-  check("--dry-run reports the change and writes nothing", r6.changed && readFileSync(plist, "utf8") === before && !/Europe/.test(readFileSync(join(stateDir, "register.json"), "utf8")));
-  tz = PT;
-  let lintFail = false;
-  try { await refreshSchedule({ ...common, readInputs: () => ({ tag, sha: "a".repeat(40), settings: { "game.timezone": "Asia/Tokyo" } }), lint: () => { throw new Error("does not lint"); } }); } catch { lintFail = true; }
-  check("a plist that fails to lint is never written", lintFail && readFileSync(plist, "utf8") === before);
-}
+console.log("reloading");
 {
   let spawned = 0, opts = null;
   const spawnFn = (cmd, args, o) => { spawned++; opts = { cmd, args, o }; return { unref() {} }; };
@@ -136,10 +122,12 @@ console.log("reload only on change");
   check("reloadNow: a job that never comes back writes a notification file saying the moderator is OFF and how to load it", failed === false && calls.filter((c) => c.startsWith("bootstrap")).length === 3 && files.length === 1 && /OFF until it is loaded: launchctl bootstrap gui\/501 \/p\.plist/.test(readFileSync(join(nd, files[0]), "utf8")), JSON.stringify(files));
 }
 {
-  // The CLI looks for the plist before any network read.
-  let out = "", code = 0;
-  try { execFileSync(process.execPath, [join(ROOT, "moderator", "schedule.mjs"), "--plist", join(TMP, "missing.plist"), "--state-dir", join(TMP, "s3"), "--tokens-from", join(TMP, "none")], { stdio: "pipe", encoding: "utf8" }); } catch (e) { code = e.status; out = String(e.stderr); }
-  check("the CLI with no plist at the path fails at once, naming it (no network read first)", code === 1 && /no plist at .*missing\.plist/.test(out), out);
+  // The CLI, with no game moderated here: no network read, no plist written, and the old single job is retired into the trash.
+  const ld = join(TMP, "cli-launchd"), ag = join(TMP, "cli-agents"), tr = join(TMP, "cli-trash");
+  mkdirSync(ld, { recursive: true }); mkdirSync(ag, { recursive: true });
+  writeFileSync(join(ld, "com.chalant.promptocracy-moderator.plist"), "<plist/>");
+  const o = execFileSync(process.execPath, [join(ROOT, "moderator", "schedule.mjs"), "--launchd-dir", ld, "--agents-dir", ag, "--trash-dir", tr, "--state-dir", join(TMP, "s3"), "--tokens-from", join(TMP, "none"), "--no-reload"], { stdio: "pipe", encoding: "utf8" });
+  check("the CLI with no moderated game retires the old single job into the trash and writes no plist", /"retired":\["com\.chalant\.promptocracy-moderator"\]/.test(o) && readdirSync(ld).length === 0 && readdirSync(tr).length === 1, o);
 }
 
 console.log("the inputs");

@@ -2,7 +2,7 @@
 // THE MODERATOR'S SCHEDULE. The night's times cannot change without a rule change, so the launchd job runs only at the
 // times registered for each game's night, from a register, instead of every 2 minutes all day (Buster, 2026-11-20).
 //
-//   node moderator/schedule.mjs [--plist <path>] [--state-dir <dir>] [--tokens-from <file>] [--no-reload] [--dry-run]
+//   node moderator/schedule.mjs [--launchd-dir <dir>] [--state-dir <dir>] [--tokens-from <file>] [--no-reload] [--dry-run]
 //
 // TWO RUNS A NIGHT PER GAME (Buster's design call, 2026-11-20):
 //   MAIN      the window's open + 2 minutes (Rickshaw: 00:02). One process, start to finish: it waits for the site's
@@ -27,7 +27,7 @@
 // are merged. On a night when the two clocks disagree a run may fire at an extra time: it finds nothing to do (one GET,
 // no clone). See moderator/PLAN.md.
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -47,8 +47,6 @@ export const MAIN_WINDOW_MINUTES = 20; // a run that starts within this long of 
 // it, so the window stays open this long past the deadline: the run that reverts it must still be inside the window.
 export const CRON_SLACK_MINUTES = 5;
 export const HORIZON_DAYS = 400; // more than a year, so both daylight-saving changes of any zone are inside
-export const BEGIN = "<!-- schedule:begin";
-export const END = "<!-- schedule:end -->";
 const CHALANT = join(homedir(), "chalantbot");
 
 // ---- the clocks --------------------------------------------------------------------------------------------------
@@ -113,12 +111,10 @@ export function isMainRun(register, slug, nowMs) {
  */
 export function buildRegister({ games, hostTz = hostZone(), now = Date.now(), deadlineHour = DEADLINE_HOUR, graceMinutes = DEPLOY_GRACE_MINUTES, cronSlackMinutes = CRON_SLACK_MINUTES, horizonDays = HORIZON_DAYS, mainAfter = MAIN_AFTER_OPEN_MINUTES, backstopBefore = BACKSTOP_BEFORE_DEADLINE_MINUTES }) {
   const out = {};
-  const merged = new Map();
   for (const g of games) {
     const own = g.settings?.["game.timezone"];
     const timeZone = validTimeZone(own) ? own : DEFAULT_SETTINGS["game.timezone"];
     const slots = slotsFor(timeZone, hostTz, now, { deadlineHour, graceMinutes, cronSlackMinutes, horizonDays, mainAfter, backstopBefore });
-    for (const s of slots) merged.set(s.Hour * 60 + s.Minute, s);
     out[g.slug] = {
       repo: g.repo,
       tag: g.tag,
@@ -131,7 +127,7 @@ export function buildRegister({ games, hostTz = hostZone(), now = Date.now(), de
         runs: `the main run ${mainAfter} minutes after the day's end, the backstop ${backstopBefore} minutes before the deadline (Buster, 2026-11-20)`,
         closes: `DEADLINE_HOUR ${deadlineHour}:00 (src/lib/day-gate.js, deadlineAfter, rule 107.6) plus DEPLOY_GRACE_MINUTES ${graceMinutes} (src/lib/votes.js, deployDeadline in src/lib/day.ts) plus one Worker cron tick, CRON_SLACK_MS ${cronSlackMinutes} (src/lib/day.ts): the tick that lists an undeployed night as not applied, which the moderator then reverts`,
       },
-      times_on_this_machine: slots.length,
+      entries: slots.map((w) => `${pad(w.Hour)}:${pad(w.Minute)}`), // "HH:MM" on this machine's clock
     };
   }
   return {
@@ -145,50 +141,57 @@ export function buildRegister({ games, hostTz = hostZone(), now = Date.now(), de
     deploy_grace_minutes: graceMinutes,
     cron_slack_minutes: cronSlackMinutes,
     games: out,
-    entries: [...merged.entries()].sort((a, b) => a[0] - b[0]).map(([m]) => hhmm(m)), // "HH:MM" on this machine's clock
+    entries: [...new Set(Object.values(out).flatMap((g) => g.entries))].sort(), // every game's, for reading; each job has its own
   };
 }
 
 /** The register without its timestamp: what decides whether it changed. */
 export const registerKey = (r) => JSON.stringify({ ...r, generated_at: undefined });
 
-// ---- the plist ---------------------------------------------------------------------------------------------------
+// ---- the plists: one launchd job per game -------------------------------------------------------------------
+// A launchd job that is still running is not started again. One shared job would let one game's main run (hours long) hold
+// back another game's scheduled starts, so every game has its own label, its own entries and its own logs.
+export const jobLabel = (slug) => `${LABEL}.${slug}`;
+const xml = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;");
 const dict = (e) => { const [h, m] = e.split(":").map(Number); return `        <dict><key>Hour</key><integer>${h}</integer><key>Minute</key><integer>${m}</integer></dict>`; };
-/** The schedule block of the plist: deterministic from the register's entries (no timestamp), so equal entries are equal text. */
-export function scheduleBlock(register) {
-  const games = Object.entries(register.games).map(([slug, g]) => `${slug} ${g.time_zone} ${g.window.runs.main} and ${g.window.runs.backstop}`).join("; ") || "no game has a token here";
-  const head = `    ${BEGIN} (generated by moderator/schedule.mjs from register.json; do not edit by hand, run it again).
-         Two runs a night per game, in this machine's time zone (${register.host_time_zone}): the main run just after the
-         day's end and the backstop an hour before the deadline.
-         Games (game time zone, main and backstop in that zone): ${games}. ${register.entries.length} entries.
+
+/** One game's plist, whole, from its register entry: deterministic (no timestamp), so equal inputs give equal text. */
+export function renderPlist({ slug, register, root = ROOT, chalant = CHALANT }) {
+  const g = register.games[slug];
+  const logs = join(chalant, "logs", "promptocracy-moderator");
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- GENERATED by moderator/schedule.mjs from register.json: do not edit by hand, run it again. One job per game.
+         ${xml(slug)} (${g.time_zone}): two runs a night, in this machine's time zone (${register.host_time_zone}): the main run
+         just after the day's end (${g.window.runs.main} game time) and the backstop an hour before the deadline (${g.window.runs.backstop}).
          A run missed while the Mac is asleep still happens: launchd starts the job once on wake.
-         AbandonProcessGroup lets the detached reload helper outlive the run that started it. -->
+         Stop it: launchctl bootout gui/$UID/${jobLabel(slug)} -->
+    <key>Label</key>
+    <string>${jobLabel(slug)}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>${xml(join(root, "moderator", "run.sh"))}</string>
+        <string>${xml(slug)}</string>
+    </array>
     <key>AbandonProcessGroup</key>
-    <true/>`;
-  if (!register.entries.length) return `${head}\n    ${END}`;
-  return `${head}\n    <key>StartCalendarInterval</key>\n    <array>\n${register.entries.map(dict).join("\n")}\n    </array>\n    ${END}`;
-}
-
-/** Put the block in the plist: replace the marked block; else replace StartInterval (the first install); else refuse. */
-export function applySchedule(plist, block) {
-  const b = plist.indexOf(BEGIN), e = plist.indexOf(END);
-  if (b >= 0 && e > b) {
-    const start = plist.lastIndexOf("\n", b) + 1; // the line's indent is part of the block
-    return plist.slice(0, start) + block + plist.slice(e + END.length);
-  }
-  const old = /\n[ \t]*<key>StartInterval<\/key>\s*<integer>\d+<\/integer>/;
-  if (old.test(plist)) return plist.replace(old, `\n${block}`);
-  throw new Error("the plist has neither schedule markers nor a StartInterval to replace");
-}
-
-/** Write the plist when the text changed; returns whether it did. `lint` throws on a malformed plist (so a bad file never replaces a good one). */
-export function writePlist(path, register, { lint = lintPlist } = {}) {
-  const old = readFileSync(path, "utf8");
-  const next = applySchedule(old, scheduleBlock(register));
-  if (next === old) return false;
-  lint(next);
-  writeFileSync(path, next);
-  return true;
+    <true/>
+${g.entries.length ? `    <key>StartCalendarInterval</key>\n    <array>\n${g.entries.map(dict).join("\n")}\n    </array>\n` : ""}    <key>StandardOutPath</key>
+    <string>${xml(join(logs, `launchd.${slug}.out.log`))}</string>
+    <key>StandardErrorPath</key>
+    <string>${xml(join(logs, `launchd.${slug}.err.log`))}</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>${xml(join(homedir(), ".local/bin"))}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>${xml(homedir())}</string>
+    </dict>
+</dict>
+</plist>
+`;
 }
 
 /** plutil -lint on the new text (macOS); a missing plutil is not an error. */
@@ -200,6 +203,11 @@ export function lintPlist(text) {
     try { execFileSync("/usr/bin/plutil", ["-lint", f], { stdio: "pipe" }); }
     catch (e) { if (e.code !== "ENOENT") throw new Error(`the generated plist does not lint: ${String(e.stdout || e.message).trim()}`); }
   } finally { rmSync(tmp, { recursive: true, force: true }); }
+}
+
+/** The moderator labels with a plist in a launchd dir (the per-game ones and the old single one). */
+export function moderatorPlists(dir) {
+  try { return readdirSync(dir).map((f) => /^(com\.chalant\.promptocracy-moderator(?:\.[A-Za-z0-9_-]+)?)\.plist$/.exec(f)).filter(Boolean).map((m) => m[1]); } catch { return []; }
 }
 
 // ---- reloading the job -------------------------------------------------------------------------------------------
@@ -216,7 +224,7 @@ export function jobLoaded(label = LABEL, uid = process.getuid()) {
 export function reloadJob({ plist, label = LABEL, uid = process.getuid(), loaded = jobLoaded, spawnFn = spawn, logFile, notifyDir }) {
   if (!loaded(label, uid)) return false;
   const out = logFile ? ["ignore", openSync(logFile, "a"), openSync(logFile, "a")] : "ignore";
-  const child = spawnFn(process.execPath, [fileURLToPath(import.meta.url), "--reload-now", "--plist", plist, ...(notifyDir ? ["--notify-dir", notifyDir] : [])], { detached: true, stdio: out });
+  const child = spawnFn(process.execPath, [fileURLToPath(import.meta.url), "--reload-now", "--plist", plist, "--label", label, ...(notifyDir ? ["--notify-dir", notifyDir] : [])], { detached: true, stdio: out });
   child.unref?.();
   return true;
 }
@@ -271,11 +279,27 @@ export function readGameInputs(url) {
 }
 
 // ---- the whole thing ---------------------------------------------------------------------------------------------
+let trashed = 0;
+const moveToTrash = (path, trashDir) => {
+  try { lstatSync(path); } catch { return false; }
+  mkdirSync(trashDir, { recursive: true });
+  renameSync(path, join(trashDir, `${Date.now()}-${trashed++}-${path.split("/").pop()}`));
+  return true;
+};
+/** Boot a job out of launchd if it is loaded (the job may be the caller itself: the files are dealt with first). */
+export function bootoutJob({ label, uid = process.getuid(), loaded = jobLoaded }) {
+  if (!loaded(label, uid)) return false;
+  try { execFileSync("/bin/launchctl", ["bootout", `gui/${uid}/${label}`], { stdio: "ignore" }); } catch { /* already gone */ }
+  return true;
+}
+
 /**
- * Regenerate the register, rewrite the plist if its entries changed, reload the job if it did. Everything outside the
- * network is injectable. Returns {changed, reloaded, register}.
+ * Regenerate the register and every game's plist. A plist that changed is rewritten and its job reloaded (only that job,
+ * only if loaded). A game new to the register gets its plist written and is reported in installNeeded: loading it is
+ * install-launchd.sh's job. A moderator plist for a label no longer in the register (a game that left, the old single job)
+ * is moved to the trash with its LaunchAgents link, and the job is booted out. Everything outside the network is injectable.
  */
-export async function refreshSchedule({ manifest, slugs, stateDir, plist, hostTz = hostZone(), now = Date.now(), readInputs = readGameInputs, urlOf = (s) => repoUrlOf(s, manifest), reload = reloadJob, lint = lintPlist, noReload = false, dryRun = false, notifyDir }) {
+export async function refreshSchedule({ manifest, slugs, stateDir, launchdDir, agentsDir = join(homedir(), "Library", "LaunchAgents"), trashDir = join(homedir(), ".Trash"), hostTz = hostZone(), now = Date.now(), readInputs = readGameInputs, urlOf = (s) => repoUrlOf(s, manifest), reload = reloadJob, retire = bootoutJob, lint = lintPlist, noReload = false, dryRun = false, notifyDir }) {
   const games = slugs.map((slug) => ({ slug, repo: manifest.games[slug].repo, ...readInputs(urlOf(slug)) }));
   const register = buildRegister({ games, hostTz, now });
   mkdirSync(stateDir, { recursive: true });
@@ -283,30 +307,49 @@ export async function refreshSchedule({ manifest, slugs, stateDir, plist, hostTz
   let prior = null;
   try { prior = JSON.parse(readFileSync(regPath, "utf8")); } catch { /* first one */ }
   if (!dryRun && (!prior || registerKey(prior) !== registerKey(register))) writeFileSync(regPath, JSON.stringify(register, null, 2) + "\n");
-  if (dryRun) return { changed: existsSync(plist) && applySchedule(readFileSync(plist, "utf8"), scheduleBlock(register)) !== readFileSync(plist, "utf8"), reloaded: false, register };
-  const changed = writePlist(plist, register, { lint });
-  const reloaded = changed && !noReload ? Boolean(reload({ plist, logFile: join(stateDir, "reload.log"), notifyDir })) : false;
-  return { changed, reloaded, register };
+  const out = { changed: [], reloaded: [], installNeeded: [], retired: [], register };
+  const labels = new Set(slugs.map(jobLabel));
+  for (const slug of slugs) {
+    const path = join(launchdDir, `${jobLabel(slug)}.plist`);
+    const text = renderPlist({ slug, register });
+    const old = existsSync(path) ? readFileSync(path, "utf8") : null;
+    if (old === text) continue;
+    out.changed.push(slug);
+    if (old === null) out.installNeeded.push(jobLabel(slug));
+    if (dryRun) continue;
+    lint(text);
+    mkdirSync(launchdDir, { recursive: true });
+    writeFileSync(path, text);
+    if (old !== null && !noReload && reload({ plist: path, label: jobLabel(slug), logFile: join(stateDir, "reload.log"), notifyDir })) out.reloaded.push(jobLabel(slug));
+  }
+  for (const label of moderatorPlists(launchdDir).filter((l) => !labels.has(l))) {
+    out.retired.push(label);
+    if (dryRun) continue;
+    moveToTrash(join(launchdDir, `${label}.plist`), trashDir);
+    moveToTrash(join(agentsDir, `${label}.plist`), trashDir);
+    retire({ label });
+  }
+  return out;
 }
 
 // ---- CLI ---------------------------------------------------------------------------------------------------------
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args = process.argv.slice(2);
   const opt = (name, dflt) => (args.includes(name) ? args[args.indexOf(name) + 1] : dflt);
-  const manifest = JSON.parse(readFileSync(join(ROOT, "games.manifest.json"), "utf8"));
-  const stateDir = opt("--state-dir", process.env.MODERATOR_STATE_DIR || join(CHALANT, "logs", "promptocracy-moderator"));
-  const plist = opt("--plist", join(CHALANT, "launchd", `${LABEL}.plist`));
+  const notifyDir = opt("--notify-dir", join(CHALANT, "_notifications"));
   if (args.includes("--reload-now")) {
-    const ok = await reloadNow({ plist, notifyDir: opt("--notify-dir", join(CHALANT, "_notifications")) });
+    const ok = await reloadNow({ plist: opt("--plist"), label: opt("--label", LABEL), notifyDir });
     console.log(JSON.stringify({ at: new Date().toISOString(), reloaded: ok }));
     process.exit(ok ? 0 : 1);
   }
-  // The plist is what this writes: check it is there before any network read (a missing file would fail after one).
-  if (!existsSync(plist)) { console.error(`schedule: no plist at ${plist}`); process.exit(1); }
+  const manifest = JSON.parse(readFileSync(join(ROOT, "games.manifest.json"), "utf8"));
+  const stateDir = opt("--state-dir", process.env.MODERATOR_STATE_DIR || join(CHALANT, "logs", "promptocracy-moderator"));
+  const launchdDir = opt("--launchd-dir", join(CHALANT, "launchd"));
   const slugs = moderatedSlugs(manifest, { envFile: opt("--tokens-from", join(CHALANT, ".env")) });
   try {
-    const r = await refreshSchedule({ manifest, slugs, stateDir, plist, notifyDir: opt("--notify-dir", join(CHALANT, "_notifications")), noReload: args.includes("--no-reload"), dryRun: args.includes("--dry-run") });
-    console.log(JSON.stringify({ at: new Date().toISOString(), games: slugs, entries: r.register.entries.length, plist_changed: r.changed, reloaded: r.reloaded }));
+    const r = await refreshSchedule({ manifest, slugs, stateDir, launchdDir, agentsDir: opt("--agents-dir", join(homedir(), "Library", "LaunchAgents")), trashDir: opt("--trash-dir", join(homedir(), ".Trash")), notifyDir, noReload: args.includes("--no-reload"), dryRun: args.includes("--dry-run") });
+    console.log(JSON.stringify({ at: new Date().toISOString(), games: slugs, plists_changed: r.changed, reloaded: r.reloaded, install_needed: r.installNeeded, retired: r.retired }));
+    if (r.installNeeded.length || r.retired.length) console.log("schedule: run ~/chalantbot/scripts/install-launchd.sh to load new jobs (retired ones are already booted out)");
   } catch (e) {
     console.error(`schedule: ${String(e.message || e).slice(0, 400)}`);
     process.exit(1);
