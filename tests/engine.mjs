@@ -77,11 +77,11 @@ check("spawnTile: returns one of the candidates (a copy), null for no room, and 
   const off = throws(() => assembleRules([m(505, { spawnTile: () => ({ x: 9, y: 9, z: 0 }) })]).spawnTile(ctx, cand));
   return J(ok) === '{"x":3,"y":4,"z":0}' && none === null && off instanceof RuleError;
 })());
-check("hooks not wired yet (voteMark, tally ...) are accepted, never called, and need no implementer yet", (() => {
-  let called = false;
-  const rs = assembleRules([m(202, { tally: () => { called = true; }, dayEnd: () => [] }), one]);
-  rs.actionAllowed(ctx, A, { kind: "move" }); rs.afterAction(ctx, A, { kind: "move" });
-  return !called && Object.values(HOOKS).filter((h) => !h.wired).length === 6;
+check("a module implementing a hook the engine doesn't run yet (tally, dayEnd ...) is refused, so it can't bundle and silently do nothing", (() => {
+  const problems = throws(() => assembleRules([m(202, { tally: () => 1, dayEnd: () => [] }), one]))?.problems ?? [];
+  return problems.some((x) => /tally is not run by the engine yet/.test(x)) && problems.some((x) => /dayEnd is not run by the engine yet/.test(x)) &&
+    throws(() => defineRule({ rule: 202, voteMark: () => "majority" })) instanceof RuleSetError &&
+    Object.values(HOOKS).filter((h) => !h.wired).length === 6;
 })());
 check("a bad module is refused: unknown hook, non-function hook, rule number missing or out of range, the same rule twice", (() => {
   const p = (mods) => throws(() => assembleRules(mods))?.problems ?? [];
