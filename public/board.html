@@ -214,7 +214,7 @@
     showNotice();
     CARDS = createCards({ root: $("mroot"), describe });   // closing a card keeps what you were writing: it is there when the card opens again
     BAL = createBallot({ api, pill: by => pill(by, false), refreshed: refresh, player: () => !!(ME && ME.player) });
-    PROP = createProposer({ api, me: () => ME, day: () => DAY, pill, vote: (n, o) => BAL.box(n, o), refresh: async () => { await refresh(); loadNotes(); } });
+    PROP = createProposer({ api, me: () => ME, day: () => DAY, pill, vote: n => BAL.box(n), refresh: async () => { await refresh(); loadNotes(); } });
     drawTabs(); drawBook();
     loadMe();
     const [g] = await Promise.all([api("/api/game"), loadDay()]);
@@ -269,7 +269,7 @@
     if (mine) return `<section class="sw pro" id="spropose" aria-label="Your proposal"><div class="swh"><h2>Your proposal, 1 of 1 today</h2></div>${PROP.chgFor(mine)}</section>`;
     const ended = !!(DAY && DAY.you && DAY.you.ended);
     if (ended || (DAY && DAY.locked)) return `<section class="sw pro" id="spropose" aria-label="No proposal today"><div class="swh"><h2>No proposal today</h2><span class="m">0 of 1 today</span></div></section>`;
-    const why = active ? c.reason : !ME ? "Log in to propose." : DATA && DATA.game.status === "setup" ? "The game has not started yet." : "You are not a player in this game.";
+    const why = active ? c.reason : DATA && DATA.game.status === "setup" ? "The game has not started yet." : "";
     const off = active && c.allowed ? "" : ` disabled title="${esc(why)}"`;
     return `<section class="sw pro" id="spropose" aria-label="Propose a change"><div class="swh"><h2>Propose a change</h2><span class="m">0 of 1 today</span></div>
       <div class="ptiles"><button type="button" class="ptile" data-tab="rules"${off}><span class="pt2">Rulebook</span><span class="pm2">${BOOK && BOOK.count() ? plural(BOOK.count(), "rule") : ""}</span><span class="pa2">+ Change or add a rule</span></button>
@@ -333,7 +333,7 @@
         if (votedCount() < bl.length) left.push(plural(bl.length - votedCount(), "vote"));
         if (!you.proposed) left.push("your proposal");
         const skips = left.join(", ").replace(/, ([^,]*)$/, " and $1");
-        html += `<div class="dask" role="group" aria-label="End turn"><span>${left.length ? `You skip ${skips}. ` : ""}Ending your turn locks day ${esc(DAY.day)} now. It is final.</span><span class="row"><button type="button" class="btn small" data-endturn="yes">End turn</button><button type="button" class="linkbtn" data-endturn="no">Keep playing</button></span></div><div id="day-msg" role="status"></div>`;
+        html += `<div class="dask" role="group" aria-label="End turn"><span>${left.length ? `You skip ${skips}.` : ""}</span><span class="row"><button type="button" class="btn small" data-endturn="yes">End turn</button><button type="button" class="linkbtn" data-endturn="no">Keep playing</button></span></div><div id="day-msg" role="status"></div>`;
       } else html += '<div id="day-msg" role="status"></div>';
       box.innerHTML = html;
     }
@@ -429,7 +429,7 @@
   }
   // What can the person looking do right now? One move a day, none after End turn or during the lock (/api/day says).
   function myMove() {
-    if (!ME || !ME.player || !DATA) return { ok: false, why: ME ? "" : "Log in to play." };
+    if (!ME || !ME.player || !DATA) return { ok: false, why: "" };
     const g = DATA.game;
     if (g.status === "setup") return { ok: false, why: "The game has not started yet." };
     if (g.status !== "playing" || !DAY || !DAY.you) return { ok: false, why: "" };
@@ -453,7 +453,7 @@
     else if (DAY && DAY.you && DAY.you.ended) lead = `<div class="mb"><span>No move today</span></div>`;
     else if (g && g.status === "setup") lead = `<div class="mb"><span><b>Setting up.</b> ${plural((DATA.players || []).length, "player")} of ${esc(g.max_players)} joined.</span></div>`;
     else if (DAY && DAY.locked) lead = `<div class="mb"><span class="hint">The day is being processed.</span></div>`;
-    else if (!ME) lead = `<div class="mb"><span class="hint">Log in to play.</span></div>`;
+    else if (!ME) lead = `<div class="mb"></div>`;
     else if (move.ok) lead = `<div class="mb"><span class="hint">You have not moved today.</span></div>`;   // a state, not an instruction: the dashed tiles say where
     else lead = `<div class="mb"><span class="hint">${esc(move.why || "")}</span></div>`;
     box.innerHTML = lead + `<span class="slot" data-slot="bar-action"></span><span class="mbr"><button class="linkbtn" id="board-toggle" type="button" aria-expanded="${BOARD_OPEN}">${BOARD_OPEN ? "Hide board" : "Show board"}</button></span>`;

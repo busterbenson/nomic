@@ -33,7 +33,7 @@ export function createBallot({ api, pill, refreshed, player = () => true }) {
   const firstOpen = () => { const l = items(); const f = l.find((i) => !i.your_vote) || l[0]; return f ? f.n : null; };
 
   /** @rule 104.3, 104.4 */
-  function box(n, { note = false } = {}) {
+  function box(n) {
     const it = find(n);
     if (!it) return "";
     const can = it.can_vote && it.can_vote.allowed;
@@ -44,7 +44,7 @@ export function createBallot({ api, pill, refreshed, player = () => true }) {
     const m = MSG && MSG.n === n ? `<p class="vmsg${MSG.err ? " err" : ""}" role="status">${esc(MSG.text)}</p>` : '<p class="vmsg" role="status"></p>';
     if (!player()) return `<div class="vbox" data-vbox="${esc(n)}"><p class="vturn mono">${t.voted} of ${t.of} voted${who ? `: ${who}` : ""}</p></div>`;
     return `<div class="vbox" data-vbox="${esc(n)}"><div class="vbtns" role="group" aria-label="Vote on ${esc(n)}">${btn("yes")}${btn("no")}</div>
-<p class="vturn mono">${t.voted} of ${t.of} voted${who ? `: ${who}` : ""}</p>${can ? "" : `<p class="vwhy">${esc((it.can_vote && it.can_vote.reason) || "")}</p>`}${note ? '<p class="vnote">Results at midnight. Not voting counts as no.</p>' : ""}${m}</div>`;
+<p class="vturn mono">${t.voted} of ${t.of} voted${who ? `: ${who}` : ""}</p>${can ? "" : `<p class="vwhy">${esc((it.can_vote && it.can_vote.reason) || "")}</p>`}${m}</div>`;
   }
 
   /** @rule 104.3 */

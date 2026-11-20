@@ -6,7 +6,7 @@
 //     me() / day()       the last /api/me and /api/day (day().you.can.propose says whether proposing is allowed, and why not)
 //     refresh()          reload the page's state after a confirm or a withdraw (it calls P.load() and P.redraw())
 //     pill(by, mine)     the page's player pill (piece + name) for a proposer {name, color}; optional
-//     vote(n, opts)      the vote box HTML for an item on today's ballot (ballot.js), drawn in its tracked change; optional
+//     vote(n)            the vote box HTML for an item on today's ballot (ballot.js), drawn in its tracked change; optional
 //   P.load()             fetch GET /api/proposals
 //   P.attach({ RB, redraw, openAdd, openPick, closeAdd })   rulebook.js: the parsed rules, a redraw, and how to open the "add a rule" and "which block" cards
 // Drafting is free and repeatable; only confirming counts. Nothing here decides what is allowed: the server's answers
@@ -119,7 +119,7 @@ export function createProposer({ api, me, day, refresh, pill, vote }) {
     const w = waiting && p.mine && canWithdraw() ? `<button class="linkbtn" type="button" data-p="withdraw" data-id="${esc(p.id)}">Withdraw</button>` : "";
     const err = S.ui && S.ui.wErr && S.ui.wId === p.id ? `<p class="notice err" role="alert">${esc(S.ui.wErr)}</p>` : "";
     return `<div class="chg${waiting ? " mine" : ""}" data-pn="${esc(p.n || "")}"><div class="ch">${pPill(p)}${playerPill(p)}<span class="pill ${waiting ? "drafting" : "bal"}">${waiting ? "On tomorrow's ballot" : "On today's ballot"}</span>${w}</div>
-<p class="mono head">${esc(p.head || "")}</p><p class="cdiff">${diffOf(p)}</p>${settingsHTML(p)}${p.conflict_note ? `<p class="cnote">${withPills(p.conflict_note)}</p>` : ""}<p class="needline mono">${esc(needText(p))}</p>${waiting ? "" : `<div class="slot" data-slot="ballot-vote" data-pn="${esc(p.n || "")}">${vote ? vote(p.n, { note: true }) : ""}</div>`}${err}</div>`;
+<p class="mono head">${esc(p.head || "")}</p><p class="cdiff">${diffOf(p)}</p>${settingsHTML(p)}${p.conflict_note ? `<p class="cnote">${withPills(p.conflict_note)}</p>` : ""}<p class="needline mono">${esc(needText(p))}</p>${waiting ? "" : `<div class="slot" data-slot="ballot-vote" data-pn="${esc(p.n || "")}">${vote ? vote(p.n) : ""}</div>`}${err}</div>`;
   }
 
   // ---- what a rule's card gets -------------------------------------------------------------------------------
@@ -171,7 +171,7 @@ export function createProposer({ api, me, day, refresh, pill, vote }) {
     } else {
       const lab = u.kind === "add" ? `A new rule for block ${esc(u.target)}, in your words`
         : u.kind === "addclause" ? `The new clause ${esc(nextClause(rule))}, in your words`
-        : u.prefilled ? "Edit the wording: change what you want, keep the rest." : "What should change? Plain words are fine.";
+        : u.prefilled ? "The new wording" : "What should change?";
       const mode = u.kind === "amend" ? `<button type="button" class="linkbtn" data-p="mode">${u.prefilled ? "Describe the change in my own words" : "Edit the wording instead"}</button>` : "";
       field = `<label for="pfWords">${lab}</label><textarea id="pfWords" maxlength="2000"${u.prefilled ? ' rows="7" class="prefill"' : ' rows="4"'}${off}>${esc(u.words || "")}</textarea>${mode}`;
     }
@@ -223,7 +223,7 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
   function addFlowHTML(sec) {
     const m = mine(), c = can(), u = S.ui;
     if (m && m.kind === "add" && m.target === sec.num) return chgHTML(m);
-    if (m) return `<p class="mnote">You have already proposed today (${esc(m.n)}). One proposal a day.</p>`;
+    if (m) return `<p class="mnote">You have already proposed today (${esc(m.n)}).</p>`;
     if (!c.allowed) return `<p class="mnote">${esc(c.reason || "You can't propose right now.")}</p>`;
     // Drawing never changes what you are writing (a card on the Back stack is drawn too): no flow yet is a button that starts one.
     if (!(u && u.kind === "add" && u.rule === sec.num)) return `<button type="button" class="btn ghost small" data-p="add" data-n="${esc(sec.num)}">Write a new rule</button>`;
@@ -243,7 +243,7 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
     let html;
     if (m) html = `<p>You proposed ${pPill(m)} today. It is on tomorrow's ballot (rule ${rpill("103.2")}).</p>`;
     else if (!c.allowed) html = `<p>${esc(c.reason || "You can't propose right now.")}</p>`;
-    else html = `<p><b>You haven't proposed a change today.</b> Pick a rule to change, or propose a new one.</p><button type="button" class="btn ghost small" data-p="pickblock">Propose a new rule</button>`;
+    else html = `<p><b>You haven't proposed a change today.</b> </p><button type="button" class="btn ghost small" data-p="pickblock">Propose a new rule</button>`;
     return `<div class="rbanner${m || !c.allowed ? " done" : ""}" id="rb-banner">${html}</div>`;
   }
 
