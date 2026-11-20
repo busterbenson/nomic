@@ -195,9 +195,13 @@ try {
 
   console.log("one vote per player per item, however many arrive at once");
   const burst = await Promise.all(["yes", "no", "yes", "no", "yes", "no"].map((x) => vote(bo, "P1", x)));
-  check("six votes from Bo on P1 at once: all answer 200, and exactly one row is kept, holding one of them; all six are logged",
-    burst.every((r) => r.status === 200) && voteRows(1).filter((r) => r.who === "Bo").length === 1 &&
-    d1(state, `SELECT COUNT(*) AS n FROM vote_events e WHERE e.player_id = '${idOf("Bo")}'`)[0].n === 6, burst.map((r) => r.status).join());
+  const boEvents = () => d1(state, `SELECT COUNT(*) AS n FROM vote_events e WHERE e.player_id = '${idOf("Bo")}'`)[0].n;
+  const burstEvents = boEvents();
+  check("six votes from Bo on P1 at once: all answer 200, and exactly one row is kept, holding one of them; each change is logged (1 to 6 rows, by arrival order)",
+    burst.every((r) => r.status === 200) && voteRows(1).filter((r) => r.who === "Bo").length === 1 && burstEvents >= 1 && burstEvents <= 6, burst.map((r) => r.status).join() + " events " + burstEvents);
+  const same = voteRows(1).find((r) => r.who === "Bo").vote;
+  const again = await vote(bo, "P1", same);
+  check("repeating the vote that stands answers 200 and logs nothing more", again.status === 200 && boEvents() === burstEvents, again.text);
 
   console.log("the rest of day 2's voting");
   check("bad votes are refused: no such proposal (404), not yes or no (400; there is no abstain), signed out (401)",

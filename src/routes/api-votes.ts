@@ -35,10 +35,10 @@ export async function castVote(ctx: Ctx, player: any, body: any, nowMs: number):
   const now = nowIso(nowMs);
   const guard = [game.id, ...dayOpenBinds(game.day, nowMs, player.id), q.id, player.id];
   const res = await env.DB.batch([
+    env.DB.prepare(VOTE_EVENT_SQL).bind(q.id, player.id, body.vote, now, ...guard, q.id, player.id, body.vote),
     env.DB.prepare(VOTE_SQL).bind(game.id, q.id, player.id, body.vote, now, now, ...guard),
-    env.DB.prepare(VOTE_EVENT_SQL).bind(q.id, player.id, body.vote, now, ...guard),
   ]);
-  if (!(res[0]?.meta?.changes > 0)) return { status: 409, body: { error: "The day changed under you. Reload and try again." } };
+  if (!(res[1]?.meta?.changes > 0)) return { status: 409, body: { error: "The day changed under you. Reload and try again." } };
   return { status: 200, body: { ok: true, proposal: `P${q.number}`, vote: body.vote, message: voteToast(q.number, body.vote) } };
 }
 

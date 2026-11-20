@@ -53,7 +53,9 @@ const GUARD = `g.id = ? AND ${dayOpenSql}
 export const VOTE_SQL = `INSERT INTO votes (game_id, proposal_id, player_id, day, vote, cast_at, updated_at)
   SELECT ?, ?, ?, g.day, ?, ?, ? FROM games g WHERE ${GUARD}
   ON CONFLICT (proposal_id, player_id) DO UPDATE SET vote = excluded.vote, updated_at = excluded.updated_at`;
-// The same guard, for the vote's log row in the same batch. Binds: proposal_id, player_id, vote, at, game_id, then
-// dayOpenBinds, then proposal_id, player_id.
+// The vote's log row, run just BEFORE VOTE_SQL in the same batch, with the same guard: one row per cast or change, none
+// for a vote that repeats the one already standing. Binds: proposal_id, player_id, vote, at, game_id, then
+// dayOpenBinds, then proposal_id, player_id, then proposal_id, player_id, vote.
 export const VOTE_EVENT_SQL = `INSERT INTO vote_events (game_id, proposal_id, player_id, day, vote, at)
-  SELECT g.id, ?, ?, g.day, ?, ? FROM games g WHERE ${GUARD}`;
+  SELECT g.id, ?, ?, g.day, ?, ? FROM games g WHERE ${GUARD}
+    AND NOT EXISTS (SELECT 1 FROM votes v WHERE v.proposal_id = ? AND v.player_id = ? AND v.vote = ?)`;
