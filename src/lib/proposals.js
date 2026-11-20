@@ -179,8 +179,7 @@ export function conflictCandidates(book, target, words = "") {
   const targetRaw = node.kind === "clause" ? node.paras.map(paraTxt).join(" ") : [...node.paras.map(paraTxt), ...node.clauses.flatMap((c) => c.paras.map(paraTxt))].join(" ");
   const out = new Map();   // num -> why (the first reason wins)
   // A fixed part (rule 110.1) is never offered: naming one as a conflict refuses the whole draft, and a change that touches one directly is refused by fixedRefusal already.
-  const fixed = new Set(fixedParts(book));
-  const add = (num, why) => { if (!out.has(num) && has(book, num) && !own(num) && !fixed.has(num)) out.set(num, why); };
+  const add = (num, why) => { if (!out.has(num) && has(book, num) && !own(num) && !fixedWhole(book, num)) out.set(num, why); };
   for (const n of referencesTo(book, target)) add(n, `cites ${target}`);
   for (const n of citedIn(`${targetRaw} ${words}`)) add(n, `the text cites it`);
   const keys = new Set(settingKeysIn(targetRaw));
@@ -259,6 +258,9 @@ const fixedWhole = (book, n) => {
   const r = book.byNum[n];
   return r?.kind === "rule" && !r.paras.length && r.clauses.length > 0 && r.clauses.every((c) => fixedParts(book).includes(c.num));
 };
+// A value with its object keys in order, so two spellings of one value compare equal.
+/** @rule 103.1 */
+const canon = (v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
 // Is this a value the game can run for this setting (the same checks the game's own settings go through)?
 /** @rule 103.1 */
 function settingValueOk(key, v) {
@@ -405,7 +407,7 @@ export function readModelAnswer(book, req, raw) {
     const flat = v !== null && typeof v === "object" && !Array.isArray(v) && Object.values(v).every((x) => ["string", "number", "boolean"].includes(typeof x));
     if (!["string", "number", "boolean"].includes(typeof v) && !flat) return { error: "malformed" };
     // Structured output may fill settings the words never mentioned with the game's defaults: that asks for nothing.
-    if (!tags.has(k) && JSON.stringify(v) === JSON.stringify(DEFAULT_SETTINGS[k])) continue;
+    if (!tags.has(k) && JSON.stringify(canon(v)) === JSON.stringify(canon(DEFAULT_SETTINGS[k]))) continue;
     if (!tags.has(k)) return refuse("scope", `The words also change ${k}, which ${req.target} doesn't name. Change one thing at a time.`);
     if (!settingValueOk(k, v)) return refuse("setting", `The game can't run ${k} as ${JSON.stringify(v)}.`);
     settings[k] = v;

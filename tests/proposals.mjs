@@ -259,7 +259,10 @@ console.log("the drafter upgrades: the 110.1 floor on a game that lacks the clau
   check("settings structured output filled with the game's defaults for settings the words never named are ignored, the one asked for stays", !filled.error && J(filled.settings) === J({ "board.chart_radius": 3 }), J(filled));
   check("an unnamed setting set to something other than its default is still refused as scope",
     readModelAnswer(RB, rq("504.2", "x"), '{"after_text": "When you move, tiles near you are charted.", "conflicts": [], "settings": {"max_players": 3}}').reason === "scope");
-  check("fixed parts (110.1, 202.4) are never offered as candidates: naming one would refuse the draft", !nums("202", "tidy it").some((n) => fixedParts(RB).includes(n)) && !nums("203.1", "x").includes("110.1"), J([nums("202", "tidy it"), nums("203.1", "x")]));
+  check("fixed parts (110.1, 202.4) and rules made only of them (110) are never offered as candidates: naming one would refuse the draft",
+    !nums("202", "tidy it").some((n) => fixedParts(RB).includes(n)) && !nums("203.1", "x").includes("110.1") && ["103.1", "103.4", "105.1", "101", "104"].every((t) => !nums(t, "the day and the proposals and the votes").includes("110")), J(["103.1", "104"].map((t) => nums(t, "the day and the proposals and the votes"))));
+  const island = readModelAnswer(RB, rq("504.2", "x"), '{"after_text": "When you move, tiles near you are charted.", "conflicts": [], "settings": {"board.island": {"height": 8, "width": 8}}}');
+  check("an untagged setting at its default is ignored whatever order its fields come in", !island.error && J(island.settings) === "{}", J(island));
 
   // The drafter's request (src/lib/drafter.ts), with fetch captured: no network, no key.
   const { build } = await import("esbuild");
@@ -276,8 +279,8 @@ console.log("the drafter upgrades: the 110.1 floor on a game that lacks the clau
   const F = (v) => J(drafter.drafterFlags({ DRAFTER_FLAGS: v }));
   check("DRAFTER_FLAGS: a comma list turns exactly those on, 'none' turns all off, '-name' removes one from the default",
     F("candidates,cache") === J({ candidates: true, cache: true, structured: false }) && F("none") === J({ candidates: false, cache: false, structured: false }) &&
-    F("-cache") === J({ ...drafter.DEFAULT_FLAGS, cache: false }) && F("") === J(drafter.DEFAULT_FLAGS) && F("nonsense") === F("none"));
-  check("the default levers: candidates and structured on, caching off (a cache write costs more than it saves when drafts are minutes apart)", J(drafter.DEFAULT_FLAGS) === J({ candidates: true, cache: false, structured: true }));
+    F("-cache") === J({ ...drafter.DEFAULT_FLAGS, cache: false }) && F("") === J(drafter.DEFAULT_FLAGS) && F("nonsense") === F("") && F("-structured") === J({ candidates: true, cache: false, structured: false }) && F("NONE") === F("none"));
+  check("the default levers: candidates on; structured off until a setting's number in the text stays in step (chart radius 3); caching off (a write costs more than it saves when drafts are minutes apart)", J(drafter.DEFAULT_FLAGS) === J({ candidates: true, cache: false, structured: false }));
   const plainReq = await sentWith("none"), allReq = await sentWith("candidates,cache,structured");
   check("with every lever off the request is what it was: a string user message, effort low, no format", typeof plainReq.messages[0].content === "string" && plainReq.output_config.effort === "low" && !("format" in plainReq.output_config) && !/Parts the code found/.test(plainReq.messages[0].content));
   check("with caching the instructions come first and the rulebook is its own block ending in the cache breakpoint; the player's words are in the last block, after it",
@@ -296,14 +299,16 @@ console.log("the drafter upgrades: the 110.1 floor on a game that lacks the clau
     try { outcome = (await drafter.draftRewording({ MODEL_API_KEY: "stub-key-not-real", DRAFTER_FLAGS: flags }, RB, readFileSync(pjoin(ROOT, "tests/fixtures/rickshaw-day-0.2/RULES.md"), "utf8"), r)).conflicts; } catch (e) { outcome = e.code; } finally { globalThis.fetch = real; console.error = err; }
     return { seen, outcome };
   };
+  const cachedRetry = await seq("cache,structured,candidates", [400, 200]);
+  check("the schema retry keeps the cache block and the candidates, and drops only the format", cachedRetry.seen.length === 2 && J(cachedRetry.seen[0].messages) === J(cachedRetry.seen[1].messages) && Array.isArray(cachedRetry.seen[1].messages[0].content) && !("format" in cachedRetry.seen[1].output_config));
   const retried = await seq("structured", [400, 200]), notRetried = await seq("none", [400, 200]), twice = await seq("structured", [400, 400]);
   check("the API refusing the schema (400) is asked again once without it, and that answer is used", retried.seen.length === 2 && "format" in retried.seen[0].output_config && !("format" in retried.seen[1].output_config) && J(retried.outcome) === J(["301"]), J(retried.outcome));
   check("a 400 with no schema is a failure at once (no second request), and a second 400 is a failure after exactly one retry", notRetried.seen.length === 1 && notRetried.outcome === "failed" && twice.seen.length === 2 && twice.outcome === "failed");
   const errs = []; const realErr = console.error; console.error = (...x) => errs.push(x.join(" "));
   const mixed = F("candidates,-cache"), spaced = F(" Cache , STRUCTURED "), typo = F("cahce");
   console.error = realErr;
-  check("DRAFTER_FLAGS: a list with a plus name is exactly those on ('candidates,-cache' = candidates only), spaces and case don't matter, a misspelt name turns nothing on and says so",
-    mixed === J({ candidates: true, cache: false, structured: false }) && spaced === J({ candidates: false, cache: true, structured: true }) && typo === F("none") && errs.some((e) => /unknown DRAFTER_FLAGS name cahce/.test(e)), J(errs));
+  check("DRAFTER_FLAGS: a list with a plus name is exactly those on ('candidates,-cache' = candidates only), spaces and case don't matter, a misspelt name changes nothing and says so",
+    mixed === J({ candidates: true, cache: false, structured: false }) && spaced === J({ candidates: false, cache: true, structured: true }) && typo === F("") && errs.some((e) => /unknown DRAFTER_FLAGS name cahce/.test(e)), J(errs));
 }
 
 // ---------------------------------------------------------------- migration 0006 on a database with data
