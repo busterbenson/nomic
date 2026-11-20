@@ -6,7 +6,7 @@ import re, sys
 from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
 
-base, out, cookie, sam_cookie = sys.argv[1:5]
+base, out, cookie, sam_cookie, dee_cookie = sys.argv[1:6]
 host = urlparse(base).hostname
 failed = []
 SLUG = "chrome"
@@ -131,7 +131,7 @@ with sync_playwright() as pw:
     page.click("#me-chip"); page.wait_for_selector("#acct:not([hidden])")
     am = text(page, "#acct")
     check("S1-ACC-01: the menu has the name, color and points, Your player card and Log out", "Ada" in am and "Teal · 0 points" in am and "Your player card" in am and "Log out" in am, am)
-    check("S1-ACC-02: no Invite or Connect your AI in the menu, the header or the Players aside; no Settings (invite links per player have no backend yet)", not re.search(r"Invite|Connect your AI|Settings", text(page, "header") + text(page, "aside")), text(page, "header"))
+    check("S1-ACC-02: no Connect your AI in the menu, the header or the Players aside; no Settings (Invite a friend only in a game in setup, checked below) (invite links per player have no backend yet)", not re.search(r"Invite|Connect your AI|Settings", text(page, "header") + text(page, "aside")), text(page, "header"))
     page.click("#bell"); page.wait_for_timeout(200)
     check("opening the bell leaves focus on the bell (the header is redrawn under it)", page.evaluate("document.activeElement && document.activeElement.id") == "bell")
     check("S1-ACC-03: opening the bell closes the account menu", page.locator("#acct").is_hidden() and page.locator("#notes-panel").is_visible())
@@ -513,6 +513,29 @@ with sync_playwright() as pw:
     turn_ended = [("Turn ended" in x) for x in ([first, second] if you else [second, first])]   # [the viewer's card, the other Sam's]
     check("two players named Sam: only the one who ended their turn says so, in their card (matched by color)", turn_ended == [False, True], f"{first} | {second}")
     check("two players named Sam: no page errors", not errors, str(errors))
+    c.close()
+
+    # ================= Invite a friend: the account menu of a player in a game still in setup =================
+    for w, h, scheme in [(1280, 900, "light"), (390, 844, "dark")]:
+        c = b.new_context(viewport={"width": w, "height": h}, color_scheme=scheme, permissions=["clipboard-read", "clipboard-write"])
+        c.add_cookies([{"name": "s", "value": dee_cookie, "domain": host, "path": "/setup"}]); page = c.new_page()
+        errors = []; page.on("pageerror", lambda e: errors.append(str(e))); page.on("console", lambda m: errors.append("console: " + m.text) if m.type == "error" else None)
+        page.goto(base + "/setup/"); page.wait_for_selector("#scores li"); page.wait_for_selector("#me-chip"); page.wait_for_timeout(500)
+        page.click("#me-chip"); page.wait_for_selector("#acct:not([hidden])")
+        has = page.locator("#acct .acct-invite").count() == 1
+        val = page.input_value("#invite-url") if has else ""
+        check(f"invite {w}: a signed-in player in a game in setup sees 'Invite a friend', the join link and Copy, and nothing else", has and text(page, "#acct .acct-invite").startswith("Invite a friend") and re.fullmatch(r"https?://[^/]+/setup/join/\S+", val) is not None and text(page, "#acct .acct-invite .btn") == "Copy")
+        page.click("#invite-copy"); page.wait_for_timeout(200)
+        clip = page.evaluate("navigator.clipboard.readText()")
+        check(f"invite {w}: Copy puts the link on the clipboard and the button says Copied", clip == val and text(page, "#invite-copy") == "Copied")
+        sideways(page, w, f"invite {w}")
+        if out != "-":
+            page.add_style_tag(content="#invite-url{filter:blur(7px)}")   # the join code is a secret: never in a screenshot
+            page.screenshot(path=f"{out}/invite-menu-{w}-{scheme}.png", clip={"x": 0, "y": 0, "width": w, "height": 420})
+        check(f"invite {w}: no page errors", not errors, str(errors)); c.close()
+    c, page, errors = new_page(b, 1280, 900, "light")
+    page.click("#me-chip"); page.wait_for_selector("#acct:not([hidden])")
+    check("invite: in a game that has started (Ada) the account menu has no 'Invite a friend'", page.locator("#acct .acct-invite").count() == 0 and "Invite" not in text(page, "#acct"))
     c.close()
 
     # ================= logged out, and a game still being set up =================

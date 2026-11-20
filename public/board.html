@@ -95,7 +95,7 @@
     let data = null; try { data = await res.json(); } catch (e) {}
     return { ok: res.ok, status: res.status, data };
   };
-  let ME = null, DATA = null;   // who is looking, and the last /api/game
+  let ME = null, DATA = null, INVITE = null;   // who is looking, and the last /api/game
   let DAY = null, END_ASK = false, DAY_AT = 0, DAY_TIMER = 0, DAY_TICK = 0;   // the last /api/day, the End turn confirm, when it was fetched
   let PROP = null, BAL = null, BOOK = null, CARDS = null;   // the proposal controller (propose.js), the mounted rulebook, the card host
   let BOARD = null, SEL = null, VIEW = null;   // the last /api/board, the selected tile {x,y}, the drawn board
@@ -118,9 +118,15 @@
 
   // ---- the header: the bell and the account chip (one panel open at a time; click-out and Esc close it) -----------------
   const BELL = '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4z M10 21h4" style="fill:none;stroke:var(--ink);stroke-width:2;stroke-linejoin:round"/></svg>';
+  // The game's join link, for a player of this game while it is in setup with a seat free (/api/invite says null otherwise).
+  async function loadInvite() {
+    INVITE = null;
+    if (ME && ME.player) { const r = await api("/api/invite"); INVITE = r.ok && r.data && r.data.url ? r.data.url : null; }
+  }
   async function loadMe() {
     const me = await api("/api/me");
     ME = me.ok ? me.data : null;
+    await loadInvite();
     if (PROP) PROP.redraw();
     if (VIEW && ME && ME.player) VIEW.setMe(ME.player.color.key);
     drawWho();
@@ -148,7 +154,14 @@
     const p = ME && ME.player;
     $("acct").innerHTML = ME ? `<div class="acct-me">${p ? `<span class="dot" style="background:${hexOf(p.color)};width:22px;height:22px"></span>` : ""}<span><b>${esc(ME.user.name)}</b>${p ? `<small>${esc(p.color.name)} · ${plural(p.score, "point")}</small>` : ""}</span></div>
       ${p ? `<button type="button" class="acct-link" data-pl="${esc(p.color.key)}" data-fromacct="1">Your player card</button>` : ""}
+      ${p && INVITE ? `<div class="acct-invite"><span>Invite a friend</span><span class="row"><input id="invite-url" type="text" readonly value="${esc(INVITE)}" aria-label="Invite a friend: join link"><button type="button" class="btn ghost small" id="invite-copy">Copy</button></span></div>` : ""}
       <button type="button" class="acct-link" id="logout">Log out</button>` : "";
+    const ic = $("invite-copy");
+    if (ic) ic.onclick = async () => {
+      const inp = $("invite-url");
+      try { await navigator.clipboard.writeText(INVITE); } catch (e) { inp.focus(); inp.select(); try { document.execCommand("copy"); } catch (e2) {} }   // no clipboard (or not allowed): the link is selected to copy by hand
+      inp.focus(); inp.select(); ic.textContent = "Copied";
+    };
     const lo = $("logout"); if (lo) lo.onclick = async () => { await api("/api/logout", {}); location.reload(); };
   }
   // Opening one closes the other; closing the bell marks what it showed as read (the badge clears when it opens, the tint stays while it is open).
@@ -498,6 +511,7 @@
   async function refresh() {
     const [g, b, me, d] = await Promise.all([api("/api/game"), api("/api/board"), api("/api/me"), api("/api/day")]);
     if (me.ok) ME = me.data; else ME = null;
+    await loadInvite();
     if (d.ok) { DAY = d.data; DAY_AT = Date.now(); }
     if (g.ok) { DATA = g.data; }
     if (b.ok) { BOARD = b.data; if (VIEW) VIEW.setData(b.data, myKey()); }
