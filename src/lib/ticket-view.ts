@@ -18,7 +18,7 @@ export function ticketView(r: any, viewerId?: string | null) {
     queue: r.queue_pos ?? null,
     by: { name: r.name, color: colorOf(r.color) },
     mine: !!viewerId && r.player_id === viewerId,
-    created_at: r.created_at, proposed_at: r.proposed_at ?? null, approved_at: r.approved_at ?? null,
+    created_at: r.created_at, changed_at: r.updated_at, proposed_at: r.proposed_at ?? null, approved_at: r.approved_at ?? null,
   };
 }
 

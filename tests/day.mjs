@@ -16,7 +16,7 @@ const check = (name, ok, detail = "") => {
   if (ok) { pass++; console.log(`  ok    ${name}`); } else { fail++; console.log(`  FAIL  ${name}${detail ? "  -> " + detail : ""}`); }
 };
 const J = JSON.stringify;
-const LOCK1 = "Chalant is processing day 1. Play resumes when it's done.";
+const LOCK1 = "The players are sleeping. Chalant is processing day 1; play resumes when it's done.";
 
 // ---------------------------------------------------------------- migration 0005 on a database with data
 console.log("migration 0005");

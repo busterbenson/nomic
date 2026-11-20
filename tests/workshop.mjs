@@ -4,9 +4,9 @@
 // thread (a visitor can't), and the MCP tools read the list and post. The pure parts first, then a real `wrangler dev` on a
 // LOCAL D1. Run: node tests/workshop.mjs  (migration 0009 itself is proved in tests/workshop-migration.mjs).
 import { createHash } from "node:crypto";
-import { dayOpenBinds } from "../src/lib/day-gate.js";
+import { dayOpenBinds, lockOpenBinds, lockOpenSql } from "../src/lib/day-gate.js";
 import { client, connect, createGame, d1, join, migrate, newState, freePort, startRulesStub, startServer, tool } from "./lib.mjs";
-import { EDIT_GUARD, LIMITS, canPost, confirmProblem, readFields, readMakes, readPost, ticketNumber } from "../src/lib/tickets.js";
+import { EDIT_GUARD, LIMITS, REOPEN_SQL, canPost, confirmProblem, readFields, readMakes, readPost, ticketNumber } from "../src/lib/tickets.js";
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = "") => { if (ok) { pass++; console.log(`  ok    ${name}`); } else { fail++; console.log(`  FAIL  ${name}${detail ? "  -> " + detail : ""}`); } };
@@ -53,7 +53,7 @@ try {
   const visitor = client(A);
   const id = Object.fromEntries(names.map((n) => [n, d1(state, `SELECT id FROM players WHERE game_id = '${gid}' AND display_name = '${n}'`)[0].id]));
   const score = (n) => d1(state, `SELECT score FROM players WHERE id = '${id[n]}'`)[0].score;
-  const cron = async () => { const r = await fetch(`${A}/__scheduled?cron=*/5+*+*+*+*`, { signal: AbortSignal.timeout(20000) }); await r.text(); return r.status; };
+  const cron = async () => { const u = `${A}/__scheduled?cron=*/5+*+*+*+*`; const r = await fetch(u, { signal: AbortSignal.timeout(20000) }).catch(() => fetch(u, { signal: AbortSignal.timeout(20000) })); await r.text(); return r.status; };
   const day = (n) => d1(state, `SELECT n, status, ends_at, deadline_at FROM days WHERE game_id = '${gid}' AND n = ${n}`)[0];
   const game = () => d1(state, `SELECT status, day, phase FROM games WHERE id = '${gid}'`)[0];
   const plus = (iso, min) => new Date(Date.parse(iso) + min * 60_000).toISOString();
@@ -169,7 +169,7 @@ try {
   await Cy.post(`/wk/api/proposals/${cyp.data.proposal.id}/confirm`, {});
   check("Cy's ordinary proposal is P4", prop(4)?.kind === "repeal");
   // The prices: Gremlin sets them later; for the count's sake Ana's commission costs 3 and she has 5.
-  // Bo's costs 7 and Bo has -3 points (rule modules can take a score below 0): the count must still finish, and pays what he has (nothing).
+  // Bo's costs 7 and Bo has -3 points (rule modules can take a score below 0): the count must still finish, and his ticket waits as Ready.
   d1(state, `UPDATE tickets SET price = 3, price_reason = 'Test price.' WHERE number = 3; UPDATE tickets SET price = 7 WHERE number = 2; UPDATE players SET score = 5 WHERE id = '${id.Ana}'; UPDATE players SET score = -3 WHERE id = '${id.Bo}'`);
 
   console.log("midnight: the ballot");
@@ -190,22 +190,29 @@ try {
   d1(state, `UPDATE games SET moderator_token_hash = '${createHash("sha256").update(TOKEN).digest("hex")}' WHERE id = '${gid}'`);
   const d2 = await midnight();
   check("P2 and P3 are approved (not 'passed': nothing for the moderator to apply); P4 passed", prop(2).status === "approved" && prop(3).status === "approved" && prop(4).status === "passed", J([prop(2), prop(3), prop(4)]));
-  check("W3 is Approved, first in the queue; W2 second; each with its log line", tk(3).state === "Approved" && tk(3).queue_pos === 1 && tk(2).state === "Approved" && tk(2).queue_pos === 2 &&
-    /Approved: P2 passed\. Paid 3 points\. Place 1 in the queue\./.test(d1(state, `SELECT text FROM ticket_log WHERE ticket_id = '${tk(3).id}' AND kind = 'approved'`)[0].text) &&
-    /Approved: P3 passed\. Paid 0 of 7 points\. Place 2 in the queue\./.test(d1(state, `SELECT text FROM ticket_log WHERE ticket_id = '${tk(2).id}' AND kind = 'approved'`)[0].text));
-  check("the price came out of Ana's points (5 to 2), once; Bo could not pay his 7 (he is at -3): the count finished, he paid 0 and his score is untouched, and the log says what was paid", score("Ana") === 2 && tk(3).paid === 3 && !!tk(3).paid_at && score("Bo") === -3 && tk(2).paid === 0, `${score("Ana")} ${score("Bo")}`);
-  check("the day's log says W3 was approved and who paid", d1(state, `SELECT text FROM events WHERE game_id = '${gid}' AND kind = 'commission_approved' ORDER BY id`).map((r) => r.text).join("|") === "W3 was approved. Ana paid 3 points.|W2 was approved.");
+  check("W3 (Ana can pay) is Approved, first in the queue, with its log line", tk(3).state === "Approved" && tk(3).queue_pos === 1 &&
+    /^Approved: P2 passed\. Paid 3 points\. Place 1 in the queue\.$/.test(d1(state, `SELECT text FROM ticket_log WHERE ticket_id = '${tk(3).id}' AND kind = 'approved'`)[0].text));
+  check("W2 (Bo has -3 of the 7 points it costs) is Ready: nothing paid, no place in the queue, and the log says why in plain words",
+    tk(2).state === "Ready" && tk(2).queue_pos === null && tk(2).paid === null && tk(2).paid_at === null && !!tk(2).decided_at && tk(2).approved_at === null &&
+    d1(state, `SELECT kind, text FROM ticket_log WHERE ticket_id = '${tk(2).id}' AND kind IN ('ready', 'approved')`).map((r) => `${r.kind}: ${r.text}`).join("|") === "ready: Ready: P3 passed. Bo has 0 of the 7 points it costs; it joins the queue when they can pay.", d1(state, `SELECT * FROM ticket_log WHERE ticket_id = '${tk(2).id}'`).map((r) => r.text).join("|"));
+  check("the price came out of Ana's points (5 to 2), once; Bo's score is untouched (-3): nothing is part-paid", score("Ana") === 2 && tk(3).paid === 3 && !!tk(3).paid_at && score("Bo") === -3, `${score("Ana")} ${score("Bo")}`);
+  check("the day's log says W3 was approved and who paid, and that W2 is ready and not paid; Bo is told in a notification",
+    d1(state, `SELECT text FROM events WHERE game_id = '${gid}' AND kind = 'commission_approved' ORDER BY id`).map((r) => r.text).join("|") === "W3 was approved. Ana paid 3 points." &&
+    d1(state, `SELECT text FROM events WHERE game_id = '${gid}' AND kind = 'commission_ready' ORDER BY id`).map((r) => r.text).join("|") === "W2 is ready, not yet paid: Bo has 0 of the 7 points it costs." &&
+    d1(state, `SELECT body FROM notifications WHERE player_id = '${id.Bo}' AND kind = 'commission_ready'`).map((r) => r.body).join("|") === "W2 is ready: P3 passed, but you have 0 of the 7 points it costs. It joins the queue when you can pay.");
   const pend = await rf(`${A}/wk/api/moderator/pending`, { headers: { authorization: `Bearer ${TOKEN}` } }).then((r) => r.json());
   check("the moderator's pending list has only P4: the commissions are left out", d2.status === "processing" && J(pend.job.passed.map((p) => p.number)) === J([4]) && !J(pend).includes("commission"), J(pend.job.passed.map((p) => [p.number, p.kind])));
   const claim = await rf(`${A}/wk/api/moderator/days/2/claim`, { method: "POST", headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" }, body: J({ sha: SHA1, outcomes: [{ number: 4, seq: 1, applied: true, commit: SHA1 }] }) });
   check("a claim names only P4 (naming a commission is refused: it is not a passed proposal)", claim.status === 200);
   const wrong = await rf(`${A}/wk/api/moderator/days/2/claim`, { method: "POST", headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" }, body: J({ sha: "b".repeat(40), outcomes: [{ number: 4, seq: 1, applied: true, commit: "b".repeat(40) }, { number: 2, seq: 2, applied: true, commit: "b".repeat(40) }] }) });
-  check("a claim that names a commission is refused (400)", wrong.status === 400 || wrong.status === 409);
+  const wrongReady = await rf(`${A}/wk/api/moderator/days/2/claim`, { method: "POST", headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" }, body: J({ sha: "b".repeat(40), outcomes: [{ number: 4, seq: 1, applied: true, commit: "b".repeat(40) }, { number: 3, seq: 2, applied: true, commit: "b".repeat(40) }] }) });
+  check("a claim that names a commission is refused (400), an approved one or the one whose ticket is Ready", (wrong.status === 400 || wrong.status === 409) && (wrongReady.status === 400 || wrongReady.status === 409));
   dev("bundle_sha:wk", SHA1);
   await cron();
-  check("the night completes on P4 alone: P4 enacted, day 2 done, day 3 open; nothing waits on the commissions", prop(4).status === "enacted" && day(2).status === "done" && game().day === 3 && prop(2).status === "approved" && tk(3).state === "Approved", J([day(2), game()]));
+  check("the night completes on P4 alone: P4 enacted, day 2 done, day 3 open; nothing waits on the commissions", prop(4).status === "enacted" && day(2).status === "done" && game().day === 3 && prop(2).status === "approved" && tk(3).state === "Approved" && tk(2).state === "Ready", J([day(2), game()]));
   await cron();
-  check("the cron again pays and approves nothing twice (Ana stays at 2; P4's 10 points were Cy's)", score("Ana") === 2 && score("Cy") === 10 && tk(3).queue_pos === 1 && d1(state, `SELECT COUNT(*) AS n FROM ticket_log WHERE kind = 'approved'`)[0].n === 2, `${score("Ana")}`);
+  check("the cron again pays and approves nothing twice (Ana stays at 2; P4's 10 points were Cy's), and W2 is still Ready with one log line",
+    score("Ana") === 2 && score("Cy") === 10 && tk(3).queue_pos === 1 && d1(state, `SELECT COUNT(*) AS n FROM ticket_log WHERE kind = 'approved'`)[0].n === 1 && d1(state, `SELECT COUNT(*) AS n FROM ticket_log WHERE kind = 'ready'`)[0].n === 1 && tk(2).state === "Ready", `${score("Ana")}`);
   const hist = (await Ana.get("/wk/api/ballot?day=2")).data.items.find((i) => i.kind === "commission" && i.ticket.n === "W3");
   check("the counted ballot shows the commission's result (passed, nothing applied) and the ticket's state", hist.status === "approved" && hist.result.passed === true && hist.result.applied === null && hist.ticket.state === "Approved" && hist.ticket.queue === 1, J(hist));
 
@@ -221,14 +228,14 @@ try {
   await yes(Ana, "P6", "no"); await yes(Bo, "P6", "no");
   const d3 = await midnight();
   check("P5 approved, P6 failed", prop(5).status === "approved" && prop(6).status === "failed", J([prop(5), prop(6)]));
-  check("the passed commission is third in the queue (first approved, first built, across nights); the failed one is Refused with the count's sentence",
-    tk(4).state === "Approved" && tk(4).queue_pos === 3 && tk(5).state === "Refused" && /Refused: P6 did not pass\. 0 of 3 voted yes; it needed 2\./.test(d1(state, `SELECT text FROM ticket_log WHERE ticket_id = '${tk(5).id}' AND kind = 'refused'`)[0].text), J([tk(4).queue_pos, tk(5).state]));
+  check("the passed commission is second in the queue (first approved, first built, across nights; the Ready ticket holds no place); the failed one is Refused with the count's sentence",
+    tk(4).state === "Approved" && tk(4).queue_pos === 2 && tk(2).queue_pos === null && tk(5).state === "Refused" && /Refused: P6 did not pass\. 0 of 3 voted yes; it needed 2\./.test(d1(state, `SELECT text FROM ticket_log WHERE ticket_id = '${tk(5).id}' AND kind = 'refused'`)[0].text), J([tk(4).queue_pos, tk(5).state]));
   check("a ballot with only commissions on it ends the night with no moderator: day 4 done, day 5 open, never 'processing'", d3.status === "done" && game().day === 5 && game().phase === "open", J([d3, game()]));
   check("a refused ticket's requester paid nothing (Cy keeps the 10 points P4 gave)", score("Cy") === 10 && tk(5).paid === null);
 
   console.log("the list and the page");
   const list = (await visitor.get(T)).data.tickets;
-  check("the list (public): newest first; number, title, requester, state, estimate, price; no ids or emails", list.map((t) => t.n).join() === "W5,W4,W3,W2,W1" && list[2].title === "A dragon" && list[2].state === "Approved" && list[2].estimate === 2 && list[2].price === 3 && list[2].by.name === "Ana" && !/@example\.com/.test(J(list)) && !J(list).includes(id.Ana) && !J(list).includes("proposal_id"), J(list[2]));
+  check("the list (public): the live work first (Ready, then Approved), then the closed ones, newest change first; number, title, requester, state, estimate, price; no ids or emails", list.map((t) => t.n).join() === "W2,W4,W3,W5,W1" && list[2].title === "A dragon" && list[2].state === "Approved" && list[2].estimate === 2 && list[2].price === 3 && list[2].by.name === "Ana" && !/@example\.com/.test(J(list)) && !J(list).includes(id.Ana) && !J(list).includes("proposal_id"), J(list[2]));
   const pg = (await visitor.get(`${T}/w3`)).data.ticket;
   check("a ticket page (public): every field, tasks, log; a visitor can't post and can't edit", pg.n === "W3" && pg.makes.length === 2 && pg.running_cost === "Nothing." && pg.price_reason === "Test price." && pg.queue === 1 && pg.proposal === "P2" && pg.tasks.length === 2 && pg.log.map((l) => l.kind).join() === "proposed,withdrawn,proposed,approved" && pg.can.post.allowed === false && pg.can.edit.allowed === false, J(pg));
 
@@ -266,7 +273,23 @@ try {
   dev("clock", plus(day(game().day).ends_at, 1));
   const lk = [await Ana.post(T, {}), await Cy.post(`${T}/W3/edit`, { title: "x" }), await Ana.post(`${T}/W3/confirm`, {})];
   check("opening, editing and confirming are refused during the lock, with the lock's sentence", lk.every((r) => r.status === 423 && /processing day 5/.test(r.data.error)), lk.map((r) => r.status + " " + r.text).join(" | "));
-  check("posting in a thread is not a move of the day: allowed during the lock", (await Bo.post(`${T}/W3/post`, { body: "Still here." })).status === 200);
+  const lkPost = [await Bo.post(`${T}/W3/post`, { body: "Still here." }), await visitor.post(`${T}/W3/post`, { body: "x" })];
+  check("posting in a thread is refused during the lock too (423 with the lock's sentence); a visitor still gets 401", lkPost[0].status === 423 && lkPost[0].data.error === "The players are sleeping. Chalant is processing day 5; play resumes when it's done." && lkPost[0].data.processing_day === 5 && lkPost[1].status === 401 &&
+    d1(state, `SELECT COUNT(*) AS n FROM ticket_posts WHERE body = 'Still here.'`)[0].n === 0, J(lkPost.map((r) => r.text)));
+  const lkPage = (await Bo.get(`${T}/W3`)).data.ticket;
+  check("the ticket page says the post is off during the lock, with the sentence", lkPage.can.post.allowed === false && lkPage.can.post.locked === true && /players are sleeping/.test(lkPage.can.post.reason));
+  {
+    // the post's own write re-checks the lock, so a post that races midnight cannot land after it
+    const lit = (v) => (typeof v === "number" ? String(v) : `'${String(v).replace(/'/g, "''")}'`);
+    const n = game().day, ends = Date.parse(day(n).ends_at);
+    const runPost = (body, nowMs) => { const b = [tk(3).id, id.Bo, body, "at", gid, ...lockOpenBinds(nowMs)]; let i = 0; d1(state, `INSERT INTO ticket_posts (ticket_id, game_id, author_kind, player_id, body, at) SELECT ?, g.id, 'player', ?, ?, ? FROM games g WHERE g.id = ? AND ${lockOpenSql}`.replace(/\?/g, () => lit(b[i++]))); return d1(state, `SELECT COUNT(*) AS n FROM ticket_posts WHERE body = '${body}'`)[0].n; };
+    const before = runPost("guard before midnight", ends - 60_000), after = runPost("guard after midnight", ends + 1000);
+    d1(state, `UPDATE games SET phase = 'locked' WHERE id = '${gid}'`);
+    const flag = runPost("guard while locked", ends - 60_000);
+    d1(state, `UPDATE games SET phase = 'open' WHERE id = '${gid}'`);
+    check("the post's write guard: lands before midnight, not after it, and not while the game is flagged locked", before === 1 && after === 0 && flag === 0, J([before, after, flag]));
+    d1(state, `DELETE FROM ticket_posts WHERE body = 'guard before midnight'`);
+  }
 
   console.log("MCP: list_tickets, read_ticket, post_to_ticket");
   dev("clock", "2026-11-14T19:00:00.000Z");
@@ -274,7 +297,7 @@ try {
   const tok = await connect(A, "wk", Bo, SITE);
   const lt = await tool(A, "wk", tok.access_token, "list_tickets");
   const lt2 = JSON.parse(lt.text);
-  check("list_tickets returns the list: newest first, with title, state, estimate and price", !lt.isError && lt2.tickets.map((t) => t.n).join() === "W7,W6,W5,W4,W3,W2,W1" && lt2.tickets.find((t) => t.n === "W3").price === 3, lt.text.slice(0, 200));
+  check("list_tickets returns the Workshop list (live work first, then the closed): with title, state, estimate and price", !lt.isError && lt2.tickets.map((t) => t.n).sort().join() === "W1,W2,W3,W4,W5,W6,W7" && lt2.total === 7 && lt2.tickets.find((t) => t.n === "W3").price === 3, lt.text.slice(0, 200));
   const rt = await tool(A, "wk", tok.access_token, "read_ticket", { ticket: "W3" });
   const rt2 = JSON.parse(rt.text).ticket;
   check("read_ticket returns the page: brief, makes, tasks, log and the thread", !rt.isError && rt2.brief.startsWith("A dragon that") && rt2.posts.length >= 2 && rt2.log.length === 4, rt.text.slice(0, 200));
@@ -285,6 +308,114 @@ try {
   check("a missing ticket and an empty post are tool errors with the reason", bad1.isError && /no such ticket/.test(bad1.text) && bad2.isError && /Write something/.test(bad2.text));
   const names2 = JSON.stringify((await (await rf(`${A}/wk/mcp`, { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream", authorization: `Bearer ${tok.access_token}` }, body: J({ jsonrpc: "2.0", id: 1, method: "tools/list" }) })).json()));
   check("the tool list names the three workshop tools", ["list_tickets", "read_ticket", "post_to_ticket"].every((n) => names2.includes(`"${n}"`)));
+
+  console.log("Ready (rule 801.4): can't pay the whole price -> Ready; each night's count pays the ones who now can, once, oldest pass first");
+  {
+    const dayNow = () => game().day;
+    const queueMax = () => d1(state, `SELECT COALESCE(MAX(queue_pos), 0) AS m FROM tickets WHERE game_id = '${gid}'`)[0].m;
+    const q0 = queueMax();
+    // Cy confirms first (the lower P-number), then Ana: both prices are more than they have (Cy 10 of 40, Ana 2 of 5)
+    const cyT = await commission(Cy, good({ title: "A castle", makes: [{ kind: "entry", name: "Castle" }] }));
+    const anaT = await commission(Ana, good({ title: "A pond", makes: [{ kind: "entry", name: "Pond" }] }));
+    const num = (x) => Number(x.n.slice(1)), pn = (x) => x.k.data.ticket.proposal;
+    check("both commissions are confirmed", cyT.k.status === 200 && anaT.k.status === 200, J([cyT.k.text, anaT.k.text]));
+    d1(state, `UPDATE tickets SET price = 40 WHERE number = ${num(cyT)}; UPDATE tickets SET price = 5 WHERE number = ${num(anaT)}`);
+    const ready0 = d1(state, `SELECT COUNT(*) AS n FROM tickets WHERE state = 'Ready'`)[0].n;
+    await midnight();
+    for (const c of [Ana, Bo, Cy]) { await yes(c, pn(cyT)); await yes(c, pn(anaT)); }
+    const dn = await midnight();
+    check("both passed and neither can pay: both Ready, nothing paid, no place in the queue; Bo's W2 is still Ready too",
+      [cyT, anaT].every((x) => tk(num(x)).state === "Ready" && tk(num(x)).paid === null && tk(num(x)).paid_at === null && tk(num(x)).queue_pos === null) && tk(2).state === "Ready" && queueMax() === q0 && score("Cy") === 10 && score("Ana") === 2, J([dn, tk(num(cyT)), tk(num(anaT))]));
+    check("the logs say why in plain words, with what they have and what it costs",
+      d1(state, `SELECT text FROM ticket_log WHERE ticket_id = '${tk(num(cyT)).id}' AND kind = 'ready'`)[0].text === `Ready: ${pn(cyT)} passed. Cy has 10 of the 40 points it costs; it joins the queue when they can pay.` &&
+      d1(state, `SELECT text FROM ticket_log WHERE ticket_id = '${tk(num(anaT)).id}' AND kind = 'ready'`)[0].text === `Ready: ${pn(anaT)} passed. Ana has 2 of the 5 points it costs; it joins the queue when they can pay.`);
+    check("a Ready ticket can't be edited or confirmed (409) and the list shows its state", (await Ana.post(`${T}/W${num(anaT)}/edit`, { title: "x" })).status === 409 && (await visitor.get(T)).data.tickets.find((t) => t.n === anaT.n).state === "Ready");
+    const pend2 = await rf(`${A}/wk/api/moderator/pending`, { headers: { authorization: `Bearer ${TOKEN}` } }).then((r) => r.json());
+    check("the moderator's pending list never names a Ready ticket's proposal", !J(pend2).includes(`"${pn(cyT).slice(1)}"`) || !J(pend2.job?.passed || []).includes("commission"), J(pend2.job?.passed || []).slice(0, 200));
+    check("the count does not pay Ready tickets that still can't pay on a later night (nothing changes, no second log line)", (await midnight()) && ready0 + 2 === d1(state, `SELECT COUNT(*) AS n FROM tickets WHERE state = 'Ready'`)[0].n && d1(state, `SELECT COUNT(*) AS n FROM ticket_log WHERE kind = 'ready'`)[0].n === 3);
+    // now everyone can pay: Bo 7, Cy 40, Ana 5
+    d1(state, `UPDATE players SET score = 7 WHERE id = '${id.Bo}'; UPDATE players SET score = 40 WHERE id = '${id.Cy}'; UPDATE players SET score = 5 WHERE id = '${id.Ana}'`);
+    await midnight();
+    const order = d1(state, `SELECT number FROM tickets WHERE game_id = '${gid}' AND queue_pos > ${q0} ORDER BY queue_pos`).map((r) => r.number);
+    check("the next count pays all three once and approves them, behind the tickets already queued, oldest pass first (W2, then Cy's before Ana's)",
+      J(order) === J([2, num(cyT), num(anaT)]) && [2, num(cyT), num(anaT)].every((n, i) => tk(n).state === "Approved" && tk(n).queue_pos === q0 + 1 + i && !!tk(n).paid_at && !!tk(n).approved_at), J(order));
+    check("each paid its whole price and no more: Bo 7 to 0, Cy 40 to 0, Ana 5 to 0", score("Bo") === 0 && score("Cy") === 0 && score("Ana") === 0 && tk(2).paid === 7 && tk(num(cyT)).paid === 40 && tk(num(anaT)).paid === 5);
+    check("the log says so, once each; the day's log names who paid",
+      d1(state, `SELECT text FROM ticket_log WHERE ticket_id = '${tk(2).id}' AND kind = 'approved'`).map((r) => r.text).join() === `Approved: Bo can pay now. Paid 7 points. Place ${q0 + 1} in the queue.` &&
+      d1(state, `SELECT COUNT(*) AS n FROM events WHERE kind = 'commission_approved' AND text LIKE 'W2 was approved.%'`)[0].n === 1 && d1(state, `SELECT text FROM events WHERE kind = 'commission_approved' AND text LIKE 'W${num(cyT)} was approved.%'`)[0].text === `W${num(cyT)} was approved. Cy paid 40 points.`);
+    // points come back (a later win), the count runs again: nothing is charged twice
+    d1(state, `UPDATE players SET score = 50 WHERE id = '${id.Bo}'; UPDATE players SET score = 50 WHERE id = '${id.Cy}'; UPDATE players SET score = 50 WHERE id = '${id.Ana}'`);
+    await midnight(); await cron();
+    check("a Ready ticket that was paid never charges again, however many nights", score("Bo") === 50 && score("Cy") === 50 && score("Ana") === 50 && d1(state, `SELECT COUNT(*) AS n FROM ticket_log WHERE kind = 'approved' AND text LIKE '%can pay now%'`)[0].n === 3 && queueMax() === q0 + 3, `${score("Bo")}`);
+    const rtool = JSON.parse((await tool(A, "wk", (await connect(A, "wk", Bo, SITE)).access_token, "list_tickets")).text).tickets;
+    check("the list (web and MCP) shows W2 as Approved now", (await visitor.get(`${T}/W2`)).data.ticket.state === "Approved" && rtool.find((t) => t.n === "W2").state === "Approved");
+    void dayNow;
+  }
+
+  console.log("reopening a refused or failed ticket (rule 801.5)");
+  {
+    const logKinds = (n) => d1(state, `SELECT kind FROM ticket_log WHERE ticket_id = '${tk(n).id}' ORDER BY id`).map((r) => r.kind).join();
+    const aW = Number(anaT0().n.slice(1));
+    function anaT0() { return { n: "W" + d1(state, `SELECT number FROM tickets WHERE title = 'A pond'`)[0].number }; }
+    await Ana.post(`${T}/W1/post`, { body: "Why was this refused?" });
+    const other = await Cy.post(`${T}/W1/reopen`, {}), vis = await visitor.post(`${T}/W1/reopen`, {});
+    check("someone else's ticket can't be reopened (404) and a visitor can't (401)", other.status === 404 && vis.status === 401 && tk(1).state === "Refused");
+    const notClosed = [await Ana.post(`${T}/W3/reopen`, {})];
+    d1(state, `UPDATE tickets SET state = 'Ready' WHERE number = ${aW}`); notClosed.push(await Ana.post(`${T}/W${aW}/reopen`, {}));
+    d1(state, `UPDATE tickets SET state = 'Shelved' WHERE number = ${aW}`); notClosed.push(await Ana.post(`${T}/W${aW}/reopen`, {}));
+    check("an Approved, a Ready and a Shelved ticket can't be reopened (409)", notClosed.every((r) => r.status === 409) && tk(3).state === "Approved" && tk(aW).state === "Shelved", J(notClosed.map((r) => r.status + " " + r.text)));
+    const pageBefore = (await Ana.get(`${T}/W1`)).data.ticket;
+    check("the page offers Reopen to its requester only", pageBefore.can.reopen.allowed === true && (await Cy.get(`${T}/W1`)).data.ticket.can.reopen.allowed === false);
+    const sc = score("Ana");
+    const ro = await Ana.post(`${T}/W1/reopen`, {});
+    check("a Refused ticket reopens as a draft under the SAME number, its log and thread kept, a 'Reopened.' line added, nothing paid or refunded",
+      ro.status === 200 && ro.data.ticket.n === "W1" && ro.data.ticket.state === "Draft" && tk(1).proposal_id === null && logKinds(1) === "refused,reopened" && ro.data.ticket.posts.length === 1 && ro.data.ticket.log.at(-1).text === "Reopened." && score("Ana") === sc && tk(1).paid === null, ro.text);
+    check("reopening twice is a 409 (it is a draft now)", (await Ana.post(`${T}/W1/reopen`, {})).status === 409 && logKinds(1) === "refused,reopened");
+    // Cy's W5 was refused by the vote: it has a proposal. Reopen it, then confirm it again: it is one of the day's proposals (limit 1)
+    const oldP = tk(5).proposal_id;
+    const roC = await Cy.post(`${T}/W5/reopen`, {});
+    check("a ticket refused by the vote reopens too: unlinked from its old proposal, the old proposal untouched", roC.status === 200 && tk(5).state === "Draft" && tk(5).proposal_id === null && d1(state, `SELECT status FROM proposals WHERE id = '${oldP}'`)[0].status === "failed");
+    const cyOrd = await Cy.post("/wk/api/proposals", { kind: "repeal", target: "403" });
+    await Cy.post(`/wk/api/proposals/${cyOrd.data.proposal.id}/confirm`, {});
+    const again = await Cy.post(`${T}/W5/confirm`, {});
+    check("confirming it again counts as one of the day's proposals: with the day's one already used it is refused with the limit's sentence", again.status === 409 && /the most a day/.test(again.data.error) && tk(5).state === "Draft" && tk(5).proposal_id === null, again.text);
+    await Cy.post(`/wk/api/proposals/${cyOrd.data.proposal.id}/withdraw`, {});
+    const again2 = await Cy.post(`${T}/W5/confirm`, {});
+    check("with the slot free it is confirmed: the same W5, a new proposal number, on the ballot", again2.status === 200 && again2.data.ticket.n === "W5" && again2.data.ticket.state === "Proposed" && again2.data.ticket.proposal !== roC.data.ticket.proposal && logKinds(5) === "proposed,refused,reopened,proposed", again2.text);
+    // Failed: Ana's other ticket (queued, paid) fails; the lock stops its reopen, then the next day allows it
+    d1(state, `UPDATE tickets SET state = 'Failed' WHERE number = ${aW}`);
+    dev("clock", plus(day(game().day).ends_at, 1));
+    const lockedRo = await Ana.post(`${T}/W${aW}/reopen`, {});
+    check("during the lock a reopen is refused (423, the lock's sentence) and changes nothing", lockedRo.status === 423 && /players are sleeping/.test(lockedRo.data.error) && tk(aW).state === "Failed" && logKinds(aW) !== "" && !logKinds(aW).includes("reopened"), lockedRo.text);
+    {
+      const lit = (v) => (typeof v === "number" ? String(v) : `'${String(v).replace(/'/g, "''")}'`);
+      const n = game().day, ends = Date.parse(day(n).ends_at);
+      const run = (nowMs) => { const b = ["x", tk(aW).id, id.Ana, ...dayOpenBinds(n, nowMs, id.Ana)]; let i = 0; d1(state, REOPEN_SQL.replace(/\?/g, () => lit(b[i++]))); return tk(aW).state; };
+      check("the reopen's write guard repeats the day gate: nothing changes after midnight", run(ends + 1000) === "Failed");
+    }
+    await cron();
+    const queued = tk(aW).queue_pos, paidBefore = tk(aW).paid, scoreBefore = score("Ana");
+    const roF = await Ana.post(`${T}/W${aW}/reopen`, {});
+    check("a Failed ticket reopens the next day as a draft; it leaves the queue, and nothing is refunded or charged", roF.status === 200 && tk(aW).state === "Draft" && tk(aW).queue_pos === null && queued !== null && tk(aW).paid === paidBefore && score("Ana") === scoreBefore, roF.text);
+    const mcpR = await tool(A, "wk", (await connect(A, "wk", Bo, SITE)).access_token, "reopen_ticket", { ticket: "W2" });
+    check("over MCP, reopen_ticket is the same route: Bo's Approved W2 is refused", mcpR.isError && /can't be reopened/.test(mcpR.text), mcpR.text);
+  }
+
+  console.log("the Workshop list is the live work and the 5 latest closed; All tickets pages 50 at a time with a state filter");
+  {
+    const lc = (await Bo.get(T)).data;
+    check("the default list holds only live tickets (own drafts, Proposed, Ready, Approved, Building) and at most 5 closed ones, and says how many there are in all", lc.total === d1(state, `SELECT COUNT(*) AS n FROM tickets WHERE state != 'Draft' OR player_id = '${id.Bo}'`)[0].n && lc.tickets.filter((t) => ["Done", "Refused", "Failed", "Shelved"].includes(t.state)).length <= 5 && lc.counts.Approved >= 3, J(lc.counts));
+    d1(state, `WITH RECURSIVE c(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM c WHERE i < 120) INSERT INTO tickets (id, game_id, number, player_id, title, state, created_at, updated_at) SELECT 'bulk' || i, '${gid}', 1000 + i, '${id.Ana}', 'Bulk ' || i, CASE WHEN i % 2 = 0 THEN 'Done' ELSE 'Shelved' END, '2026-10-01T00:00:00.000Z', '2026-10-' || printf('%02d', 1 + i / 10) || 'T00:00:00.000Z' FROM c`);
+    const p1 = (await visitor.get(`${T}?all=1`)).data;
+    check("All tickets, page 1: 50 rows, newest change first, with a cursor for the next; a visitor sees it (public)", p1.tickets.length === 50 && !!p1.next && p1.tickets[0].changed_at >= p1.tickets[49].changed_at && p1.total >= 120, J([p1.tickets.length, p1.next, p1.total]));
+    const p2 = (await visitor.get(`${T}?all=1&cursor=${encodeURIComponent(p1.next)}`)).data, p3 = (await visitor.get(`${T}?all=1&cursor=${encodeURIComponent(p2.next)}`)).data;
+    const seen = [...p1.tickets, ...p2.tickets, ...p3.tickets].map((t) => t.n);
+    check("pages 2 and 3 continue with no gap and no repeat, and the last page has no cursor (nothing is loaded twice)", p2.tickets.length === 50 && new Set(seen).size === seen.length && seen.length === 100 + p3.tickets.length && (p3.next === null ? p3.tickets.length === p1.total - 100 : p3.tickets.length === 50), J([p2.tickets.length, p3.tickets.length, p3.next]));
+    const f = (await visitor.get(`${T}?all=1&state=Shelved`)).data;
+    check("a state filter lists only that state", f.tickets.length > 0 && f.tickets.every((t) => t.state === "Shelved") && f.counts.Shelved >= 60, J([f.tickets.length, f.counts]));
+    check("a bad state or cursor is a 400; other players' drafts never appear", (await visitor.get(`${T}?all=1&state=Nope`)).status === 400 && (await visitor.get(`${T}?all=1&cursor=zzz`)).status === 400 && !(await visitor.get(`${T}?all=1&state=Draft`)).data.tickets.length);
+    d1(state, `DELETE FROM tickets WHERE id LIKE 'bulk%'`);
+  }
 } catch (e) {
   fail++; console.log("  FAIL  harness:", e?.stack || e);
   if (srv) console.log(srv.log().slice(-3000));

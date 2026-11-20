@@ -17,12 +17,26 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&
 const lines = (s) => String(s || "").split("\n").map((x) => x.trim()).filter(Boolean);
 
 export function createWorkshop({ api, me, pill, rpill, when, canCommission, refresh, cards }) {
-  const S = { list: [], detail: {}, form: null, busy: false, err: "", note: "", openErr: "", draftPost: {} };
+  const S = { list: [], total: 0, counts: {}, view: "main", all: { rows: [], next: null, state: "", err: "" }, detail: {}, form: null, busy: false, err: "", note: "", openErr: "", draftPost: {} };
 
   /** @rule 801.2 */
   async function load() {
     const r = await api("/api/tickets");
     S.list = r.ok && r.data ? r.data.tickets || [] : [];
+    S.total = r.ok && r.data ? r.data.total || 0 : 0;
+    S.counts = r.ok && r.data ? r.data.counts || {} : {};
+  }
+  // The all-tickets list: 50 at a time, newest change first, optionally one state; "More" asks for the next page. @rule 801.2
+  async function loadAll(reset) {
+    const A = S.all;
+    const q = new URLSearchParams({ all: "1" });
+    if (A.state) q.set("state", A.state);
+    if (!reset && A.next) q.set("cursor", A.next);
+    const r = await api(`/api/tickets?${q}`);
+    if (!r.ok) { A.err = (r.data && r.data.error) || "Something went wrong."; return; }
+    A.err = "";
+    A.rows = reset ? r.data.tickets : A.rows.concat(r.data.tickets);
+    A.next = r.data.next || null;
   }
   /** @rule 801.2 */
   async function loadOne(n) {
@@ -43,9 +57,9 @@ export function createWorkshop({ api, me, pill, rpill, when, canCommission, refr
 
   // ---- the list --------------------------------------------------------------------------------------------------
   /** @rule 801.2, 801.4 */
-  function rowHTML(t) {
+  function rowHTML(t, dense) {
     return `<li class="trow" id="wk-${esc(t.n)}"><span class="tmain"><button type="button" class="tlink" data-ticket="${esc(t.n)}" aria-haspopup="dialog"><span class="wpill">${esc(t.n)}</span><span class="tt">${esc(t.title || "Untitled")}</span></button></span>
-<span class="tmeta">${pill(t.by, t.mine)}<span class="pill tstate" data-state="${esc(t.state)}">${esc(t.state)}</span><span class="tnum mono">${esc(nights(t.estimate))}</span><span class="tnum mono">${esc(points(t.price))}</span></span></li>`;
+<span class="tmeta">${pill(t.by, t.mine)}<span class="pill tstate" data-state="${esc(t.state)}">${esc(t.state)}</span><span class="tnum mono">${esc(nights(t.estimate))}</span><span class="tnum mono">${esc(points(t.price))}</span>${dense ? `<span class="tnum mono">${esc(when(t.changed_at))}</span>` : ""}</span></li>`;
   }
   /** @rule 801.1, 801.2 */
   function commissionButton() {
@@ -53,17 +67,26 @@ export function createWorkshop({ api, me, pill, rpill, when, canCommission, refr
     const c = canCommission();
     return `<span class="wkact"><button type="button" class="btn small" data-w="open"${c.allowed ? "" : " disabled"}>Commission something</button>${c.allowed ? (S.openErr ? `<span class="mnote" role="alert">${esc(S.openErr)}</span>` : "") : `<span class="mnote">${esc(c.reason || "")}</span>`}</span>`;
   }
-  const count = () => S.list.length;
+  const count = () => S.total;
+  /** The all-tickets list: a row each, a chip per state, "More". @rule 801.2 */
+  function allHTML() {
+    const A = S.all, states = ["Draft", "Proposed", "Ready", "Approved", "Building", "Done", "Refused", "Failed", "Shelved"].filter((s) => S.counts[s]);
+    const chip = (s, label) => `<button type="button" class="pill tstate" data-w="filter" data-state="${esc(s)}" aria-pressed="${A.state === s}">${esc(label)}</button>`;
+    return `<div class="wk"><div class="wkmain"><section class="sw wkl wkall" aria-label="All tickets"><div class="swh"><h2>All tickets</h2><span class="m">${esc(`${S.total} ${S.total === 1 ? "ticket" : "tickets"}`)}</span><button type="button" class="linkbtn" data-w="main">← Workshop</button></div>
+<div class="tfilter">${chip("", `All ${S.total}`)}${states.map((s) => chip(s, `${s} ${S.counts[s]}`)).join("")}</div>
+${A.rows.length ? `<ul class="tlist">${A.rows.map((t) => rowHTML(t, true)).join("")}</ul>` : `<p class="mnote">No tickets.</p>`}${A.err ? `<p class="notice err" role="alert">${esc(A.err)}</p>` : ""}${A.next ? `<div class="row"><button type="button" class="btn ghost small" data-w="more">More</button></div>` : ""}</section></div></div>`;
+  }
   /** The Workshop tab: the tickets first, then the catalog's groups. @rule 801.2 */
   function tabHTML() {
+    if (S.view === "all") return allHTML();
     return `<div class="wk"><div class="wkmain"><section class="sw wkl" aria-label="Workshop"><div class="swh"><h2>Workshop</h2><span class="m">${count() ? esc(`${count()} ${count() === 1 ? "ticket" : "tickets"}`) : ""}</span>${commissionButton()}</div>
-${S.list.length ? `<ul class="tlist">${S.list.map(rowHTML).join("")}</ul>` : `<p class="mnote">No tickets yet.</p>`}</section>
+${S.list.length ? `<ul class="tlist">${S.list.map((t) => rowHTML(t)).join("")}</ul>` : `<p class="mnote">No tickets yet.</p>`}${S.total ? `<button type="button" class="linkbtn" data-w="all">All tickets (${esc(S.total)})</button>` : ""}</section>
 <div class="cbox wkcat"><h2 class="crow-h">Catalog</h2><p class="mnote" data-slot="catalog-entries">No entries yet.</p></div></div></div>`;
   }
   /** The Summary's block: the newest tickets and the way into the tab. @rule 801.2 */
   function summaryHTML() {
     const top = S.list.slice(0, 3);
-    return `<section class="sw cat" aria-label="Workshop"><div class="swh"><h2>Workshop</h2><button type="button" class="linkbtn" data-tab="workshop">Open the Workshop →</button></div>${top.length ? `<ul class="tlist">${top.map(rowHTML).join("")}</ul>` : `<p class="mnote">No tickets yet.</p>`}</section>`;
+    return `<section class="sw cat" aria-label="Workshop"><div class="swh"><h2>Workshop</h2><button type="button" class="linkbtn" data-tab="workshop">Open the Workshop →</button></div>${top.length ? `<ul class="tlist">${top.map((t) => rowHTML(t)).join("")}</ul>` : `<p class="mnote">No tickets yet.</p>`}</section>`;
   }
 
   // ---- the ticket page (a card) ----------------------------------------------------------------------------------
@@ -115,8 +138,16 @@ ${row("Price", `${esc(points(t.price))}${t.price_reason ? `<span class="mnote"> 
   function threadHTML(t) {
     const author = (x) => (x.by ? pill(x.by, false) : `<span class="plpill npc">${x.author === "gremlin" ? "Gremlin" : "Chalant"}</span>`);
     const posts = t.posts.length ? `<ul class="tposts">${t.posts.map((x) => `<li>${author(x)}<span class="mnote mono">${esc(when(x.at))}</span><p>${esc(x.body)}</p></li>`).join("")}</ul>` : "";
-    const form = t.can.post.allowed ? `<div class="pf wkpost"><label for="wkPost">Post</label><textarea id="wkPost" rows="3" maxlength="2000"${S.busy ? " disabled" : ""}>${esc(S.draftPost[t.n] || "")}</textarea>${S.err && !t.can.edit.allowed ? `<p class="notice err" role="alert">${esc(S.err)}</p>` : ""}<div class="row"><button class="btn small" type="button" data-w="post"${S.busy ? " disabled" : ""}>Post</button></div></div>` : "";
+    // the lock (rule 107.1) keeps the form but turns it off, with the lock's sentence; a visitor has no form
+    const can = t.can.post, off = S.busy || !can.allowed;
+    const form = can.allowed || can.locked ? `<div class="pf wkpost"><label for="wkPost">Post</label><textarea id="wkPost" rows="3" maxlength="2000"${off ? " disabled" : ""}>${esc(S.draftPost[t.n] || "")}</textarea>${can.locked ? `<p class="mnote">${esc(can.reason)}</p>` : ""}${S.err && !t.can.edit.allowed ? `<p class="notice err" role="alert">${esc(S.err)}</p>` : ""}<div class="row"><button class="btn small" type="button" data-w="post"${off ? " disabled" : ""}>Post</button></div></div>` : "";
     return `<section class="tsec"><h3>Discussion</h3>${posts}${form}</section>`;
+  }
+  /** A refused or failed ticket of yours can be reopened as a draft (rule 801.5); the lock turns the button off with its sentence. @rule 801.5 */
+  function reopenHTML(t) {
+    if (!t.mine || !(t.state === "Refused" || t.state === "Failed")) return "";
+    const c = t.can.reopen, off = S.busy || !c.allowed;
+    return `<div class="row wkreopen"><button class="btn small" type="button" data-w="reopen"${off ? " disabled" : ""}>Reopen as a draft</button>${c.allowed ? "" : `<span class="mnote">${esc(c.reason || "")}</span>`}${S.err && !t.can.edit.allowed ? `<p class="notice err" role="alert">${esc(S.err)}</p>` : ""}</div>`;
   }
   /** The ticket card. @rule 801.2, 804.1 */
   function card(spec) {
@@ -128,7 +159,7 @@ ${row("Price", `${esc(points(t.price))}${t.price_reason ? `<span class="mnote"> 
     if (editing && (!S.form || S.form.n !== n)) S.form = formFrom(t);
     return { cls: "crit tk", label: `${t.n} ${t.title || "Untitled"}`, backLabel: t.n,
       html: `<div class="mtop"><div class="cart"><span class="wpill big">${esc(t.n)}</span></div><h2>${esc(t.title || "Untitled")}</h2><span class="mmeta">${pill(t.by, t.mine)}</span><span class="mpill">${esc(t.state)}</span></div>
-${editing ? formHTML(t) : factsHTML(t)}${editing ? "" : tasksHTML(t)}${logHTML(t)}${threadHTML(t)}` };
+${editing ? formHTML(t) : factsHTML(t)}${reopenHTML(t)}${editing ? "" : tasksHTML(t)}${logHTML(t)}${threadHTML(t)}` };
   }
 
   // ---- the clicks and keystrokes ---------------------------------------------------------------------------------
@@ -152,6 +183,16 @@ ${editing ? formHTML(t) : factsHTML(t)}${editing ? "" : tasksHTML(t)}${logHTML(t
       await open(r.data.ticket, false);
       return;
     }
+    if (a === "all" || a === "main" || a === "filter" || a === "more") {
+      if (S.busy) return;
+      S.busy = true;
+      try {
+        if (a === "main") S.view = "main";
+        else { S.view = "all"; if (a !== "more") { S.all.state = a === "filter" ? el.dataset.state || "" : S.all.state; S.all.next = null; } await loadAll(a !== "more"); }
+      } finally { S.busy = false; }
+      await refresh();
+      return;
+    }
     if (!n || S.busy) return;
     S.busy = true; S.err = ""; S.note = ""; cards.redraw();
     try {
@@ -163,6 +204,9 @@ ${editing ? formHTML(t) : factsHTML(t)}${editing ? "" : tasksHTML(t)}${logHTML(t
           else { S.err = (r.data && r.data.error) || "Something went wrong."; await loadOne(n); S.form = null; }
           await refresh();
         }
+      } else if (a === "reopen") {
+        const r = await api(`/api/tickets/${encodeURIComponent(n)}/reopen`, {});
+        if (r.ok) { S.detail[n] = r.data.ticket; S.form = null; await refresh(); } else { S.err = (r.data && r.data.error) || "Something went wrong."; await loadOne(n); }
       } else if (a === "post") {
         const ta = document.getElementById("wkPost");
         const body = ta ? ta.value : "";

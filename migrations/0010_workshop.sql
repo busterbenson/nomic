@@ -115,9 +115,11 @@ CREATE INDEX vote_events_proposal ON vote_events(proposal_id, at);
 -- makes: what it will add or change, a JSON list of {"kind": "entry", "name": ...} (a catalog entry) and
 -- {"kind": "rule", "num": ...} (a rule number). estimate: nights. price / price_reason: the points the requester pays when it
 -- passes (rule 801.4), and why. running_cost: what it costs the site each month, in words, or ''.
--- state: Draft -> Proposed (on the ballot) -> Approved (in the queue, rule 803.1) -> Building -> Done; or Refused, Failed, Shelved.
+-- state: Draft -> Proposed (on the ballot) -> Approved (in the queue, rule 803.1), or Ready first when the requester can't pay the whole
+-- price when it passes (rule 801.4: nothing is paid and it has no place in the queue until they can) -> Building -> Done; or Refused, Failed, Shelved.
 -- proposal_id: the commission proposal it rides on (NULL while a draft). queue_pos: its place in the queue, set when approved.
--- paid / paid_at: the points actually taken from the requester when it was approved, and when (NULL until then).
+-- paid / paid_at: the points taken from the requester when it was approved (always the whole price, never part), and when (NULL until
+-- then, and while it is Ready). approved_at is when it joined the queue.
 CREATE TABLE tickets (
   id TEXT PRIMARY KEY,
   game_id TEXT NOT NULL REFERENCES games(id),
@@ -130,7 +132,7 @@ CREATE TABLE tickets (
   price INTEGER NOT NULL DEFAULT 0 CHECK (price >= 0),
   price_reason TEXT NOT NULL DEFAULT '',
   running_cost TEXT NOT NULL DEFAULT '',
-  state TEXT NOT NULL DEFAULT 'Draft' CHECK (state IN ('Draft', 'Proposed', 'Approved', 'Building', 'Done', 'Refused', 'Failed', 'Shelved')),
+  state TEXT NOT NULL DEFAULT 'Draft' CHECK (state IN ('Draft', 'Proposed', 'Ready', 'Approved', 'Building', 'Done', 'Refused', 'Failed', 'Shelved')),
   proposal_id TEXT REFERENCES proposals(id),
   queue_pos INTEGER CHECK (queue_pos IS NULL OR queue_pos >= 1),
   paid INTEGER CHECK (paid IS NULL OR paid >= 0),
@@ -158,7 +160,8 @@ CREATE TABLE ticket_tasks (
 );
 
 -- A ticket's log: dated entries written by the site (and, later, the moderator). kind: proposed, withdrawn, approved,
--- refused, note. A ticket is approved or refused once, however many times the count runs.
+-- ready, refused, reopened, note. A ticket is made ready, approved or refused once each time it is counted, however many times the count
+-- runs (a reopened ticket can be counted again, rule 801.5); the index is the second line of defence behind the state guards.
 CREATE TABLE ticket_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   ticket_id TEXT NOT NULL REFERENCES tickets(id),
@@ -168,7 +171,7 @@ CREATE TABLE ticket_log (
   at TEXT NOT NULL
 );
 CREATE INDEX ticket_log_ticket ON ticket_log(ticket_id, id);
-CREATE UNIQUE INDEX ticket_log_decided_once ON ticket_log(ticket_id, kind) WHERE kind IN ('approved', 'refused');
+CREATE UNIQUE INDEX ticket_log_decided_once ON ticket_log(ticket_id, kind, at) WHERE kind IN ('ready', 'approved', 'refused');
 
 -- A ticket's discussion (rule 804.1). author_kind: a player, Gremlin or Chalant; player_id is the author of a player's post.
 CREATE TABLE ticket_posts (

@@ -7,7 +7,7 @@ Spec for Buster's OK (2026-11-20). Nothing here is built. It replaces the larger
 - Features are built only into a game's own repo and exist only for that game's players. Players can't propose changes to the platform.
 - Everything new (a creature, a tile, an item, a feature like a forum) comes in as a **commission**. Plain rule changes (reword, add, repeal, move, mark) stay ordinary proposals.
 - A commission creates a **ticket** that tracks everything about it: a brief, the catalog entries and rules it makes, an estimate, a cost, a log of tasks and progress, and a discussion.
-- **The Catalog tab becomes the Workshop tab**, and the catalog lives inside it (the ticket list first, then the catalog groups).
+- **The Catalog tab becomes the Workshop tab**, and the catalog lives inside it (the ticket list first, then the catalog groups). The list shows live work only (your own drafts, Proposed, Ready, Approved, Building) and the 5 most recently closed; "All tickets (N)" opens a dense list of every ticket, newest change first, filtered by state and paged 50 at a time.
 - A live helper, **Gremlin**, builds the brief with the player in real time and answers ticket discussions. He is clearly not Chalant, has a gremlin-y personality, and escalates what he isn't comfortable with to Chalant.
 - **Gremlin is an NPC who lives in the Workshop tab**, not a piece on the board (to start). His chat is a sidebar window on desktop and a sheet from a button on phones, with a portrait.
 - **Chat history** with Gremlin and Starling is saved per player, per day, private to that player, and scrolls back through past days. A ticket's discussion stays public on the ticket.
@@ -23,7 +23,7 @@ One page per commission, opened from the Workshop list or any pill that names it
 |---|---|---|
 | Title, number (W1, W2...) | | Gremlin drafts, the player confirms |
 | Requester | player pill | |
-| State | Draft → Proposed (on the ballot) → Approved (in the queue) → Building → Done; or Refused, Failed, Shelved | the site |
+| State | Draft → Proposed (on the ballot) → Ready (passed, the requester can't pay the whole price yet) → Approved (in the queue) → Building → Done; or Refused, Failed, Shelved. Refused and Failed tickets can be reopened as drafts by their requester (same number); Shelved stays closed | the site |
 | Brief | what it is and what it does, in plain words | Gremlin, from the conversation |
 | Makes | the catalog entries and rules it will add or change, as pills (dimmed until live) | Gremlin drafts, Chalant finalizes at build time |
 | Estimate | nights | Gremlin's guess; Chalant can revise once building starts |
@@ -38,7 +38,7 @@ One page per commission, opened from the Workshop list or any pill that names it
 1. **Commission.** On the Workshop tab, "Commission something" opens a draft ticket and a chat with Gremlin. The player describes it; Gremlin asks what he needs to know and fills in the brief, makes, estimate, cost and tasks as they go. Anything impossible (outside the game, against privacy, security or the law, or past the limits) is refused here, with the reason.
 2. **Confirm.** The player confirms the ticket at Gremlin's price (they can haggle with him before confirming; the price is final once confirmed, and a player who can't afford it can't confirm). It is one of their proposals for the day (103.2) and goes on tomorrow's ballot, where the ballot row shows the brief, the estimate and the cost.
 3. **Vote.** Like any proposal, at the mark of the block it adds to (105).
-4. **Pay and queue.** A passed commission's price comes out of the requester's points (spent: it no longer counts toward winning), and the ticket is Approved and joins the queue: first approved, first built.
+4. **Pay and queue.** A passed commission whose requester can pay the whole price pays it (spent: it no longer counts toward winning) and the ticket is Approved and joins the queue. If they can't pay it all, nothing is paid and the ticket waits as **Ready**, outside the queue; each night's count pays every Ready ticket whose requester can now pay in full (oldest pass first), and it joins the queue then, behind the tickets already in it. Never part-paid. First paid, first built.
 5. **Build.** Each night, after the night's other changes (107.2), Chalant works the ticket at the front of the queue within the limits: reads the whole thread first, works the tasks, ticks what's done, logs one line, answers the thread.
 6. **Done.** When the work is finished and its tests pass, its rules and catalog entries go live together, like any change (107). The ticket shows Done and the History records it.
 7. **Failed or shelved.** Three failed nights in a row send the ticket back to its requester with the reason (107.7). A ticket whose estimate grows past 2x its voted estimate goes back on the ballot before more work.
@@ -50,7 +50,7 @@ One page per commission, opened from the Workshop list or any pill that names it
 - **Context each turn:** the game's rulebook, the catalog, this ticket and its thread, the workshop limits, the Nomic library index, and his persona.
 - **Persona:** a little scrappy workshop gremlin. Short sentences, workshop slang, fond of the word "contraption", cheerful about limits. Never promises an outcome, never says something is built, never pretends to be Chalant.
 - **Escalation:** when he's unsure (a rules conflict, an estimate he can't size, anything that looks like a loophole), he says so in the thread ("Kicking this upstairs to Chalant.") and marks the ticket **Escalated**. Escalations reach Chalant during the day as a notification on the Mac mini, and Chalant answers in the thread; the night run reads every thread anyway.
-- **Limits:** a per-player daily message cap (a setting); player text reaches the model only as data, fenced; no tools beyond writing the ticket fields and a post.
+- **Limits:** a per-player daily message cap (a setting). Gremlin answers at most 20 ticket-thread comments per player per day, separate from his 30 chat messages; players' own posts have no limit. Also: player text reaches the model only as data, fenced; no tools beyond writing the ticket fields and a post.
 
 ## Gremlin's prices
 
@@ -109,3 +109,7 @@ Before step 3 can build features like a forum, the platform needs general pieces
 2. **Gremlin's daily cap:** lean 30 messages per player a day.
 3. **Who can post in a thread:** lean every player in the game; Ghosts and dead players read only.
 4. **Can the requester withdraw an approved ticket before it's built?** Lean yes; it goes to Shelved, and the price isn't refunded.
+
+## Step 1 decisions (Buster, 2026-11-20)
+
+Tickets and threads are public to visitors. A commission whose requester can't pay the whole price goes Ready and pays on the first night they can (801.4, 803.1). The midnight lock stops everything the Workshop adds, posting in a thread included (107.1). A refused or failed ticket can be reopened by its requester (801.5).

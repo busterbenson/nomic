@@ -440,7 +440,7 @@ console.log("the day: midnights in the game's time zone, the lock, End turn");
   const end = Date.parse(day.ends_at), game = { status: "playing", phase: "open" };
   check("the lock is exact: open 1 ms before midnight, locked AT midnight and 1 s after, by the clock alone (the flag still says open)",
     dayGate(game, day, null, end - 1) === null && J(dayGate(game, day, null, end)) === J({ status: 423, error: lockMessage(3), processing_day: 3 }) && dayGate(game, day, null, end + 1000)?.status === 423);
-  check("the lock message names the day being processed", lockMessage(3) === "Chalant is processing day 3. Play resumes when it's done.");
+  check("the lock message names the day being processed", lockMessage(3) === "The players are sleeping. Chalant is processing day 3; play resumes when it's done.");
   check("the lock also holds by the flag: the game locked, or the day no longer open, even before midnight",
     isLocked({ phase: "locked" }, day, end - H) && isLocked(game, { ...day, status: "locked" }, end - H) && isLocked(game, { ...day, status: "processing" }, end - H) && !isLocked(game, day, end - H));
   check("End turn is final: an ended turn is refused (409) for the rest of the day, and the lock (423) still comes first at midnight",

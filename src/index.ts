@@ -163,11 +163,11 @@ async function route(request: Request, env: Env, execCtx: ExecutionContext): Pro
     ctx.params.id = segs[3];
     return run({ post: apiProposals.action(segs[4]) }, method, ctx);
   }
-  // /api/tickets/<W3> (the ticket page), and /api/tickets/<W3>/edit, /confirm and /post (rules 801, 804)
+  // /api/tickets/<W3> (the ticket page), and /api/tickets/<W3>/edit, /confirm, /reopen and /post (rules 801, 804)
   if (sub === "api" && segs[2] === "tickets" && (segs.length === 4 || segs.length === 5)) {
     ctx.params.n = segs[3];
     if (segs.length === 4) return run({ get: apiTickets.one }, method, ctx);
-    if (segs[4] === "edit" || segs[4] === "confirm" || segs[4] === "post") return run({ post: apiTickets.action(segs[4]) }, method, ctx);
+    if (segs[4] === "edit" || segs[4] === "confirm" || segs[4] === "post" || segs[4] === "reopen") return run({ post: apiTickets.action(segs[4]) }, method, ctx);
   }
   return notFound();
 }

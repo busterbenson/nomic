@@ -19,7 +19,7 @@ const check = (name, ok, detail = "") => {
   if (ok) { pass++; console.log(`  ok    ${name}`); } else { fail++; console.log(`  FAIL  ${name}${detail ? "  -> " + detail : ""}`); }
 };
 const J = JSON.stringify;
-const LOCK1 = "Chalant is processing day 1. Play resumes when it's done.";
+const LOCK1 = "The players are sleeping. Chalant is processing day 1; play resumes when it's done.";
 const MD = readFileSync(pjoin(ROOT, "templates/RULES.md"), "utf8");
 const B = parseBook(MD);
 const req = (body) => readRequest(B, body);

@@ -3,7 +3,7 @@
 // the SQL the count runs when a commission passes or fails (rules 801.4, 803.1). src/routes/api-tickets.ts is the routes.
 import { dayOpenSql } from "./day-gate.js";
 
-export const STATES = ["Draft", "Proposed", "Approved", "Building", "Done", "Refused", "Failed", "Shelved"];
+export const STATES = ["Draft", "Proposed", "Ready", "Approved", "Building", "Done", "Refused", "Failed", "Shelved"];
 export const LIMITS = { title: 80, brief: 2000, makeName: 60, makes: 12, tasks: 20, task: 200, running_cost: 200, estimate: 99, post: 2000 };
 // The block a commission is voted at the mark of (rule 105.4), and the one rule a game needs for a workshop at all.
 export const WORKSHOP_BLOCK = "800";
@@ -109,6 +109,17 @@ export function readPost(body) {
   return { body: text };
 }
 
+// ---- the list -----------------------------------------------------------------------------------------------------------
+export const LIVE_STATES = ["Draft", "Proposed", "Ready", "Approved", "Building"];
+export const CLOSED_STATES = ["Done", "Refused", "Failed", "Shelved"];
+export const RECENT_CLOSED = 5;
+export const PAGE = 50;
+/** The cursor of the all-tickets list: "<updated_at>~<number>", or null when it is not one. @rule 801.2 */
+export function readCursor(v) {
+  const m = /^(\d{4}-\d{2}-\d{2}T[\d:.]+Z)~(\d{1,6})$/.exec(String(v ?? ""));
+  return m ? { at: m[1], number: Number(m[2]) } : null;
+}
+
 // ---- the SQL ---------------------------------------------------------------------------------------------------------
 // Open a draft: the game's next W-number, in the statement that opens it; refused if the day is not open for this player, or
 // if the player already has a blank draft (two clicks make one). Binds: id, player_id, created_at, updated_at, game_id,
@@ -123,17 +134,60 @@ export const OPEN_DRAFT_SQL = `INSERT INTO tickets (id, game_id, number, player_
 // Binds: ticket id, player id, then dayOpenBinds.
 /** @rule 801.2, 107.1, 202.4 */
 export const EDIT_GUARD = `id = ? AND state = 'Draft' AND player_id = ? AND proposal_id IS NULL AND EXISTS (SELECT 1 FROM games g WHERE g.id = tickets.game_id AND ${dayOpenSql})`;
+// Reopen a refused or failed ticket as a draft under the same number (rule 801.5): the requester's own, the day gate re-checked in the
+// write, the link to its old proposal and its place in the queue cleared. Nothing is refunded or charged. Binds: updated_at, ticket
+// id, player id, then dayOpenBinds.
+/** @rule 801.5, 107.1, 202.4 */
+export const REOPEN_SQL = `UPDATE tickets SET state = 'Draft', proposal_id = NULL, queue_pos = NULL, proposed_at = NULL, approved_at = NULL, decided_at = NULL, updated_at = ?
+  WHERE id = ? AND player_id = ? AND state IN ('Refused', 'Failed') AND EXISTS (SELECT 1 FROM games g WHERE g.id = tickets.game_id AND ${dayOpenSql})`;
 // The commission's draft proposal, for the confirm to make the day's proposal (rule 801.1). Binds: id, player_id, title, brief,
 // head, base_sha, created_at, game_id, then dayOpenBinds.
 /** @rule 801.1 */
 export const COMMISSION_DRAFT_SQL = `INSERT INTO proposals (id, game_id, player_id, day_proposed, kind, scope, target, words, title, draft_head, drafted_by, base_sha, status, created_at)
   SELECT ?, g.id, ?, g.day, 'commission', 'block', '${WORKSHOP_BLOCK}', ?, ?, ?, 'code', ?, 'draft', ? FROM games g WHERE g.id = ? AND ${dayOpenSql}`;
 
+// Whether a ticket's requester can pay its whole price now (rule 801.4): a price of 0 always can, otherwise their points must
+// cover all of it. Nothing is ever part-paid. In SQL, on the unaliased tickets table.
+/** @rule 801.4 */
+const CAN_PAY = `tickets.price <= MAX(0, COALESCE((SELECT score FROM players WHERE game_id = tickets.game_id AND id = tickets.player_id), 0))`;
+// The next place in the queue (rule 803.1), taken in the statement that approves.
+const NEXT_PLACE = `(SELECT COALESCE(MAX(x.queue_pos), 0) + 1 FROM tickets x WHERE x.game_id = tickets.game_id)`;
+const pts = (col) => `${col} || CASE WHEN ${col} = 1 THEN ' point' ELSE ' points' END`;
+
+/**
+ * The statements that pay ONE approved ticket's price, once, and say so (rules 801.4, 803.1). `where` picks the ticket on the
+ * unaliased tickets table (its `?`-binds in `binds`), `text` is the log line, an SQL expression on t. Paid is the whole price or nothing; paid_at is
+ * the one-time flag, so a second run takes nothing.
+ * @rule 801.4, 803.1
+ */
+function payStatements(db, where, binds, game, text, day, now) {
+  const mine = `t.id IN (SELECT id FROM tickets WHERE ${where})`;
+  return [
+    db.prepare(`UPDATE players SET score = score - (SELECT t.paid FROM tickets t WHERE ${mine} AND t.state = 'Approved' AND t.paid_at IS NULL)
+       WHERE game_id = ? AND id = (SELECT t.player_id FROM tickets t WHERE ${mine} AND t.state = 'Approved' AND t.paid_at IS NULL)`).bind(...binds, game.id, ...binds),
+    db.prepare(`UPDATE tickets SET paid_at = ? WHERE ${where} AND state = 'Approved' AND paid_at IS NULL`).bind(now, ...binds),
+    db.prepare(
+      `INSERT OR IGNORE INTO ticket_log (ticket_id, day, kind, text, at)
+       SELECT t.id, ?, 'approved', ${text}, ? FROM tickets t WHERE ${mine} AND t.state = 'Approved' AND t.paid_at = ?`,
+    ).bind(day, now, ...binds, now),
+    db.prepare(
+      `INSERT INTO events (game_id, kind, text, created_at, day, phase, player_id)
+       SELECT t.game_id, 'commission_approved', 'W' || t.number || ' was approved.' || CASE WHEN t.paid > 0 THEN ' ' || p.display_name || ' paid ' || ${pts("t.paid")} || '.' ELSE '' END, ?, ?, 'night', t.player_id
+       FROM tickets t JOIN players p ON p.game_id = t.game_id AND p.id = t.player_id
+       WHERE ${mine} AND t.state = 'Approved' AND t.paid_at = ? AND EXISTS (SELECT 1 FROM ticket_log l WHERE l.ticket_id = t.id AND l.kind = 'approved' AND l.at = ?)
+         AND NOT EXISTS (SELECT 1 FROM events e WHERE e.game_id = t.game_id AND e.kind = 'commission_approved' AND e.text LIKE 'W' || t.number || ' was approved.%')`,
+    ).bind(now, day, ...binds, now, now),
+  ];
+}
+
 /**
  * What the count writes for ONE commission, as statements (rules 801.4, 803.1). `q` is the counted proposal {id, number},
  * `result` {passed, sentence}. Every statement is guarded by the stored state, so a second run changes and pays nothing:
- *   passed   the ticket goes Approved with the next place in the queue (rule 803.1) and the points it costs come out of the
- *            requester, once (rule 801.4: paid points are spent, and no longer count toward winning, rule 402), the log says so
+ *   passed, the requester can pay the whole price   the ticket goes Approved with the next place in the queue (rule 803.1) and
+ *            the price comes out of the requester, once (rule 801.4: paid points are spent, and no longer count toward
+ *            winning, rule 402); the log says so
+ *   passed, they can't                              the ticket goes Ready: nothing is paid, it has no place in the queue, and the
+ *            log, the day's log and the requester's notification say why (rule 801.4); readyStatements pays it on a later night
  *   failed   the ticket goes Refused with the count's sentence
  * @rule 801.4, 803.1
  */
@@ -145,30 +199,52 @@ export function countTicketStatements(db, game, q, result, day, now) {
       db.prepare(`INSERT OR IGNORE INTO ticket_log (ticket_id, day, kind, text, at) SELECT t.id, ?, 'refused', ?, ? FROM tickets t WHERE ${mine} AND t.state = 'Refused' AND t.decided_at = ?`).bind(day, `Refused: P${q.number} did not pass. ${result.sentence}`, now, q.id, now),
     ];
   }
+  const passedGuard = `proposal_id = ? AND state IN ('Draft', 'Proposed') AND EXISTS (SELECT 1 FROM proposals WHERE id = ? AND status = 'approved')`;
+  const have = `(SELECT MAX(0, COALESCE(score, 0)) FROM players WHERE game_id = t.game_id AND id = t.player_id)`;
   return [
-    db.prepare(
-      `UPDATE tickets SET state = 'Approved', approved_at = ?, decided_at = ?, updated_at = ?,
-         paid = MAX(0, MIN(price, COALESCE((SELECT score FROM players WHERE game_id = tickets.game_id AND id = tickets.player_id), 0))),
-         queue_pos = (SELECT COALESCE(MAX(x.queue_pos), 0) + 1 FROM tickets x WHERE x.game_id = tickets.game_id)
-       WHERE proposal_id = ? AND state IN ('Draft', 'Proposed') AND EXISTS (SELECT 1 FROM proposals WHERE id = ? AND status = 'approved')`,
-    ).bind(now, now, now, q.id, q.id),
-    // The price comes out of the requester's points, once: paid_at is the flag.
-    db.prepare(
-      `UPDATE players SET score = score - (SELECT t.paid FROM tickets t WHERE ${mine} AND t.state = 'Approved' AND t.paid_at IS NULL)
-       WHERE game_id = ? AND id = (SELECT t.player_id FROM tickets t WHERE ${mine} AND t.state = 'Approved' AND t.paid_at IS NULL)`,
-    ).bind(q.id, game.id, q.id),
-    db.prepare(`UPDATE tickets SET paid_at = ? WHERE proposal_id = ? AND state = 'Approved' AND paid_at IS NULL`).bind(now, q.id),
+    // can't pay the whole price: Ready, no place in the queue, nothing paid
+    db.prepare(`UPDATE tickets SET state = 'Ready', decided_at = ?, updated_at = ? WHERE ${passedGuard} AND NOT (${CAN_PAY})`).bind(now, now, q.id, q.id),
     db.prepare(
       `INSERT OR IGNORE INTO ticket_log (ticket_id, day, kind, text, at)
-       SELECT t.id, ?, 'approved', 'Approved: P' || CAST(? AS INTEGER) || ' passed. ' || CASE WHEN t.paid < t.price THEN 'Paid ' || t.paid || ' of ' || t.price || CASE WHEN t.price = 1 THEN ' point' ELSE ' points' END || '. ' WHEN t.paid > 0 THEN 'Paid ' || t.paid || CASE WHEN t.paid = 1 THEN ' point' ELSE ' points' END || '. ' ELSE '' END || 'Place ' || t.queue_pos || ' in the queue.', ?
-       FROM tickets t WHERE ${mine} AND t.state = 'Approved' AND t.paid_at = ?`,
+       SELECT t.id, ?, 'ready', 'Ready: P' || CAST(? AS INTEGER) || ' passed. ' || p.display_name || ' has ' || ${have} || ' of the ' || ${pts("t.price")} || ' it costs; it joins the queue when they can pay.', ?
+       FROM tickets t JOIN players p ON p.game_id = t.game_id AND p.id = t.player_id WHERE ${mine} AND t.state = 'Ready' AND t.decided_at = ?`,
     ).bind(day, q.number, now, q.id, now),
     db.prepare(
       `INSERT INTO events (game_id, kind, text, created_at, day, phase, player_id)
-       SELECT t.game_id, 'commission_approved', 'W' || t.number || ' was approved.' || CASE WHEN t.paid > 0 THEN ' ' || p.display_name || ' paid ' || t.paid || CASE WHEN t.paid = 1 THEN ' point.' ELSE ' points.' END ELSE '' END, ?, ?, 'night', t.player_id
+       SELECT t.game_id, 'commission_ready', 'W' || t.number || ' is ready, not yet paid: ' || p.display_name || ' has ' || ${have} || ' of the ' || ${pts("t.price")} || ' it costs.', ?, ?, 'night', t.player_id
        FROM tickets t JOIN players p ON p.game_id = t.game_id AND p.id = t.player_id
-       WHERE ${mine} AND t.state = 'Approved' AND t.paid_at = ? AND EXISTS (SELECT 1 FROM ticket_log l WHERE l.ticket_id = t.id AND l.kind = 'approved' AND l.at = ?)
-         AND NOT EXISTS (SELECT 1 FROM events e WHERE e.game_id = t.game_id AND e.kind = 'commission_approved' AND e.text LIKE 'W' || t.number || ' was approved.%')`,
-    ).bind(now, day, q.id, now, now),
+       WHERE ${mine} AND t.state = 'Ready' AND t.decided_at = ? AND NOT EXISTS (SELECT 1 FROM events e WHERE e.game_id = t.game_id AND e.kind = 'commission_ready' AND e.text LIKE 'W' || t.number || ' is ready%')`,
+    ).bind(now, day, q.id, now),
+    db.prepare(
+      `INSERT OR IGNORE INTO notifications (id, game_id, player_id, kind, body, link, created_at)
+       SELECT 'ready-' || t.id, t.game_id, t.player_id, 'commission_ready', 'W' || t.number || ' is ready: P' || CAST(? AS INTEGER) || ' passed, but you have ' || ${have} || ' of the ' || ${pts("t.price")} || ' it costs. It joins the queue when you can pay.', ?, ?
+       FROM tickets t WHERE ${mine} AND t.state = 'Ready' AND t.decided_at = ?`,
+    ).bind(q.number, `/${game.slug}/`, now, q.id, now),
+    // can pay: Approved, in the order passed, paid once
+    db.prepare(
+      `UPDATE tickets SET state = 'Approved', approved_at = ?, decided_at = ?, updated_at = ?, paid = price, queue_pos = ${NEXT_PLACE}
+       WHERE ${passedGuard} AND ${CAN_PAY}`,
+    ).bind(now, now, now, q.id, q.id),
+    ...payStatements(db, "proposal_id = ?", [q.id], game, `'Approved: P' || CAST(${q.number} AS INTEGER) || ' passed. ' || CASE WHEN t.paid > 0 THEN 'Paid ' || ${pts("t.paid")} || '. ' ELSE '' END || 'Place ' || t.queue_pos || ' in the queue.'`, day, now),
   ];
+}
+
+/** The ids of the Ready tickets, oldest pass first (the order they are paid in), read just before the count's batch. @rule 801.4, 803.1 */
+export async function readyIds(db, gameId) {
+  const rows = await db.prepare(`SELECT t.id FROM tickets t LEFT JOIN proposals q ON q.id = t.proposal_id WHERE t.game_id = ? AND t.state = 'Ready' ORDER BY t.decided_at, q.number`).bind(gameId).all();
+  return rows.results.map((r) => r.id);
+}
+
+/**
+ * What the count writes for the tickets that were Ready (rules 801.4, 803.1), in the order given (oldest pass first), after the
+ * night's new approvals so they queue behind them. One at a time, each guarded by Ready and by the requester's points at that
+ * moment (so the one before it has already paid): a ticket whose requester can now pay the whole price pays it once and goes
+ * Approved with the next place in the queue; any other stays Ready, untouched. A ticket that is no longer Ready changes nothing.
+ * @rule 801.4, 803.1
+ */
+export function readyStatements(db, game, ids, day, now) {
+  return ids.flatMap((id) => [
+    db.prepare(`UPDATE tickets SET state = 'Approved', approved_at = ?, updated_at = ?, paid = price, queue_pos = ${NEXT_PLACE} WHERE id = ? AND state = 'Ready' AND paid_at IS NULL AND ${CAN_PAY}`).bind(now, now, id),
+    ...payStatements(db, "id = ?", [id], game, `'Approved: ' || (SELECT display_name FROM players WHERE game_id = t.game_id AND id = t.player_id) || ' can pay now. Paid ' || ${pts("t.paid")} || '. Place ' || t.queue_pos || ' in the queue.'`, day, now),
+  ]);
 }
