@@ -219,11 +219,20 @@ check("a // @rule line comment is not a claim (only a /** */ block is), and a re
   return J(f.map((x) => [x.name, x.tags])) === J([["a", []], ["b", ["504"]], ["c", []]]);
 })());
 check("property hooks are found: name: (a) => ..., name: async function (...), name: x => ...", J(findFunctions("export default defineRule({\n  /** @rule 504 */\n  actionAllowed: (c, a) => null,\n  afterAction: async function (c) { return []; },\n  spawnTile: c => null,\n});\n").map((f) => [f.name, f.tags.length])) === '[["actionAllowed",1],["afterAction",0],["spawnTile",0]]');
+check("hookClaimProblems: a tagged decoy function with the hook's name elsewhere does not stand in for the real hook (`hook: impl`), and a hook with no definition line at all fails closed", (() => {
+  const decoy = "/** @rule 202 */\nfunction actionAllowed() {}\nexport default defineRule({\n  rule: 202,\n  actionAllowed: impl,\n});\n";
+  const none = "export default defineRule({ rule: 202, ...other });\n";
+  return hookClaimProblems("rules/202.ts", decoy, ["actionAllowed"]).length === 1 && hookClaimProblems("rules/202.ts", none, ["actionAllowed"]).length === 1;
+})());
+check("regexes and division: a regex after return or ( with a quote in it is skipped; division after ) or } is not mistaken for one", (() => {
+  const f = findFunctions("function a() { return /'/.test(x); }\nconst d = (a + b) / 2; const e = {} / 3;\nfunction b() { return x / 2 / 3; }\nconst r = [/`/, /\"/];\nfunction c() {}\n");
+  return J(f.map((x) => x.name)) === '["a","b","c"]';
+})());
 check("hookClaimProblems: every hook the LOADED module has must be a tagged function the scan can see (a multi-line signature fails closed)", (() => {
   const ok = hookClaimProblems("rules/504.ts", "export default defineRule({\n  /** @rule 504 */\n  actionAllowed(a) {\n  },\n});\n", ["actionAllowed"]);
   const miss = hookClaimProblems("rules/504.ts", "export default defineRule({\n  /** @rule 504 */\n  actionAllowed(\n    a,\n  ) {\n  },\n});\n", ["actionAllowed"]);
   const untagged = hookClaimProblems("rules/504.ts", "export default defineRule({\n  actionAllowed(a) {\n  },\n});\n", ["actionAllowed"]);
-  return ok.length === 0 && miss.length === 1 && /hook actionAllowed has no function with a @rule tag/.test(miss[0]) && untagged.length === 1;
+  return ok.length === 0 && miss.length === 1 && /hook actionAllowed has no @rule tag the checker can see/.test(miss[0]) && untagged.length === 1;
 })());
 {
   const r = runClaimsCheck();
@@ -291,7 +300,7 @@ check("the game's claims also say what each rule works with: 202 shares actionAl
 })());
 must("a node_modules folder in a game fails the build (the build links its own engine; a game must not supply one)", { GAMES_SOURCE: tree("bad", (d) => put(d, "node_modules/promptocracy/package.json", `{"name":"promptocracy","exports":{"./engine":"./e.js","./engine/testing":"./e.js"}}`)) }, /top level may hold only[\s\S]*not node_modules/);
 must("any other unknown top-level file fails the build too", { GAMES_SOURCE: tree("bad", (d) => put(d, "build.mjs", "export const x = 1;\n")) }, /not build\.mjs/);
-must("a hook written in a shape the claim scan cannot see fails the build, naming the hook", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/505.ts", readFileSync(pjoin(FIX, "rules/505.ts"), "utf8").replace("spawnTile(ctx, candidates) {", "spawnTile(\n    ctx,\n    candidates,\n  ) {"))) }, /hook spawnTile has no function with a @rule tag/);
+must("a hook written in a shape the claim scan cannot see fails the build, naming the hook", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/505.ts", readFileSync(pjoin(FIX, "rules/505.ts"), "utf8").replace("spawnTile(ctx, candidates) {", "spawnTile(\n    ctx,\n    candidates,\n  ) {"))) }, /hook spawnTile has no @rule tag the checker can see/);
 {
   mkdirSync(pjoin(work, "sandbox"), { recursive: true }); const probe = realpathSync(pjoin(work, "sandbox"));
   writeFileSync(pjoin(probe, "p.mjs"), `const out = {};\nconst t = (k, f) => { try { f(); out[k] = "ALLOWED"; } catch (e) { out[k] = e.code ?? "other"; } };\nconst fs = process.getBuiltinModule("fs");\nt("read-etc", () => fs.readFileSync("/etc/hosts"));\nt("read-proc", () => fs.readFileSync("/proc/self/environ"));\nt("write", () => fs.writeFileSync(${J(pjoin(work, "sandbox-wrote.txt"))}, "x"));\nt("child", () => process.getBuiltinModule("child_process").execSync("echo hi"));\nt("worker", () => new (process.getBuiltinModule("worker_threads").Worker)("1", { eval: true }));\nt("read-own", () => fs.readFileSync("p.mjs"));\nconsole.log(JSON.stringify(out));\n`);
@@ -299,6 +308,10 @@ must("a hook written in a shape the claim scan cannot see fails the build, namin
   const o = r.ok ? JSON.parse(r.stdout) : {};
   check("game code runs sandboxed: it can read its own folder, and cannot read other files (/etc, /proc), write a file, start a process or a worker", o["read-own"] === "ALLOWED" && ["read-etc", "read-proc", "write", "child", "worker"].every((k) => o[k] === "ERR_ACCESS_DENIED") && !existsSync(pjoin(work, "sandbox-wrote.txt")), r.out.slice(0, 400));
 }
+must("a package.json that names itself promptocracy (or maps exports/imports) would replace the engine: it fails the build", { GAMES_SOURCE: tree("bad", (d) => put(d, "package.json", `{"name":"promptocracy","type":"module","exports":{"./engine":"./docs/fake.js"}}`)) }, /package\.json may not be named promptocracy/);
+const escapeTest = (assertion) => `import { test } from "node:test";\nimport assert from "node:assert/strict";\nconst j = (...a: string[]) => a.join("");\nconst F = (0 as any)[j("con", "structor")][j("con", "structor")];\ntest("a run-time-built name gets a handle; what can it reach?", () => {\n  const p = F("return " + j("pro", "cess"))();\n  const fs = p.getBuiltinModule("fs");\n${assertion}\n});\n`;
+must("game code that gets past the lint by building names at run time still cannot read the platform checkout (the build fails if it can)", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/202.test.ts", escapeTest(`  assert.ok(fs.readFileSync(${J(pjoin(ROOT, "wrangler.toml"))}, "utf8"), "read the platform's wrangler.toml");\n  assert.ok(fs.readdirSync("node_modules/promptocracy/..").length);`))) }, /the game's tests fail against this engine[\s\S]*read the platform's wrangler\.toml|ERR_ACCESS_DENIED/);
+check("and what it can see of the engine is only the staged copy: no .git, no .dev.vars, no wrangler.toml, no node_modules beside it", quiet(() => bundle({ GAMES_SOURCE: tree("bad", (d) => put(d, "rules/202.test.ts", escapeTest(`  assert.deepEqual(fs.readdirSync("node_modules/promptocracy").sort(), ["package.json", "scripts", "src"]);\n  assert.throws(() => fs.readFileSync(${J(pjoin(ROOT, "wrangler.toml"))}, "utf8"), /ERR_ACCESS_DENIED|Access to this API has been restricted/);\n  assert.throws(() => fs.writeFileSync("rules/x.txt", "x"));\n  assert.throws(() => p.getBuiltinModule("child_process").execSync("echo hi"));`))) })) === null);
 check("BUNDLE_SKIP_TESTS=1 skips the game's tests (and only the tests: the lint and the checks still run)", quiet(() => bundle({ BUNDLE_SKIP_TESTS: "1", GAMES_SOURCE: tree("bad", (d) => put(d, "rules/202.test.ts", `import { test } from "node:test";\ntest("x", () => { throw new Error("no"); });\n`)) })) === null);
 {
   process.env.PROMPTOCRACY_TEST_SECRET = "hunter2";

@@ -184,11 +184,11 @@ fetches it (`git clone --depth 1`, over https, no token), and bundles it only if
 `game.json` lists exactly the modules in `rules/`; every module passes the lint (it may import only
 `promptocracy/engine` and may not name `fetch`, `globalThis`, `process`, `env` ... see `src/engine/lint.js`); the
 modules load and assemble, and `RULES.md`, `settings.json` and the modules agree; and the game's own tests pass
-against this engine. Game code only runs in child processes with a scrubbed environment (no deploy token) under Node's permission model (`node --permission`): it may read its own folder and the engine's source, and cannot write a file, start a process, open a worker or read anything else (the network is the one thing the permission model does not cover). A game's top level may hold only `RULES.md`, `game.json`, `settings.json`, `package.json`, `README.md`, `rules/`, `rulings/` and similar plain files: no `node_modules` (the build links its own engine), no symlinks.
+against this engine. Game code only runs in child processes with a scrubbed environment (no deploy token) under Node's permission model (`node --permission`): it may read its own folder (which holds a plain-file copy of the engine, never a link to the checkout) and nothing else, and cannot write a file, start a process, open a worker or read anything else (the network is the one thing the permission model does not cover). A game's top level may hold only `RULES.md`, `game.json`, `settings.json`, `package.json`, `README.md`, `rules/`, `rulings/` and similar plain files: no `node_modules` (the build stages its own engine), no symlinks, and a `package.json` may not be named `promptocracy` or have `exports`/`imports`.
 Any failure stops the build, so a bad game never ships. The result is `src/generated/` (gitignored), and a game
 with a bundle is answered from it: `/<slug>/api/rules` serves the bundled `RULES.md`, so the text you read is the
 text whose code is running. A game with no bundle falls back to its repo (above) and the starter pack.
-Needs Node 22.6 or newer (it strips the modules' types; the Workers Builds image defaults to Node 24, and 22.23 is also preinstalled).
+Needs Node 22.13 or newer (it strips the modules' types and runs game code under `--permission`; the Workers Builds image defaults to Node 24, and 22.23 is also preinstalled).
 
 `GAMES_SOURCE=dir` reads `dir/<slug>/` instead of GitHub (the tests use `tests/fixtures/games`), so
 `npm test` never touches the network; `BUNDLE_SKIP_TESTS=1` skips running the game's tests. Rule order is rule number

@@ -130,13 +130,24 @@ export function overClaimed(file, src, max = 3) {
 }
 
 /**
- * For a module the build has really loaded: every hook it exports must be a function that carries a tag. The line scan
- * above can miss an odd shape (a multi-line signature), and this closes that gap: the hook names come from the module,
- * not from the text. Returns problems. @rule 101
+ * For a module the build has really loaded: every hook it exports must be written as a function that carries a tag.
+ * The line scan above can miss an odd shape (a multi-line signature, `hook: someOtherFunction`), and this closes that
+ * gap from the other side: `hookNames` come from the loaded module, and EVERY line that starts as that hook's definition
+ * (`name(`, `async name(`, `name:`) must be a function the scan sees with a tag, and there must be at least one. A tagged
+ * decoy function elsewhere with the same name does not help (it does not start as a definition), and a hook the scan
+ * cannot read fails closed. Returns problems. @rule 101
  */
 export function hookClaimProblems(file, src, hookNames) {
-  const claimed = new Set(findFunctions(src).filter((f) => f.tags.length).map((f) => f.name));
-  return hookNames.filter((h) => !claimed.has(h)).map((h) => `${file}: hook ${h} has no function with a @rule tag the checker can see (write it as \`${h}(...) {\` or \`${h}: (...) =>\` on one line, with a /** @rule n */ block above)`);
+  const lines = String(src).split("\n");
+  const fns = findFunctions(src);
+  const problems = [];
+  for (const name of hookNames) {
+    const start = new RegExp(`^\\s*(?:async\\s+)?${name}\\s*[(:]`);
+    const at = lines.flatMap((l, i) => (start.test(l) ? [i + 1] : []));
+    const ok = at.length > 0 && at.every((n) => fns.some((f) => f.line === n && f.name === name && f.tags.length));
+    if (!ok) problems.push(`${file}: hook ${name} has no @rule tag the checker can see (write it as \`${name}(...) {\` or \`${name}: (...) =>\` on one line, with a /** @rule n */ block directly above)`);
+  }
+  return problems;
 }
 
 /** Orders rule numbers the way a reader does: 202.2 before 202.10 before 505. @rule 101 */

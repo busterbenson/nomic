@@ -27,7 +27,7 @@
 //   BUNDLE_OUT=dir        where to write (default src/generated)
 //   BUNDLE_SKIP_TESTS=1   skip running the tests (the wrangler dev of the test suite; the tests run them once, directly)
 import { execFileSync, spawnSync } from "node:child_process";
-import { cpSync, existsSync, lstatSync, realpathSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -40,6 +40,7 @@ import { validateSettings } from "../src/lib/settings.js";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const TOP_LEVEL = new Set(["RULES.md", "game.json", "settings.json", "package.json", "package-lock.json", "README.md", "LICENSE", "LICENSE.md", ".gitignore", "rules", "rulings", "docs", ".github"]);
 const MAX_RULES_BYTES = 200_000;
+const MAX_FILES = 1000, MAX_BYTES = 10_000_000;
 const SLUG = /^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/;
 const REPO = /^[A-Za-z0-9_-][A-Za-z0-9._-]*\/[A-Za-z0-9_-][A-Za-z0-9._-]*$/;
 
@@ -59,23 +60,41 @@ export function runNode(args, cwd, label, { timeout = 120_000 } = {}) {
 }
 
 // Game code (its modules' top-level code, its tests) runs under Node's permission model on top of the scrubbed
-// environment: it can read the game's own folder and the engine's source, and nothing else. It cannot write a file,
-// start a process or open a worker, and it cannot read /proc/<pid>/environ or the platform's other files. (Node's
-// permission model does not cover the network; with nothing secret reachable there is nothing to send.)
+// environment: it can read the game's own folder (which holds a staged COPY of the engine, see stageEngine) and
+// nothing else. It cannot write a file, start a process or open a worker, and it cannot read /proc/<pid>/environ or
+// anything of the platform checkout. (Node's permission model does not cover the network; with nothing secret reachable
+// there is nothing to send.) The starter pack is the platform's own code and also reads src/, scripts/ and package.json.
 // `node --permission` needs Node 22.13 or newer (22.6+ has --experimental-permission).
-export function runSandboxed(scriptArgs, dir, label, { timeout = 120_000 } = {}) {
+export function runSandboxed(scriptArgs, dir, label, { timeout = 120_000, platformReads = false } = {}) {
   const flags = process.allowedNodeEnvironmentFlags;
   const perm = flags.has("--permission") ? "--permission" : flags.has("--experimental-permission") ? "--experimental-permission" : null;
   if (!perm) fail("this Node has no permission model (--permission); the build needs Node 22.13 or newer to run game code safely");
-  const reads = [realpathSync(dir), realpathSync(join(ROOT, "src")), realpathSync(join(ROOT, "scripts")), realpathSync(join(ROOT, "package.json"))];
+  const reads = [realpathSync(dir)];
+  if (platformReads) reads.push(realpathSync(join(ROOT, "src")), realpathSync(join(ROOT, "scripts")), realpathSync(join(ROOT, "package.json")));
   return runNode([perm, ...reads.map((p) => `--allow-fs-read=${p}`), ...scriptArgs], dir, label, { timeout });
 }
 
+// The engine a game's modules and tests import ("promptocracy/engine"), copied as plain files into the game's own
+// node_modules. NOT a link to the platform checkout: a link would make the whole checkout (.git, .dev.vars ...)
+// readable from inside the game's folder. Only the files the engine API needs are copied.
+export function stageEngine(dir) {
+  const rootPkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
+  const dest = join(dir, "node_modules", "promptocracy");
+  mkdirSync(join(dest, "src", "engine"), { recursive: true });
+  mkdirSync(join(dest, "src", "lib"), { recursive: true });
+  mkdirSync(join(dest, "scripts"), { recursive: true });
+  writeFileSync(join(dest, "package.json"), JSON.stringify({ name: rootPkg.name, type: "module", exports: rootPkg.exports }, null, 2));
+  for (const f of ["api.js", "api.d.ts", "hooks.js", "rulesmd.js", "testing.js"]) cpSync(join(ROOT, "src", "engine", f), join(dest, "src", "engine", f));
+  for (const f of ["geometry.js", "settings.js", "board-rules.js"]) cpSync(join(ROOT, "src", "lib", f), join(dest, "src", "lib", f));
+  cpSync(join(ROOT, "scripts", "check-game.mjs"), join(dest, "scripts", "check-game.mjs"));
+  return dest;
+}
+
 // Runs each test file as its own script (node:test files run standalone), sandboxed. {ok, passed, out}.
-export function runTestFiles(files, dir, label) {
+export function runTestFiles(files, dir, label, opts = {}) {
   let passed = 0, out = "";
   for (const f of files) {
-    const r = runSandboxed([f], dir, label);
+    const r = runSandboxed([f], dir, label, opts);
     out += `\n== ${f}\n${r.out}`;
     passed += Number((/# pass (\d+)/.exec(r.out) ?? [])[1] ?? 0);
     if (!r.ok) return { ok: false, passed, out };
@@ -112,12 +131,14 @@ function fetchGame(slug, repo, base, into) {
 
 // A fetched game must be plain files and folders: a symlink could point the build at a file outside the game
 // (RULES.md -> a file with secrets would be published at /api/rules).
-export function assertNoLinks(dir, label) {
+export function assertNoLinks(dir, label, tally = { files: 0, bytes: 0 }) {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
     const st = lstatSync(p);
     if (st.isSymbolicLink()) fail(`${label}: ${p.slice(dir.length)} is a symlink; a game may hold only plain files and folders`);
-    if (st.isDirectory()) assertNoLinks(p, label);
+    if (st.isDirectory()) assertNoLinks(p, label, tally);
+    else { tally.files++; tally.bytes += st.size; }
+    if (tally.files > MAX_FILES || tally.bytes > MAX_BYTES) fail(`${label}: the game is too big (over ${MAX_FILES} files or ${MAX_BYTES / 1e6} MB)`);
   }
 }
 
@@ -130,6 +151,11 @@ export function checkTree(dirIn, label, { starter = false, skipTests = false } =
   if (!starter) {
     // Only these may sit at the top of a game. Above all no node_modules: the build links its own engine there.
     const top = readdirSync(dir).filter((n) => !TOP_LEVEL.has(n));
+    if (existsSync(join(dir, "package.json"))) {
+      // A package.json that names itself promptocracy, or maps imports, would replace the engine the build links.
+      const pj = readJson(join(dir, "package.json"), `${label}: package.json`);
+      if (pj.name === "promptocracy" || "exports" in pj || "imports" in pj) fail(`${label}: package.json may not be named promptocracy or have "exports" or "imports" (it would replace the engine)`);
+    }
     if (top.length) fail(`${label}: the game's top level may hold only ${[...TOP_LEVEL].join(", ")}; not ${top.join(", ")}`);
   }
   const rulesPath = join(dir, "RULES.md");
@@ -165,12 +191,8 @@ export function checkTree(dirIn, label, { starter = false, skipTests = false } =
   const claims = claimMap(sources);
 
   // Game code runs only from here on, and only in a child with a scrubbed environment.
-  if (!starter) {
-    const nm = join(dir, "node_modules");
-    mkdirSync(nm, { recursive: true });
-    if (!existsSync(join(nm, "promptocracy"))) symlinkSync(ROOT, join(nm, "promptocracy"), "dir");
-  }
-  const chk = runSandboxed([join(ROOT, "scripts", "check-game.mjs"), dir], dir, "check");
+  const staged = starter ? null : stageEngine(dir);
+  const chk = runSandboxed([staged ? join(staged, "scripts", "check-game.mjs") : join(ROOT, "scripts", "check-game.mjs"), dir], dir, "check", { platformReads: starter });
   let verdict;
   try { verdict = JSON.parse(chk.stdout.trim().split("\n").pop()); } catch { fail(`${label}: the module check did not run:\n${chk.out.slice(-1500)}`); }
   if (verdict.problems.length) fail(`${label}: ${verdict.problems.join("\n  ")}`);
@@ -182,7 +204,7 @@ export function checkTree(dirIn, label, { starter = false, skipTests = false } =
   if (!skipTests) {
     const tf = tests.map((f) => `rules/${f}`);
     if (!tf.length) fail(`${label}: no tests (rules/*.test.ts). A game's rules need tests.`);
-    const t = runTestFiles(tf, dir, "tests");
+    const t = runTestFiles(tf, dir, "tests", { platformReads: starter });
     if (!t.ok) fail(`${label}: the game's tests fail against this engine:\n${t.out.slice(-4000)}`);
     testSummary = `${t.passed} passed`;
   }
@@ -228,7 +250,7 @@ export function bundleGames(env = process.env) {
     const startDir = join(ROOT, "templates");
     const sp = checkTree(startDir, "starter pack", { starter: true, skipTests: true });
     if (!skipTests) {
-      const t = runTestFiles(readdirSync(join(startDir, "rules")).filter((f) => /\.test\.ts$/.test(f)).sort().map((f) => `rules/${f}`), startDir, "starter tests");
+      const t = runTestFiles(readdirSync(join(startDir, "rules")).filter((f) => /\.test\.ts$/.test(f)).sort().map((f) => `rules/${f}`), startDir, "starter tests", { platformReads: true });
       if (!t.ok) fail(`the starter pack's tests fail:\n${t.out.slice(-4000)}`);
       sp.tests = `${t.passed} passed`;
     }
