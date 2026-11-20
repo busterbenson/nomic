@@ -247,6 +247,20 @@ console.log("the drafter upgrades: the 110.1 floor on a game that lacks the clau
   check("a candidate the model checked with collides true joins its conflicts (union, no duplicates); false, own, unknown and non-boolean ones don't", !ck.error && J(ck.conflicts) === J(["301", "105"]), J(ck));
   check("the candidate paragraph asks for 'checked' only when there are candidates", /"checked"/.test(withC.user) && !/"checked"/.test(without.user) && !/"checked"/.test(without.system));
 
+  // Review findings (pass 1): the 110.1 floor guard, prefilled edits with candidates, defaults filled in by structured output,
+  // fixed parts never offered as candidates.
+  check("a reword of 104 on a game without 104.4 can't smuggle a '104.4 ...' clause in (the floor guard doesn't open that door)",
+    typeof readModelAnswer(RB, rq("104", "x"), '{"after_text": "A proposal passes if a third vote yes.\\n\\n104.4 Everyone sees every vote at once.", "conflicts": [], "settings": {}}').message === "string" &&
+    readModelAnswer(RB, rq("104", "x"), '{"after_text": "A proposal passes if a third vote yes.\\n\\n104.4 Everyone sees every vote at once.", "conflicts": [], "settings": {}}').reason === "scope");
+  const pw = "A player whose proposal passes gets 10 points.";
+  const prefC = readModelAnswer(RB, rq("401", pw, { prefilled: true }), '{"after_text": "something else", "conflicts": ["402"], "settings": {}, "checked": [{"num": "403", "collides": true}, {"num": "402", "collides": false}]}');
+  check("a prefilled edit with candidates keeps the player's exact words and joins the checked candidates to its conflicts", prefC.after_text === pw && J(prefC.conflicts) === J(["402", "403"]), J(prefC));
+  const filled = readModelAnswer(RB, rq("504.2", "make the chart radius 3"), '{"after_text": "When you move, every tile within three tiles of you is charted. [setting: board.chart_radius]", "conflicts": [], "settings": {"max_players": 8, "board.island": {"width": 8, "height": 8}, "mcp_enabled": true, "board.chart_radius": 3}}');
+  check("settings structured output filled with the game's defaults for settings the words never named are ignored, the one asked for stays", !filled.error && J(filled.settings) === J({ "board.chart_radius": 3 }), J(filled));
+  check("an unnamed setting set to something other than its default is still refused as scope",
+    readModelAnswer(RB, rq("504.2", "x"), '{"after_text": "When you move, tiles near you are charted.", "conflicts": [], "settings": {"max_players": 3}}').reason === "scope");
+  check("fixed parts (110.1, 202.4) are never offered as candidates: naming one would refuse the draft", !nums("202", "tidy it").some((n) => fixedParts(RB).includes(n)) && !nums("203.1", "x").includes("110.1"), J([nums("202", "tidy it"), nums("203.1", "x")]));
+
   // The drafter's request (src/lib/drafter.ts), with fetch captured: no network, no key.
   const { build } = await import("esbuild");
   const tmp = mkdtempSync(pjoin(tmpdir(), "promptocracy-drafter-flags-"));
@@ -273,6 +287,23 @@ console.log("the drafter upgrades: the 110.1 floor on a game that lacks the clau
     allReq.output_config.effort === "low" && allReq.output_config.format?.type === "json_schema" && J(allReq.output_config.format.schema) === J(answerSchema()) && /Parts the code found/.test(allReq.messages[0].content[1].text));
   check("the cached part is byte-identical for two different players' requests (the cache can hit)",
     J((await sentWith("cache")).messages[0].content[0]) === J((await sentWith("cache")).messages[0].content[0]));
+  // A 400 on the schema: ask once more without it; a 400 without the schema is just a failure. Every request seen, in order.
+  const seq = async (flags, statuses) => {
+    const real = globalThis.fetch, seen = [], err = console.error; let i = 0;
+    globalThis.fetch = async (url, init) => { seen.push(JSON.parse(init.body)); const st = statuses[Math.min(i++, statuses.length - 1)]; return new Response(JSON.stringify(st === 200 ? { content: [{ type: "text", text: raw }] } : { error: {} }), { status: st }); };
+    console.error = () => {};
+    let outcome;
+    try { outcome = (await drafter.draftRewording({ MODEL_API_KEY: "stub-key-not-real", DRAFTER_FLAGS: flags }, RB, readFileSync(pjoin(ROOT, "tests/fixtures/rickshaw-day-0.2/RULES.md"), "utf8"), r)).conflicts; } catch (e) { outcome = e.code; } finally { globalThis.fetch = real; console.error = err; }
+    return { seen, outcome };
+  };
+  const retried = await seq("structured", [400, 200]), notRetried = await seq("none", [400, 200]), twice = await seq("structured", [400, 400]);
+  check("the API refusing the schema (400) is asked again once without it, and that answer is used", retried.seen.length === 2 && "format" in retried.seen[0].output_config && !("format" in retried.seen[1].output_config) && J(retried.outcome) === J(["301"]), J(retried.outcome));
+  check("a 400 with no schema is a failure at once (no second request), and a second 400 is a failure after exactly one retry", notRetried.seen.length === 1 && notRetried.outcome === "failed" && twice.seen.length === 2 && twice.outcome === "failed");
+  const errs = []; const realErr = console.error; console.error = (...x) => errs.push(x.join(" "));
+  const mixed = F("candidates,-cache"), spaced = F(" Cache , STRUCTURED "), typo = F("cahce");
+  console.error = realErr;
+  check("DRAFTER_FLAGS: a list with a plus name is exactly those on ('candidates,-cache' = candidates only), spaces and case don't matter, a misspelt name turns nothing on and says so",
+    mixed === J({ candidates: true, cache: false, structured: false }) && spaced === J({ candidates: false, cache: true, structured: true }) && typo === F("none") && errs.some((e) => /unknown DRAFTER_FLAGS name cahce/.test(e)), J(errs));
 }
 
 // ---------------------------------------------------------------- migration 0006 on a database with data

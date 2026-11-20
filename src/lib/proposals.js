@@ -178,7 +178,9 @@ export function conflictCandidates(book, target, words = "") {
   const own = (k) => k === target || k.startsWith(target + ".") || target.startsWith(k + ".");
   const targetRaw = node.kind === "clause" ? node.paras.map(paraTxt).join(" ") : [...node.paras.map(paraTxt), ...node.clauses.flatMap((c) => c.paras.map(paraTxt))].join(" ");
   const out = new Map();   // num -> why (the first reason wins)
-  const add = (num, why) => { if (!out.has(num) && has(book, num) && !own(num)) out.set(num, why); };
+  // A fixed part (rule 110.1) is never offered: naming one as a conflict refuses the whole draft, and a change that touches one directly is refused by fixedRefusal already.
+  const fixed = new Set(fixedParts(book));
+  const add = (num, why) => { if (!out.has(num) && has(book, num) && !own(num) && !fixed.has(num)) out.set(num, why); };
   for (const n of referencesTo(book, target)) add(n, `cites ${target}`);
   for (const n of citedIn(`${targetRaw} ${words}`)) add(n, `the text cites it`);
   const keys = new Set(settingKeysIn(targetRaw));
@@ -402,6 +404,8 @@ export function readModelAnswer(book, req, raw) {
   for (const [k, v] of Object.entries(a.settings || {})) {
     const flat = v !== null && typeof v === "object" && !Array.isArray(v) && Object.values(v).every((x) => ["string", "number", "boolean"].includes(typeof x));
     if (!["string", "number", "boolean"].includes(typeof v) && !flat) return { error: "malformed" };
+    // Structured output may fill settings the words never mentioned with the game's defaults: that asks for nothing.
+    if (!tags.has(k) && JSON.stringify(v) === JSON.stringify(DEFAULT_SETTINGS[k])) continue;
     if (!tags.has(k)) return refuse("scope", `The words also change ${k}, which ${req.target} doesn't name. Change one thing at a time.`);
     if (!settingValueOk(k, v)) return refuse("setting", `The game can't run ${k} as ${JSON.stringify(v)}.`);
     settings[k] = v;

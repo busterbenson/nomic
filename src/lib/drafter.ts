@@ -29,11 +29,13 @@ export const DEFAULT_FLAGS: DrafterFlags = { candidates: true, cache: false, str
 export function drafterFlags(env: Env): DrafterFlags {
   const raw = (env.DRAFTER_FLAGS ?? "").trim();
   if (!raw) return { ...DEFAULT_FLAGS };
-  const names = raw.split(",").map((x) => x.trim()).filter(Boolean);
+  const names = raw.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+  // Names without a minus are exactly the levers that are on; only minus names start from the default and remove from it.
   const on = names.every((n) => n.startsWith("-")) ? { ...DEFAULT_FLAGS } : { candidates: false, cache: false, structured: false };
   for (const n of names) {
     const k = n.replace(/^-/, "") as keyof DrafterFlags;
     if (k in on) on[k] = !n.startsWith("-");
+    else if (n !== "none") console.error("drafter: unknown DRAFTER_FLAGS name", n.slice(0, 30));
   }
   return on;
 }
@@ -52,20 +54,26 @@ export async function draftRewording(env: Env, book: any, rulesMd: string, req: 
   const content = flags.cache
     ? [{ type: "text", text: p.rulebook, cache_control: { type: "ephemeral" } }, { type: "text", text: p.rest }]
     : p.user;
+  const send = (structured: boolean) => fetch(`${base}/v1/messages`, {
+    method: "POST",
+    signal: AbortSignal.timeout(25_000),
+    headers: { "content-type": "application/json", "x-api-key": env.MODEL_API_KEY as string, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({
+      model: env.MODEL_NAME || "claude-haiku-5-5",
+      max_tokens: 2000,
+      output_config: structured ? { effort: "low", format: { type: "json_schema", schema: answerSchema() } } : { effort: "low" },
+      system: p.system,
+      messages: [{ role: "user", content }],
+    }),
+  });
   let res: Response;
   try {
-    res = await fetch(`${base}/v1/messages`, {
-      method: "POST",
-      signal: AbortSignal.timeout(25_000),
-      headers: { "content-type": "application/json", "x-api-key": env.MODEL_API_KEY, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({
-        model: env.MODEL_NAME || "claude-haiku-5-5",
-        max_tokens: 2000,
-        output_config: flags.structured ? { effort: "low", format: { type: "json_schema", schema: answerSchema() } } : { effort: "low" },
-        system: p.system,
-        messages: [{ role: "user", content }],
-      }),
-    });
+    res = await send(flags.structured);
+    // The API refusing the schema (a 400) must not take rewording down: ask once more without it. The post-checks read either answer.
+    if (res.status === 400 && flags.structured) {
+      console.error("drafter: the schema was refused (400), asking again without it");
+      res = await send(false);
+    }
   } catch (e: any) {
     console.error("drafter: request failed:", e?.name || "error");
     throw new DrafterError("failed", "The moderator could not draft that just now. Try again in a minute.");
