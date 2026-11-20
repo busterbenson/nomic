@@ -36,6 +36,8 @@ try {
   // the midnight roll: day 1 is over, day 2 is open, and both proposals are on its ballot
   d1(state, `UPDATE proposals SET status = 'on_ballot' WHERE game_id = '${gid}' AND status = 'confirmed'`);
   d1(state, `UPDATE days SET status = 'done' WHERE game_id = '${gid}' AND n = 1; UPDATE games SET day = 2 WHERE id = '${gid}'; INSERT INTO days (game_id, n, starts_at, ends_at, status) VALUES ('${gid}', 2, '2000-01-02T00:00:00.000Z', '${new Date(Date.now() + (7 * 60 + 41) * 60000).toISOString()}', 'open')`);   // 7 h 41 m left: far from the midnight lock for the length of a run
+  // day 2's electorate is the three players, as the midnight roll would have written it (rule 104.2)
+  d1(state, `INSERT INTO electors (game_id, day, player_id) SELECT game_id, 2, id FROM players WHERE game_id = '${gid}'; UPDATE days SET electorate = 3 WHERE game_id = '${gid}' AND n = 2`);
   // a second game still being set up (one player, not started), seen by nobody logged in
   const open = await createGame(state, { slug: "setup", name: "Setting Up", repo: "busterbenson/chrome-game", rulesBase: stub.base });
   await join(srv.base, "setup", open.code, { email: "dee@example.com", name: "Dee", color: "marigold" });

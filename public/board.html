@@ -66,12 +66,14 @@
   // The board is drawn from /api/board, the players and the log from /api/game, the rulebook from /api/rules
   // (the game's own repo, fetched by the server). /api/me, /api/day and /api/notifications say who is looking and what they may do.
   // The page is: header (bell, account chip) - the board band, its move bar and the players - the book (tabs).
-  // Slots other work fills carry data-slot="...": moon, recap, ballot-count, ballot-vote, rule-action, recent-days,
-  // history-days, catalog-entries, player-today, bar-action. They are empty containers here; the CSS hides them while empty.
+  // Slots other work fills carry data-slot="...": moon, recap, rule-action, recent-days, history-days, catalog-entries,
+  // player-today, bar-action. They are empty containers here; the CSS hides them while empty. ballot-count and ballot-vote
+  // are filled by ballot.js (the Yes / No boxes, drawn in each ballot row and in a rule's card).
   import { ensureDefs } from "/js/pieces.js";
   import { mountRulebook } from "/js/rulebook.js";
   import { createProposer, diffOf } from "/js/propose.js";
   import { createCards } from "/js/cards.js";
+  import { createBallot } from "/js/ballot.js";
   import { mini, playerPill, hexOf } from "/js/people.js";
   const SLUG = location.pathname.split("/")[1] || "";
   const BASE = "/" + SLUG;
@@ -95,7 +97,7 @@
   };
   let ME = null, DATA = null;   // who is looking, and the last /api/game
   let DAY = null, END_ASK = false, DAY_AT = 0, DAY_TIMER = 0, DAY_TICK = 0;   // the last /api/day, the End turn confirm, when it was fetched
-  let PROP = null, BOOK = null, CARDS = null;   // the proposal controller (propose.js), the mounted rulebook, the card host
+  let PROP = null, BAL = null, BOOK = null, CARDS = null;   // the proposal controller (propose.js), the mounted rulebook, the card host
   let BOARD = null, SEL = null, VIEW = null;   // the last /api/board, the selected tile {x,y}, the drawn board
   let TAB = "summary", BOARD_OPEN = true, LASTMOVE = null, NOTES = { list: [], unread: 0 }, RULES_OK = false;
   ensureDefs();
@@ -211,7 +213,8 @@
   async function load() {
     showNotice();
     CARDS = createCards({ root: $("mroot"), describe });   // closing a card keeps what you were writing: it is there when the card opens again
-    PROP = createProposer({ api, me: () => ME, day: () => DAY, pill, refresh: async () => { await refresh(); loadNotes(); } });
+    BAL = createBallot({ api, pill: by => pill(by, false), redraw: redrawBallot, refreshed: refresh });
+    PROP = createProposer({ api, me: () => ME, day: () => DAY, pill, vote: (n, o) => BAL.box(n, o), refresh: async () => { await refresh(); loadNotes(); } });
     drawTabs(); drawBook();
     loadMe();
     const [g] = await Promise.all([api("/api/game"), loadDay()]);
@@ -219,7 +222,7 @@
     else drawGame(g.data);
     // the rulebook shows each rule's settings, so it waits for the board's reply (which carries them)
     const [rules] = await Promise.all([fetch(BASE + "/api/rules").then(async r => { if (!r.ok) throw new Error("rules " + r.status); return r.text(); }).catch(() => null), boardLoaded]);
-    await PROP.load();
+    await Promise.all([PROP.load(), BAL.load()]);
     if (rules === null) { $("rules").innerHTML = '<p class="err" style="padding:20px 28px">Rules unavailable right now.</p>'; drawBook(); return; }
     BOOK = mountRulebook($("rules"), rules, { settings: (BOARD && BOARD.settings) || {}, proposer: PROP, cards: CARDS, action: ruleAction });
     BOOK.onCount(() => { drawTabs(); drawBook(); });
@@ -256,6 +259,8 @@
     const need = p.needs ? (p.needs.mark === "unanimous" ? `It needs all ${p.needs.of} votes to pass.` : `It needs ${p.needs.needed} of ${p.needs.of} votes to pass.`) : "";
     return `proposed ${what}. ${need}`;
   }
+  // The ballot rows and the open card, drawn again (a vote came back, or its message timed out).
+  const redrawBallot = () => { drawBook(); if (BOOK) BOOK.redraw(); if (CARDS && CARDS.isOpen()) CARDS.redraw(); };
   const ballotList = () => (PROP ? PROP.onBallot() : []);
   const votedCount = () => (DAY && DAY.you ? Number(DAY.you.voted) || 0 : 0);   // how many of today's ballot items you have voted on (/api/day); the Yes / No boxes go in the ballot-vote slots
   const pointsFor = () => { const r = BOOK && BOOK.rulebook.byNum["401"]; const m = r && /gets (\d+) points?/.exec(JSON.stringify(r.paras.concat(...r.clauses.map(c => c.paras)))); return m ? Number(m[1]) : null; };
@@ -275,9 +280,9 @@
   }
   function summaryHTML() {
     const bl = ballotList();
-    const ballot = `<section class="sw" id="sballot" aria-label="Today's ballot"><div class="swh"><h2>Today's ballot</h2><span class="m" data-slot="ballot-count">${bl.length ? plural(bl.length, "proposal") : ""}</span></div>
+    const ballot = `<section class="sw" id="sballot" aria-label="Today's ballot"><div class="swh"><h2>Today's ballot</h2><span class="m" data-slot="ballot-count">${!bl.length ? "" : BAL && BAL.hasYou() ? `${BAL.voted()} of ${BAL.total()} voted` : plural(bl.length, "proposal")}</span></div>
       ${bl.length ? `<ul class="sl">${bl.map(p => `<li id="sb-${esc(p.n)}"><p class="sbs">${PROP.pPill(p)} ${pill(p.by, p.mine)} ${sentence(p)}</p>
-        <div class="sdiff">${p.title ? `<p class="sdh">${esc(p.title)}</p>` : ""}<p class="mono head">${esc(p.head || "")}</p><p>${diffOf(p)}</p></div><div class="vrow slot" data-slot="ballot-vote" data-pn="${esc(p.n)}"></div></li>`).join("")}</ul>` : `<p class="mnote">Nothing is on today's ballot.</p>`}</section>`;
+        <div class="sdiff">${p.title ? `<p class="sdh">${esc(p.title)}</p>` : ""}<p class="mono head">${esc(p.head || "")}</p><p>${diffOf(p)}</p></div><div class="vrow slot" data-slot="ballot-vote" data-pn="${esc(p.n)}">${BAL ? BAL.box(p.n) : ""}</div></li>`).join("")}</ul>` : `<p class="mnote">Nothing is on today's ballot.</p>`}</section>`;
     const cat = `<section class="sw cat" aria-label="Catalog"><div class="swh"><h2>Catalog</h2><button type="button" class="linkbtn" data-tab="catalog">Open the catalog →</button></div><p class="mnote" data-slot="catalog-entries">No entries yet.</p></section>`;
     return `<div class="sgrid"><section class="sw day" id="sday" aria-label="Today"></section>
       <div class="slot recapw" data-slot="recap"></div>
@@ -344,7 +349,7 @@
     const go = el => { if (el) el.scrollIntoView({ behavior: reduced() ? "auto" : "smooth", block: what === "board" ? "center" : "start" }); };
     if (what === "board") { if (!BOARD_OPEN) { BOARD_OPEN = true; drawMoveBar(); } go($(BOARD_OPEN ? "movebar" : "playtop")); const b = $("movebar").querySelector("button"); if (b) b.focus({ preventScroll: true }); return; }
     if (TAB !== "summary") setTab("summary");
-    const first = what === "ballot" ? ($("sballot").querySelector("li") || $("sballot")) : $("spropose");
+    const first = what === "ballot" ? ($("sb-" + (BAL && BAL.firstOpen())) || $("sballot").querySelector("li") || $("sballot")) : $("spropose");
     go(first); first.classList.add("ring"); setTimeout(() => first.classList.remove("ring"), 1700);
   }
   async function loadDay() {
@@ -499,7 +504,7 @@
     if (d.ok) { DAY = d.data; DAY_AT = Date.now(); }
     if (g.ok) { DATA = g.data; }
     if (b.ok) { BOARD = b.data; if (VIEW) VIEW.setData(b.data, myKey()); }
-    if (PROP) await PROP.load();
+    await Promise.all([PROP ? PROP.load() : 0, BAL ? BAL.load() : 0]);
     drawWho(); if (g.ok) drawGame(g.data); if (b.ok) drawBoard(b.data); drawTabs(); drawBook(); drawMoveBar();
     if (BOOK) BOOK.redraw();
     if (CARDS && CARDS.isOpen()) CARDS.redraw();
@@ -540,6 +545,15 @@
     if (pl && DATA) { CARDS.hidePreview(); if (pl.dataset.fromacct) await closePanels(); openPlayer(pl.dataset.pl, inCard); return; }
     const use = t.closest("[data-muse]");
     if (use) { CARDS.close(); jumpTo("board"); return; }
+    const vb = t.closest("[data-vote]");
+    if (vb) {
+      if (vb.disabled || !BAL) return;
+      const where = vb.closest("#mroot") ? "#mroot" : "#p-summary";
+      await BAL.click(vb);
+      const again = document.querySelector(`${where} [data-vote="${vb.dataset.vote}"][data-pn="${vb.dataset.pn}"]`);   // the boxes were drawn again: keep the keyboard where it was
+      if (again && !again.disabled) again.focus({ preventScroll: true });
+      return;
+    }
     const pe = t.closest("#p-summary [data-p]");
     if (pe && PROP && !pe.disabled) { PROP.click(pe); return; }
     const b = t.closest("[data-endturn]");

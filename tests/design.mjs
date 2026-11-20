@@ -3,7 +3,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join as pjoin } from "node:path";
 import { ROOT } from "./lib.mjs";
-import { parseRules, markOf, renderMarkdown, hl } from "../public/js/rulebook.js";
+import { parseRules, markOf, renderMarkdown, hl, linkCites } from "../public/js/rulebook.js";
 import { TRACED, ROLES, FOOT, HEIGHT } from "../public/js/pieces-data.js";
 import { createProposer } from "../public/js/propose.js";
 
@@ -151,6 +151,16 @@ check("no size rule reaches an svg through a descendant selector (each piece is 
 check("a recently changed rule's warm sand is a token with a dark value too (no color lives outside theme.css)", /--warm1:/.test(css.slice(0, css.indexOf("@media"))) && /--warm1:/.test(dark) && !/#F2DFB4|#4C4023/i.test(read("public/site.css")));
 check("the page has no sticky or fixed elements except the card layer (S1-SUM-07)", !/position:\s*sticky/.test(read("public/site.css")) && (read("public/site.css").match(/position:\s*fixed/g) || []).length === 2);
 check("the pages no longer ship the WebGL board: no three.js in public/ or the Worker's routes", !readdirSync(pjoin(ROOT, "public")).includes("vendor") && !/three/i.test(read("src/index.ts")));
+
+console.log("citations link to their rule, in both voices");
+{
+  const by = { "202.4": 1, "504": 1, "103": 1 };
+  const out = (t) => linkCites(t, by);
+  const btn = (n) => `<button type="button" class="xref" data-seecard="${n}" data-clause="${n}" aria-haspopup="dialog" aria-label="Preview ${n}">${n}</button>`;
+  check("the old voice 'rule 202.4' links as before", out("see rule 202.4 here") === `see rule ${btn("202.4")} here`);
+  check("the new voice '(202.4)' links its number and keeps the parentheses", out("until midnight (202.4).") === `until midnight (${btn("202.4")}).` && out("(504)") === `(${btn("504")})`);
+  check("a parenthesised number that is not a rule is left alone, and so are numbers already inside a link", out("(999) and (12)") === "(999) and (12)" && out("rule 202.4 (202.4)") === `rule ${btn("202.4")} (${btn("202.4")})`);
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

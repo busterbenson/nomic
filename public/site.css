@@ -455,3 +455,18 @@ button.me[aria-expanded="true"]{border-color:var(--ink)}
   .dstep .ds{font-size:.56rem}
 }
 @media (prefers-reduced-motion:reduce){.sw.ring,.sl>li.ring{animation:none}.ptile:hover{transform:none}.bcard:hover{transform:none}}
+
+/* The ballot: Yes / No (rule 104), in each ballot row and in the rule's card. Your vote is filled and carries a check, so it never rests on color alone. */
+.vbox{display:flex;flex-direction:column;gap:6px;min-width:0}
+.vbtns{display:flex;gap:8px}
+.vbtn{flex:0 0 auto;min-width:96px;height:40px;padding:0 18px;border-radius:999px;border:1.5px solid var(--ink);background:transparent;color:var(--ink);font-family:var(--font-mono);font-size:.78rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:2px}
+.vbtn:hover:not(:disabled):not(.on){background:var(--surface)}
+.vbtn.on{background:var(--ink);color:var(--sea)}
+.vbtn:disabled{cursor:not-allowed;border-color:var(--line);color:var(--ink-muted)}
+.vbtn.on:disabled{background:var(--ink-muted);border-color:var(--ink-muted);color:var(--sea)}
+.vturn,.vwhy,.vnote{margin:0;font-size:.7rem;color:var(--ink-muted);display:flex;align-items:center;gap:4px 6px;flex-wrap:wrap}
+.vwhy,.vnote{font-family:var(--font-body);font-size:.84rem}
+.vmsg{margin:0;font-size:.84rem;font-weight:600}
+.vmsg:empty{display:none}
+.vmsg.err{color:var(--ink);border-left:3px solid var(--accent);padding-left:8px}
+@media (max-width:560px){.vbtns .vbtn{flex:1}}

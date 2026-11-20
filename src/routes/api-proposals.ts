@@ -112,7 +112,7 @@ export async function draft(ctx: Ctx, player: any, body: any, nowMs: number): Pr
       after = a.after_text; settings = a.settings; modelConflicts = a.conflicts;
     } catch (e: any) {
       if (!(e instanceof DrafterError)) throw e;
-      return out({ error: e.message, drafting: e.code }, e.code === "unavailable" ? 503 : 502);
+      return out({ error: e.message, drafting: e.code }, e.code === "unavailable" ? 503 : e.code === "refused" ? 422 : 502);
     }
   }
   // The model may take a while: the write is timed when its answer is in, so a draft that finishes after midnight

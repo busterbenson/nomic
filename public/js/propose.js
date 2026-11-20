@@ -6,6 +6,7 @@
 //     me() / day()       the last /api/me and /api/day (day().you.can.propose says whether proposing is allowed, and why not)
 //     refresh()          reload the page's state after a confirm or a withdraw (it calls P.load() and P.redraw())
 //     pill(by, mine)     the page's player pill (piece + name) for a proposer {name, color}; optional
+//     vote(n, opts)      the vote box HTML for an item on today's ballot (ballot.js), drawn in its tracked change; optional
 //   P.load()             fetch GET /api/proposals
 //   P.attach({ RB, redraw, openAdd, openPick, closeAdd })   rulebook.js: the parsed rules, a redraw, and how to open the "add a rule" and "which block" cards
 // Drafting is free and repeatable; only confirming counts. Nothing here decides what is allowed: the server's answers
@@ -70,7 +71,7 @@ const settingsHTML = (p) => {
 /** @rule 105.1 */
 const needText = (p) => (p.needs ? `${p.needs.mark} · needs ${p.needs.needed} of ${p.needs.of}` : p.mark || "");
 
-export function createProposer({ api, me, day, refresh, pill }) {
+export function createProposer({ api, me, day, refresh, pill, vote }) {
   const S = { list: [], today: null, ui: null, RB: null, redraw: () => {}, openAdd: () => {}, openPick: () => {}, closeAdd: () => {} };
 
   /** @rule 103.2 */
@@ -118,7 +119,7 @@ export function createProposer({ api, me, day, refresh, pill }) {
     const w = waiting && p.mine && canWithdraw() ? `<button class="linkbtn" type="button" data-p="withdraw" data-id="${esc(p.id)}">Withdraw</button>` : "";
     const err = S.ui && S.ui.wErr && S.ui.wId === p.id ? `<p class="notice err" role="alert">${esc(S.ui.wErr)}</p>` : "";
     return `<div class="chg${waiting ? " mine" : ""}" data-pn="${esc(p.n || "")}"><div class="ch">${pPill(p)}${playerPill(p)}<span class="pill ${waiting ? "drafting" : "bal"}">${waiting ? "On tomorrow's ballot" : "On today's ballot"}</span>${w}</div>
-<p class="mono head">${esc(p.head || "")}</p><p class="cdiff">${diffOf(p)}</p>${settingsHTML(p)}${p.conflict_note ? `<p class="cnote">${withPills(p.conflict_note)}</p>` : ""}<p class="needline mono">${esc(needText(p))}</p>${waiting ? "" : `<div class="slot" data-slot="ballot-vote" data-pn="${esc(p.n || "")}"></div>`}${err}</div>`;
+<p class="mono head">${esc(p.head || "")}</p><p class="cdiff">${diffOf(p)}</p>${settingsHTML(p)}${p.conflict_note ? `<p class="cnote">${withPills(p.conflict_note)}</p>` : ""}<p class="needline mono">${esc(needText(p))}</p>${waiting ? "" : `<div class="slot" data-slot="ballot-vote" data-pn="${esc(p.n || "")}">${vote ? vote(p.n, { note: true }) : ""}</div>`}${err}</div>`;
   }
 
   // ---- what a rule's card gets -------------------------------------------------------------------------------
