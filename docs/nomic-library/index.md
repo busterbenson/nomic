@@ -11,8 +11,11 @@ Notes marked "library note" are suggestions, not rules. Nothing here is a rule o
 | 3 | [Voting: thresholds, quorum, abstention, blocs](03-voting.md) | 2026-11-20 |
 | 4 | [Judgment and disputes: CFJs, appeals, ratification](04-judgment-and-disputes.md) | 2026-11-20 |
 | 5 | [Loopholes and scams](05-loopholes-and-scams.md) | 2026-11-20 |
+| 6 | [Rule structure: precedence, mutability, paradox](06-rule-structure.md) | 2026-11-20 |
+| 7 | [Pace and engagement: cadence, idle players, onboarding](07-pace-and-engagement.md) | 2026-11-20 |
+| 8 | [Game state and economies: ledgers, currencies, contracts](08-game-state-and-economies.md) | 2026-11-20 |
 
-Coming: rule structure (precedence, conflicts, paradoxes); pace and engagement; game state and economies; eras and resets; social dynamics; code is law; history and lineage.
+Coming: eras and resets; social dynamics; code is law; history and lineage.
 
 ## Main sources
 - Peter Suber, [Nomic, the initial set of rules](http://web.archive.org/web/2015/http://www.earlham.edu/~peters/writing/nomic.htm) (1982, via the Wayback Machine)
