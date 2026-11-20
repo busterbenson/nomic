@@ -10,7 +10,7 @@
 // Environment (read from ~/chalantbot/.env by the launchd wrapper; never printed):
 //   PROMPTOCRACY_API            https://promptocracy.us (or a preview URL)
 //   PROMPTOCRACY_MODERATOR_TOKEN_<SLUG>   the game's bearer token (SLUG upper-cased, - as _)
-//   PROMPTOCRACY_GAME_REPO_<SLUG>         the repo to push to (default git@github.com:<repo from the Worker>.git)
+//   PROMPTOCRACY_GAME_REPO_<SLUG>         the repo to push to (default https://github.com/<repo from the Worker>.git; the mini has no GitHub SSH key, git uses the gh credential helper)
 //   CLOUDFLARE_WORKERS_TOKEN, CLOUDFLARE_ACCOUNT_ID, PROMPTOCRACY_BUILD_TRIGGER   the deploy trigger (Workers Builds)
 //   MODERATOR_STATE_DIR (default ~/chalantbot/logs/promptocracy-moderator), MODERATOR_NOTIFY_DIR
 //   (default ~/chalantbot/_notifications), MODERATOR_CLAUDE (default `claude`)
@@ -746,7 +746,7 @@ export function openAuditPrWith({ platformRepo, gh = "gh" }) {
     const work = mkdtempSync(join(tmpdir(), "moderator-audit-"));
     try {
       const dir = join(work, "p");
-      git(["clone", "-q", "--depth", "1", "--", `git@github.com:${platformRepo}.git`, dir], work);
+      git(["clone", "-q", "--depth", "1", "--", `https://github.com/${platformRepo}.git`, dir], work);
       const f = join(dir, "tests", "drafter-cases.json");
       const doc = JSON.parse(readFileSync(f, "utf8"));
       if (doc.cases.some((x) => x.id === c.id)) return;
@@ -770,7 +770,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (!token) { console.error(`moderator: no ${envKey("PROMPTOCRACY_MODERATOR_TOKEN", slug)} in the environment`); process.exit(2); }
   const api = process.env.PROMPTOCRACY_API || "https://promptocracy.us";
   const repo = JSON.parse(readFileSync(join(ROOT, "games.manifest.json"), "utf8")).games?.[slug]?.repo;
-  const repoUrl = process.env[envKey("PROMPTOCRACY_GAME_REPO", slug)] || (repo && `git@github.com:${repo}.git`);
+  const repoUrl = process.env[envKey("PROMPTOCRACY_GAME_REPO", slug)] || (repo && `https://github.com/${repo}.git`);
   if (!repoUrl) { console.error(`moderator: ${slug} is not in games.manifest.json`); process.exit(2); }
   const chalant = join(homedir(), "chalantbot");
   const r = await runOnce({
