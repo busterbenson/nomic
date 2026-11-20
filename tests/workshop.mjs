@@ -72,6 +72,10 @@ try {
     return { n, o, e, k };
   };
 
+  // The limit is the game's own setting (rule 103.2, proposals.per_day, default 3). This run holds it at 1 so a commission and
+  // the day's one proposal compete; the section on the limit itself raises it.
+  const setPerDay = (v) => d1(state, `UPDATE games SET settings = json_set(settings, '$."proposals.per_day"', ${v}) WHERE id = '${gid}'`);
+  setPerDay(1);
   d1(state, `UPDATE games SET status = 'playing' WHERE id = '${gid}'`);
   await client(A).get("/wk/api/day");
 
@@ -122,9 +126,9 @@ try {
   check("it is hidden from others until it is on the ballot (like any proposal), and Ana sees her own with its ticket", hidden.proposals.length === 0 && mineList.proposals.length === 1 && mineList.proposals[0].kind === "commission" && mineList.proposals[0].ticket.n === "W3");
   console.log("the day's limit is the proposals' own (rule 103.2)");
   const second = await commission(Ana, good({ title: "A second thing" }));
-  check("a second commission the same day is refused with the proposals' own sentence, and leaves no stray proposal row", second.k.status === 409 && /already proposed today/.test(second.k.data.error) && d1(state, "SELECT COUNT(*) AS n FROM proposals WHERE kind = 'commission'")[0].n === 1 && tk(4).state === "Draft" && tk(4).proposal_id === null, second.k.text);
+  check("a second commission the same day is refused with the proposals' own sentence, and leaves no stray proposal row", second.k.status === 409 && /the most a day/.test(second.k.data.error) && d1(state, "SELECT COUNT(*) AS n FROM proposals WHERE kind = 'commission'")[0].n === 1 && tk(4).state === "Draft" && tk(4).proposal_id === null, second.k.text);
   const ordinary = await Ana.post("/wk/api/proposals", { kind: "repeal", target: "403" });
-  check("and an ordinary proposal the same day is refused too: a commission counts as the day's proposal", ordinary.status === 409 && /already proposed today/.test(ordinary.data.error), ordinary.text);
+  check("and an ordinary proposal the same day is refused too: a commission counts as the day's proposal", ordinary.status === 409 && /the most a day/.test(ordinary.data.error), ordinary.text);
   console.log("withdrawing a commission");
   const wd = await Ana.post(`/wk/api/proposals/${d1(state, "SELECT id FROM proposals WHERE number = 1")[0].id}/withdraw`, {});
   check("withdrawing it sends the ticket back to a draft, unlinked, with a log line", wd.status === 200 && tk(3).state === "Draft" && tk(3).proposal_id === null && d1(state, `SELECT kind FROM ticket_log WHERE ticket_id = '${tk(3).id}' ORDER BY id`).map((r) => r.kind).join() === "proposed,withdrawn", wd.text);
@@ -231,6 +235,15 @@ try {
   const oc = await Bo.post(`/wk/api/proposals/${ow.data.proposal.id}/confirm`, {});
   const owd = await Bo.post(`/wk/api/proposals/${ow.data.proposal.id}/withdraw`, {});
   check("an ordinary proposal can be confirmed, withdrawn and (the day's slot freed) proposed again", oc.status === 200 && owd.status === 200 && d1(state, `SELECT status FROM proposals WHERE id = '${ow.data.proposal.id}'`)[0].status === "withdrawn" && d1(state, "SELECT COUNT(*) AS n FROM tickets WHERE state = 'Proposed' AND proposal_id IS NULL")[0].n === 0);
+  console.log("the limit is the game's setting (rule 103.2), for commissions too");
+  setPerDay(2);
+  const lim1 = await commission(Bo, good({ title: "A flag", makes: [{ kind: "entry", name: "Flag" }] }));
+  const lim2 = await Bo.post("/wk/api/proposals", { kind: "repeal", target: "403" });
+  const lim2c = await Bo.post(`/wk/api/proposals/${lim2.data.proposal?.id}/confirm`, {});
+  const lim3 = await commission(Bo, good({ title: "A third thing" }));
+  check("with proposals.per_day at 2, Bo's commission and an ordinary proposal both confirm the same day; a third (a commission again) is refused with the limit's sentence and leaves no stray row",
+    lim1.k.status === 200 && lim2c.status === 200 && lim3.k.status === 409 && /the most a day/.test(lim3.k.data.error) && d1(state, `SELECT COUNT(*) AS n FROM proposals WHERE title = 'A third thing'`)[0].n === 0, J([lim1.k.text, lim2c.text, lim3.k.text]));
+  setPerDay(1);
   console.log("the midnight lock (rule 107.1)");
   dev("clock", plus(day(game().day).ends_at, 1));
   const lk = [await Ana.post(T, {}), await Cy.post(`${T}/W3/edit`, { title: "x" }), await Ana.post(`${T}/W3/confirm`, {})];
@@ -243,7 +256,7 @@ try {
   const tok = await connect(A, "wk", Bo, SITE);
   const lt = await tool(A, "wk", tok.access_token, "list_tickets");
   const lt2 = JSON.parse(lt.text);
-  check("list_tickets returns the list: newest first, with title, state, estimate and price", !lt.isError && lt2.tickets.map((t) => t.n).join() === "W5,W4,W3,W2,W1" && lt2.tickets[2].price === 3, lt.text.slice(0, 200));
+  check("list_tickets returns the list: newest first, with title, state, estimate and price", !lt.isError && lt2.tickets.map((t) => t.n).join() === "W7,W6,W5,W4,W3,W2,W1" && lt2.tickets.find((t) => t.n === "W3").price === 3, lt.text.slice(0, 200));
   const rt = await tool(A, "wk", tok.access_token, "read_ticket", { ticket: "W3" });
   const rt2 = JSON.parse(rt.text).ticket;
   check("read_ticket returns the page: brief, makes, tasks, log and the thread", !rt.isError && rt2.brief.startsWith("A dragon that") && rt2.posts.length >= 2 && rt2.log.length === 4, rt.text.slice(0, 200));

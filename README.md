@@ -118,9 +118,9 @@ two games is two unrelated players.
 
 The host (the first player to join) starts a game with the Start button, `POST /<slug>/api/start` or the MCP tool
 `start_game` (rules 102.2, 203.1): the game goes to `playing` and day 1 begins.
-Once playing, the game runs one day at a time (rule 203.1). Each player may move once, end their turn, and make one
-proposal a day (rule 103): `POST /<slug>/api/proposals` drafts it (free and repeatable; code drafts the mechanical
-kinds, a small model drafts rewording in plain words), `.../proposals/<id>/confirm` makes it the day's one proposal
+Once playing, the game runs one day at a time (rule 203.1). Each player may move once, end their turn, and confirm up to
+`proposals.per_day` proposals a day (3 by default; rule 103.2): `POST /<slug>/api/proposals` drafts it (free and repeatable; code drafts the mechanical
+kinds, a small model drafts rewording in plain words), `.../proposals/<id>/confirm` makes it one of the day's proposals
 (P1, P2, ... on the next day's ballot) and `.../withdraw` takes it back until midnight or End turn. `POST /api/turn` is
 draft + confirm in one call.
 Each day's ballot is the proposals confirmed the day before (rule 104.3): `POST /<slug>/api/votes {proposal: "P3",

@@ -52,7 +52,8 @@ try {
     sql("PRAGMA foreign_key_check").length === 0 && sql("PRAGMA foreign_key_list(votes)").some((f) => f.table === "proposals") && sql("PRAGMA foreign_key_list(vote_events)").some((f) => f.table === "proposals") && sql("PRAGMA foreign_key_list(tickets)").some((f) => f.table === "proposals"));
   const idx = sql("SELECT name FROM sqlite_master WHERE type = 'index'").map((r) => r.name);
   check("the indexes the rebuild drops are back, and the new tables have theirs",
-    ["proposals_number", "proposals_one_a_day", "proposals_ballot", "proposals_target", "votes_day", "vote_events_proposal", "tickets_number", "tickets_proposal", "tickets_queue", "ticket_log_decided_once", "ticket_posts_ticket"].every((n) => idx.includes(n)), J(idx));
+    ["proposals_number", "proposals_day_count", "proposals_ballot", "proposals_target", "votes_day", "vote_events_proposal", "tickets_number", "tickets_proposal", "tickets_queue", "ticket_log_decided_once", "ticket_posts_ticket"].every((n) => idx.includes(n)), J(idx));
+  check("the old unique one-a-day index stays gone (0009 replaced it): a player can have several confirmed proposals on a day", !idx.includes("proposals_one_a_day"));
   check("no table is left under its temporary name", !sql("SELECT name FROM sqlite_master WHERE name LIKE '%\\_new' ESCAPE '\\'").length);
   check("the four new tables start empty", ["tickets", "ticket_tasks", "ticket_log", "ticket_posts"].every((t) => sql(`SELECT COUNT(*) AS n FROM ${t}`)[0].n === 0));
 
@@ -60,7 +61,7 @@ try {
   check("the new kind 'commission' and the new status 'approved' are accepted; an unknown kind or status is still refused",
     !refused(com("k1", "draft")) && !refused(com("k2", "approved", ", 7, 'majority', 4, 'x'")) &&
     refused(com("k3", "draft").replace("'commission'", "'bogus'")) && refused(com("k4", "bogus")));
-  check("the old rules still hold: a draft has no number, a confirmed one needs its mark and ballot day, one confirmed a day per player, numbers unique per game",
+  check("the old rules still hold: a draft has no number, a confirmed one needs its mark and ballot day, numbers unique per game",
     refused(com("k5", "confirmed")) && refused(com("k6", "confirmed", ", 8, 'majority', 9, 'x'")) && refused(com("k7", "approved", ", 7, 'majority', 4, 'x'")) && refused(`UPDATE proposals SET number = 1 WHERE id = 'k2'`));
   check("votes still need their proposal and their elector", refused(`INSERT INTO votes (game_id, proposal_id, player_id, day, vote, cast_at, updated_at) VALUES ('gp','nope','p0',3,'yes','x','x')`) && refused(`INSERT INTO votes (game_id, proposal_id, player_id, day, vote, cast_at, updated_at) VALUES ('gp','k2','p0',9,'yes','x','x')`));
 } catch (e) {

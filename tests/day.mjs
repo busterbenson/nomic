@@ -127,9 +127,10 @@ try {
   const dt = d1(state, `SELECT player_id, moved_at, ended_at FROM day_turns WHERE game_id = '${gid}' AND day = 1`);
   check("each move is recorded in day_turns for day 1 (moved_at = the clock), and the move's log line belongs to day 1", dt.length === 2 && dt.every((r) => r.moved_at === "2026-03-08T19:00:00.000Z" && r.ended_at === null) && d1(state, `SELECT day, phase FROM events WHERE game_id = '${gid}' AND kind = 'piece_moved'`).every((e) => e.day === 1 && e.phase === "day"), J(dt));
   const REPEAL = (words) => ({ kind: "repeal", target: "403", words });
+  d1(state, `UPDATE games SET settings = json_set(settings, '$."proposals.per_day"', 1) WHERE slug = 'day'`); // this flow runs at a limit of 1 (tests/proposals-per-day.mjs covers 3)
   const p1 = await ana.post("/day/api/turn", REPEAL("Make the island bigger."));
   const p2 = await ana.post("/day/api/turn", REPEAL("And again."));
-  check("one proposal a day: Ana proposes once (moving did not stop it); a second one the same day is refused (409)", p1.status === 200 && p2.status === 409 && p2.data.error === "You already proposed today. One proposal a day.", p1.text + " " + p2.text);
+  check("at a limit of 1 a day: Ana proposes once (moving did not stop it); a second one the same day is refused (409) with the number", p1.status === 200 && p2.status === 409 && p2.data.error === "You've proposed 1 today, the most a day (103.2).", p1.text + " " + p2.text);
 
   console.log("End turn is final");
   const cyAt = J(pos().find((p) => p.n === "Cy"));

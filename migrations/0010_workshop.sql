@@ -13,9 +13,8 @@
 -- new children first, drop the old children, drop the old parent, rename the new parent into place, rename the children).
 -- Every column, CHECK, index and row is carried over unchanged; only the two lists grow.
 --
--- Numbered 0010 because the proposals-per-day change is 0009 (it replaces the unique one-a-day index with a plain index). A rebuild
--- recreates the indexes as they stand, so this file must be written against whichever of the two lands first: if that change is
--- in, `proposals_one_a_day` below becomes `proposals_day_count` (non-unique, as its 0009 makes it).
+-- Written after 0009 (proposals per day), which replaced the unique index proposals_one_a_day with the plain index
+-- proposals_day_count: the rebuild recreates the indexes as they stand after 0009.
 --
 -- What it does to existing rows: nothing. Every proposal, vote and vote event is copied as it is (same ids, numbers,
 -- statuses), and the five new tables start empty.
@@ -104,9 +103,9 @@ ALTER TABLE proposals_new RENAME TO proposals;
 ALTER TABLE votes_new RENAME TO votes;
 ALTER TABLE vote_events_new RENAME TO vote_events;
 
--- The indexes the rebuild drops with the old tables, as 0006, 0007 and 0008 made them.
+-- The indexes the rebuild drops with the old tables, as 0006 to 0009 left them.
 CREATE UNIQUE INDEX proposals_number ON proposals(game_id, number);
-CREATE UNIQUE INDEX proposals_one_a_day ON proposals(game_id, player_id, day_proposed) WHERE status NOT IN ('draft', 'withdrawn');
+CREATE INDEX proposals_day_count ON proposals(game_id, player_id, day_proposed) WHERE status NOT IN ('draft', 'withdrawn');
 CREATE INDEX proposals_ballot ON proposals(game_id, day_ballot, status);
 CREATE INDEX proposals_target ON proposals(game_id, target);
 CREATE INDEX votes_day ON votes(game_id, day, player_id);

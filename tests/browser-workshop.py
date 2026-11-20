@@ -93,7 +93,7 @@ with sync_playwright() as p:
     check("1280-light: confirming makes it Proposed: the proposal's P-number is on the page, and the log says so", re.search(r"Proposal\s*P2", card, re.I) and "Put on tomorrow's ballot as P2." in card, card)
     shot(page, "ticket-proposed-1280-light")
     page.keyboard.press("Escape"); page.wait_for_timeout(300)
-    check("1280-light: 'Commission something' is now disabled, with the proposals' own reason", page.locator('[data-w="open"]').is_disabled() and "already proposed" in text(page, "#p-workshop .wkact"))
+    check("1280-light: 'Commission something' stays enabled: Ada has used 1 of her 3 proposals today", page.locator('[data-w="open"]').is_enabled())
     page.click("#tab-summary"); page.wait_for_selector("#spropose")
     check("1280-light: the Summary's 'Your proposal' shows the commission's title, brief and facts, not an empty diff", "A kite" in text(page, "#spropose") and "2 nights · 0 points" in text(page, "#spropose"), text(page, "#spropose"))
     shot(page, "yours-1280-light", full_page=True); sideways(page, 1280, "1280-light yours")

@@ -283,14 +283,16 @@ import { createWorkshop } from "/js/workshop.js";
 
   function proposeCard() {
     if (!(ME && ME.player)) return "";   // not a signed-in player of this game: no Propose card, and nothing in its place
-    const mine = PROP && PROP.mine(), c = PROP ? PROP.canPropose() : { allowed: false, reason: "" };
+    const mine = PROP ? PROP.mineList() : [], c = PROP ? PROP.canPropose() : { allowed: false, reason: "" };
     const active = !!(ME && ME.player && DAY && DAY.you);
-    if (mine) return `<section class="sw pro" id="spropose" aria-label="Your proposal"><div class="swh"><h2>Your proposal, 1 of 1 today</h2></div>${PROP.chgFor(mine)}</section>`;
-    const ended = !!(DAY && DAY.you && DAY.you.ended);
-    if (ended || (DAY && DAY.locked)) return `<section class="sw pro" id="spropose" aria-label="No proposal today"><div class="swh"><h2>No proposal today</h2><span class="m">0 of 1 today</span></div></section>`;
+    const pr = active && DAY.you.proposals, count = pr ? `${pr.made} of ${pr.limit} today` : "";   // your confirmed proposals of the day's limit (proposals.per_day, rule 103.2)
+    const ended = !!(DAY && DAY.you && DAY.you.ended), shut = ended || (DAY && DAY.locked);
+    const head = mine.length ? `<h2>${mine.length > 1 ? "Your proposals" : "Your proposal"}, ${esc(count)}</h2>` : `<h2>Propose a change</h2><span class="m">${esc(count)}</span>`;
+    if (mine.length && shut) return `<section class="sw pro" id="spropose" aria-label="Your proposals"><div class="swh">${head}</div>${mine.map(PROP.chgFor).join("")}</section>`;
+    if (shut) return `<section class="sw pro" id="spropose" aria-label="No proposal today"><div class="swh"><h2>No proposal today</h2><span class="m">${esc(count)}</span></div></section>`;
     const why = active ? c.reason : DATA && DATA.game.status === "setup" ? "The game has not started yet." : "";
     const off = active && c.allowed ? "" : ` disabled title="${esc(why)}"`;
-    return `<section class="sw pro" id="spropose" aria-label="Propose a change"><div class="swh"><h2>Propose a change</h2><span class="m">0 of 1 today</span></div>
+    return `<section class="sw pro" id="spropose" aria-label="Propose a change"><div class="swh">${head}</div>${mine.map(PROP.chgFor).join("")}
       <div class="ptiles"><button type="button" class="ptile" data-tab="rules"${off}><span class="pt2">Rulebook</span><span class="pm2">${BOOK && BOOK.count() ? plural(BOOK.count(), "rule") : ""}</span><span class="pa2">+ Change or add a rule</span></button>
       <button type="button" class="ptile" data-tab="workshop"${off}><span class="pt2">Workshop</span><span class="pm2">${WS && WS.count() ? plural(WS.count(), "ticket") : ""}</span><span class="pa2">+ Commission something</span></button></div>${active && !c.allowed ? `<p class="mnote">${esc(c.reason)}</p>` : ""}</section>`;
   }
@@ -336,14 +338,13 @@ import { createWorkshop } from "/js/workshop.js";
     } else if (box) {
       box.hidden = false;
       const you = DAY.you, ended = !!(you && you.ended);
-      const mineP = PROP && PROP.mine();
       const bl = ballotList();
       // End turn is the one filled button on the page once your move, your votes and your proposal are all in; before that it is ghost (OPEN-06 (3): lean yes)
       const allDone = !!(you && you.moved && you.proposed && votedCount() === bl.length);
       const step = (done, jump, label, doneLabel, detail) => `<li><button type="button" class="dstep${done ? " done" : ended ? " skip" : ""}" data-jump="${jump}"><span class="ck" aria-hidden="true">${done ? "✓" : ended ? "–" : ""}</span><span class="dt"><span class="dn2">${done ? doneLabel : label}</span>${detail ? `<span class="ds">${esc(detail)}</span>` : ""}</span></button></li>`;
       const myPos = BOARD && ME && ME.player ? BOARD.pieces.find(p => p.color.key === myKey()) : null;
       let html = `<div class="dhead"><h2>Day ${esc(DAY.day)}</h2><span class="moon" data-slot="moon"></span></div>`;
-      if (you) html += `<ul class="dsteps">${step(you.moved, "board", ended ? "No move" : "Move", "Moved", you.moved && myPos ? noLevel(myPos.at.label) : "")}${step(bl.length > 0 && votedCount() === bl.length, "ballot", ended ? "No votes" : "Vote", "Voted", bl.length ? `${votedCount()} of ${bl.length}` : "")}${step(you.proposed, "propose", ended ? "No proposal" : "Propose", "Proposed", you.proposed && mineP ? mineP.n : "")}</ul>`;
+      if (you) html += `<ul class="dsteps">${step(you.moved, "board", ended ? "No move" : "Move", "Moved", you.moved && myPos ? noLevel(myPos.at.label) : "")}${step(bl.length > 0 && votedCount() === bl.length, "ballot", ended ? "No votes" : "Vote", "Voted", bl.length ? `${votedCount()} of ${bl.length}` : "")}${step(you.proposed, "propose", ended ? "No proposal" : "Propose", "Proposed", you.proposed && PROP ? PROP.mineList().map(p => p.n).join(", ") : "")}</ul>`;
       html += `<div class="dend">${ended ? `<span class="clock done">${LOCKSVG}Turn ended</span>`
         : `<span class="clock" id="clock">${esc(clockText())}</span>${you && !END_ASK ? `<button type="button" class="btn small${allDone ? "" : " ghost"}" data-endturn="ask"${you.can.end_turn.allowed ? "" : ` disabled title="${esc(you.can.end_turn.reason || "")}"`}>End turn</button>` : ""}`}</div>`;
       if (you && END_ASK && !ended) {

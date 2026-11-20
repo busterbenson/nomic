@@ -7,15 +7,15 @@ Every function that carries out the game should say which rule it implements, wi
 `src/` is only reported for now: these functions have no claim yet. Site plumbing such as sign-in and email goes
 under rule 101 or 102; a follow-up change claims them and moves `src/` into the strict set.
 
-137 of 278 functions outside `src/engine/` are unclaimed.
+134 of 256 functions outside `src/engine/` are unclaimed.
 
 ## src/index.ts (5)
 
-- line 58: `secure`
-- line 68: `notFound`
-- line 74: `run`
-- line 79: `route`
-- line 176: `fetch`
+- line 57: `secure`
+- line 67: `notFound`
+- line 73: `run`
+- line 78: `route`
+- line 169: `fetch`
 
 ## src/lib/auth.ts (6)
 
@@ -66,9 +66,9 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/lib/mcp-tools.ts (3)
 
-- line 46: `reply`
-- line 47: `asJson`
-- line 49: `registerTools`
+- line 45: `reply`
+- line 46: `asJson`
+- line 48: `registerTools`
 
 ## src/lib/notify.ts (1)
 
@@ -108,22 +108,18 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/lib/settings.js (12)
 
-- line 41: `validTimeZone`
-- line 46: `isInt`
-- line 47: `isObj`
-- line 48: `evenInt`
-- line 52: `max_players`
-- line 56: `mcp_enabled`
-- line 61: `exactly`
-- line 70: `spawnSpots`
-- line 71: `inside`
-- line 79: `validateSettings`
-- line 99: `getSettings`
-- line 113: `settingsForSize`
-
-## src/lib/tickets.js (1)
-
-- line 20: `clean`
+- line 44: `validTimeZone`
+- line 49: `isInt`
+- line 50: `isObj`
+- line 51: `evenInt`
+- line 55: `max_players`
+- line 59: `mcp_enabled`
+- line 65: `exactly`
+- line 74: `spawnSpots`
+- line 75: `inside`
+- line 83: `validateSettings`
+- line 103: `getSettings`
+- line 117: `settingsForSize`
 
 ## src/lib/util.ts (27)
 
@@ -157,11 +153,11 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/routes/api-ballot.ts (1)
 
-- line 32: `pill`
+- line 31: `pill`
 
 ## src/routes/api-day.ts (1)
 
-- line 37: `can`
+- line 39: `can`
 
 ## src/routes/api-login.ts (1)
 
@@ -189,17 +185,12 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/routes/api-proposals.ts (1)
 
-- line 24: `out`
+- line 23: `out`
 
 ## src/routes/api-rules.ts (2)
 
 - line 11: `text`
 - line 14: `get`
-
-## src/routes/api-tickets.ts (2)
-
-- line 22: `out`
-- line 211: `need`
 
 ## src/routes/landing.ts (2)
 
