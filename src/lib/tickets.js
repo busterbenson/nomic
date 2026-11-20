@@ -9,7 +9,6 @@ export const LIMITS = { title: 80, brief: 2000, makeName: 60, makes: 12, tasks: 
 export const WORKSHOP_BLOCK = "800";
 export const WORKSHOP_RULE = "801";
 // The price of a commission until Gremlin sets it (a later step), and why.
-export const NO_GREMLIN = "No Gremlin yet.";
 
 /** "W3", "w3" or 3 -> 3; anything else -> null. @rule 801.2 */
 export function ticketNumber(v) {
@@ -115,10 +114,15 @@ export function readPost(body) {
 // if the player already has a blank draft (two clicks make one). Binds: id, player_id, created_at, updated_at, game_id,
 // player_id, then dayOpenBinds.
 /** @rule 801.2 */
-export const OPEN_DRAFT_SQL = `INSERT INTO tickets (id, game_id, number, player_id, price_reason, state, created_at, updated_at)
-  SELECT ?, g.id, (SELECT COALESCE(MAX(number), 0) + 1 FROM tickets WHERE game_id = g.id), ?, '${NO_GREMLIN}', 'Draft', ?, ? FROM games g
+export const OPEN_DRAFT_SQL = `INSERT INTO tickets (id, game_id, number, player_id, state, created_at, updated_at)
+  SELECT ?, g.id, (SELECT COALESCE(MAX(number), 0) + 1 FROM tickets WHERE game_id = g.id), ?, 'Draft', ?, ? FROM games g
   WHERE g.id = ? AND NOT EXISTS (SELECT 1 FROM tickets b WHERE b.game_id = g.id AND b.player_id = ? AND b.state = 'Draft' AND b.title = '' AND b.brief = '' AND b.makes = '[]')
     AND ${dayOpenSql}`;
+// The edit's own guard (rule 801.2): your draft, not tied to a proposal, and the whole day gate re-checked in the write, so an
+// End turn or the midnight lock that lands after the route's read still stops it. The ticket table is unaliased (tickets).
+// Binds: ticket id, player id, then dayOpenBinds.
+/** @rule 801.2, 107.1, 202.4 */
+export const EDIT_GUARD = `id = ? AND state = 'Draft' AND player_id = ? AND proposal_id IS NULL AND EXISTS (SELECT 1 FROM games g WHERE g.id = tickets.game_id AND ${dayOpenSql})`;
 // The commission's draft proposal, for the confirm to make the day's proposal (rule 801.1). Binds: id, player_id, title, brief,
 // head, base_sha, created_at, game_id, then dayOpenBinds.
 /** @rule 801.1 */

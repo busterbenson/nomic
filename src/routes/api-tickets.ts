@@ -11,8 +11,8 @@
 // Every write that is a move of the day goes through the day's gate (the lock, End turn), in the handler and in the SQL.
 // The price is 0 until Gremlin sets it (a later step).
 import { getPlayer } from "../lib/auth";
-import { clockNow, dayOpenBinds, loadToday } from "../lib/day";
-import { COMMISSION_DRAFT_SQL, OPEN_DRAFT_SQL, WORKSHOP_RULE, canPost, confirmProblem, readFields, readPost, ticketNumber } from "../lib/tickets.js";
+import { clockNow, dayOpenBinds, dayOpenSql, loadToday } from "../lib/day";
+import { COMMISSION_DRAFT_SQL, EDIT_GUARD, OPEN_DRAFT_SQL, WORKSHOP_RULE, canPost, confirmProblem, readFields, readPost, ticketNumber } from "../lib/tickets.js";
 import { refusalBody, turnBlock } from "../lib/turn";
 import { COLS, FROM, ticketView } from "../lib/ticket-view";
 import { Ctx, colorOf, json, nowIso, readJson } from "../lib/util";
@@ -155,13 +155,15 @@ export async function edit(ctx: Ctx, player: any, raw: unknown, body: any, nowMs
   const sets: string[] = [], binds: unknown[] = [];
   for (const k of ["title", "brief", "estimate", "running_cost"]) if (k in f) { sets.push(`${k} = ?`); binds.push(f[k]); }
   if ("makes" in f) { sets.push("makes = ?"); binds.push(JSON.stringify(f.makes)); }
-  const guard = `id = ? AND state = 'Draft' AND player_id = ? AND proposal_id IS NULL AND EXISTS (SELECT 1 FROM games g WHERE g.id = tickets.game_id AND ${"g.status = 'playing' AND g.phase = 'open' AND g.day = ?"})`;
-  const stmts = [env.DB.prepare(`UPDATE tickets SET ${[...sets, "updated_at = ?"].join(", ")} WHERE ${guard}`).bind(...binds, now, t.id, player.id, game.day)];
+  // the write itself re-checks the whole day gate (rule 107.1, 202.4), so an End turn or the midnight lock that lands after
+  // mine()'s read still stops the edit
+  const gate = dayOpenBinds(game.day, nowMs, player.id);
+  const stmts = [env.DB.prepare(`UPDATE tickets SET ${[...sets, "updated_at = ?"].join(", ")} WHERE ${EDIT_GUARD}`).bind(...binds, now, t.id, player.id, ...gate)];
   if ("tasks" in f) {
     // the tasks follow the same gate as the fields: your draft, not on a ballot, the day open
-    const ok = "EXISTS (SELECT 1 FROM tickets x JOIN games g ON g.id = x.game_id WHERE x.id = ? AND x.state = 'Draft' AND x.player_id = ? AND x.proposal_id IS NULL AND g.status = 'playing' AND g.phase = 'open' AND g.day = ?)";
-    stmts.push(env.DB.prepare(`DELETE FROM ticket_tasks WHERE ticket_id = ? AND ${ok}`).bind(t.id, t.id, player.id, game.day));
-    f.tasks.forEach((text: string, i: number) => stmts.push(env.DB.prepare(`INSERT INTO ticket_tasks (ticket_id, pos, text) SELECT ?, ?, ? WHERE ${ok}`).bind(t.id, i + 1, text, t.id, player.id, game.day)));
+    const ok = `EXISTS (SELECT 1 FROM tickets x JOIN games g ON g.id = x.game_id WHERE x.id = ? AND x.state = 'Draft' AND x.player_id = ? AND x.proposal_id IS NULL AND ${dayOpenSql})`;
+    stmts.push(env.DB.prepare(`DELETE FROM ticket_tasks WHERE ticket_id = ? AND ${ok}`).bind(t.id, t.id, player.id, ...gate));
+    f.tasks.forEach((text: string, i: number) => stmts.push(env.DB.prepare(`INSERT INTO ticket_tasks (ticket_id, pos, text) SELECT ?, ?, ? WHERE ${ok}`).bind(t.id, i + 1, text, t.id, player.id, ...gate)));
   }
   const res = await env.DB.batch(stmts);
   if (!(res[0]?.meta?.changes > 0)) return out({ error: "The day changed under you. Reload and try again." }, 409);

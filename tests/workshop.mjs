@@ -4,8 +4,9 @@
 // thread (a visitor can't), and the MCP tools read the list and post. The pure parts first, then a real `wrangler dev` on a
 // LOCAL D1. Run: node tests/workshop.mjs  (migration 0009 itself is proved in tests/workshop-migration.mjs).
 import { createHash } from "node:crypto";
+import { dayOpenBinds } from "../src/lib/day-gate.js";
 import { client, connect, createGame, d1, join, migrate, newState, freePort, startRulesStub, startServer, tool } from "./lib.mjs";
-import { LIMITS, canPost, confirmProblem, readFields, readMakes, readPost, ticketNumber } from "../src/lib/tickets.js";
+import { EDIT_GUARD, LIMITS, canPost, confirmProblem, readFields, readMakes, readPost, ticketNumber } from "../src/lib/tickets.js";
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = "") => { if (ok) { pass++; console.log(`  ok    ${name}`); } else { fail++; console.log(`  FAIL  ${name}${detail ? "  -> " + detail : ""}`); } };
@@ -82,7 +83,7 @@ try {
   console.log("opening a draft (rule 801.2): Commission something");
   check("signed out: 401; the list is public and empty", (await visitor.post(T, {})).status === 401 && (await visitor.get(T)).data?.tickets?.length === 0);
   const o1 = await Ana.post(T, {});
-  check("Ana's first ticket is W1, a draft with no title, price 0 and the reason 'No Gremlin yet.'", o1.status === 200 && o1.data.ticket === "W1" && o1.data.existing === false && tk(1).state === "Draft" && tk(1).price === 0 && tk(1).price_reason === "No Gremlin yet." && tk(1).proposal_id === null, o1.text);
+  check("Ana's first ticket is W1, a draft with no title, price 0 and no price reason (nothing has priced it)", o1.status === 200 && o1.data.ticket === "W1" && o1.data.existing === false && tk(1).state === "Draft" && tk(1).price === 0 && tk(1).price_reason === "" && tk(1).proposal_id === null, o1.text);
   const o1b = await Ana.post(T, {});
   check("opening again gives the same blank draft: no W2, no wasted number", o1b.data.ticket === "W1" && o1b.data.existing === true && d1(state, "SELECT COUNT(*) AS n FROM tickets")[0].n === 1);
   const racing = await Promise.all([Bo.post(T, {}), Bo.post(T, {})]);
@@ -103,6 +104,23 @@ try {
   const ed2 = await Ana.post(`${T}/W1/edit`, { title: "A dragon", tasks: ["Only one"] });
   check("an edit changes only the fields it names; tasks are replaced as a list", ed2.data.ticket.title === "A dragon" && ed2.data.ticket.brief.startsWith("A dragon that") && ed2.data.ticket.tasks.length === 1);
 
+  // The edit's own write re-checks the whole day gate: an End turn that lands after the route's read still stops the edit.
+  {
+    const lit = (v) => (typeof v === "number" ? String(v) : `'${String(v).replace(/'/g, "''")}'`);
+    const n = game().day, tid = tk(1).id, now = new Date(Date.parse(day(n).ends_at) - 60_000).toISOString();
+    const runEdit = (title) => { const b = [title, tid, id.Ana, ...dayOpenBinds(n, Date.parse(now), id.Ana)]; let i = 0; d1(state, `UPDATE tickets SET title = ? WHERE ${EDIT_GUARD}`.replace(/\?/g, () => lit(b[i++]))); return tk(1).title; };
+    const before = tk(1).title;
+    const opened = runEdit("open day") === "open day";
+    d1(state, `INSERT INTO day_turns (game_id, day, player_id, ended_at) VALUES ('${gid}', ${n}, '${id.Ana}', '${now}') ON CONFLICT (game_id, day, player_id) DO UPDATE SET ended_at = excluded.ended_at`);
+    const blocked = runEdit("after end turn") === "open day";
+    d1(state, `UPDATE day_turns SET ended_at = NULL WHERE game_id = '${gid}' AND day = ${n} AND player_id = '${id.Ana}'`);
+    const late = new Date(Date.parse(day(n).ends_at) + 1000).toISOString();
+    const b2 = ["after midnight", tid, id.Ana, ...dayOpenBinds(n, Date.parse(late), id.Ana)]; let j = 0;
+    d1(state, `UPDATE tickets SET title = ? WHERE ${EDIT_GUARD}`.replace(/\?/g, () => lit(b2[j++])));
+    const pastMidnight = tk(1).title === "open day";
+    runEdit(before);
+    check("the edit's write guard repeats the day gate: it writes while the day is open, and changes nothing once Ana's turn has ended or past midnight", opened && blocked && pastMidnight && tk(1).title === before);
+  }
   console.log("801.3: a commission that names nothing to make is refused");
   await Ana.post(`${T}/W1/edit`, good({ makes: [] }));
   const miss = await Ana.post(`${T}/W1/edit`, { title: "" });

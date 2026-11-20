@@ -128,7 +128,7 @@ CREATE TABLE tickets (
   makes TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(makes) AND json_type(makes) = 'array'),
   estimate INTEGER NOT NULL DEFAULT 1 CHECK (estimate >= 1),
   price INTEGER NOT NULL DEFAULT 0 CHECK (price >= 0),
-  price_reason TEXT NOT NULL DEFAULT 'No Gremlin yet.',
+  price_reason TEXT NOT NULL DEFAULT '',
   running_cost TEXT NOT NULL DEFAULT '',
   state TEXT NOT NULL DEFAULT 'Draft' CHECK (state IN ('Draft', 'Proposed', 'Approved', 'Building', 'Done', 'Refused', 'Failed', 'Shelved')),
   proposal_id TEXT REFERENCES proposals(id),

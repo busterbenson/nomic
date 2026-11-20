@@ -105,7 +105,7 @@ ${S.err ? `<p class="notice err" role="alert">${esc(S.err)}</p>` : ""}${S.note ?
   function factsHTML(t) {
     const row = (k, v) => `<div class="tr"><dt>${k}</dt><dd>${v}</dd></div>`;
     return `<dl class="tdl">${row("Brief", `<span class="tbrief">${esc(t.brief) || '<span class="mnote">Empty</span>'}</span>`)}${row("Makes", makesHTML(t))}${row("Estimate", esc(nights(t.estimate)))}
-${row("Price", `${esc(points(t.price))}<span class="mnote"> · ${esc(t.price_reason)}</span>`)}${t.running_cost ? row("Running cost", esc(t.running_cost)) : ""}${t.proposal ? row("Proposal", `<span class="ppill">${esc(t.proposal)}</span>`) : ""}${t.queue ? row("Queue", `Place ${esc(t.queue)}`) : ""}</dl>`;
+${row("Price", `${esc(points(t.price))}${t.price_reason ? `<span class="mnote"> · ${esc(t.price_reason)}</span>` : ""}`)}${t.running_cost ? row("Running cost", esc(t.running_cost)) : ""}${t.proposal ? row("Proposal", `<span class="ppill">${esc(t.proposal)}</span>`) : ""}${t.queue ? row("Queue", `Place ${esc(t.queue)}`) : ""}</dl>`;
   }
   /** @rule 801.2 */
   const tasksHTML = (t) => (t.tasks.length ? `<section class="tsec"><h3>Tasks</h3><ul class="ttasks">${t.tasks.map((x) => `<li${x.done ? ' class="done"' : ""}><span class="ck" aria-hidden="true">${x.done ? "✓" : ""}</span>${esc(x.text)}${x.done && x.done_day ? `<span class="mnote"> · day ${esc(x.done_day)}</span>` : ""}</li>`).join("")}</ul></section>` : "");
