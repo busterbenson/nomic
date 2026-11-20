@@ -522,6 +522,28 @@ console.log("main run (watch)");
   check("main run: a claimed night whose deploy never works is still watched, then its final pass reverts the not-applied change", (r.watched ?? 0) > 0 && /Reverts-Proposal: P3/.test(log), J([r, log.slice(0, 300), readFileSync(join(repo.base, "state", "g.night.jsonl"), "utf8").split("\n").map((l) => l.slice(0, 160))]));
 }
 {
+  // Codex P2 on #30 (second): the main run crashed, so the 01:00 BACKSTOP (watch off) claims the night, and the deploy
+  // never works. It must see the night through like the main run: watch, then a final pass that reverts the change.
+  let clock = Date.now();
+  const deadline = clock + 10 * 60_000;
+  const repo = gameRepo();
+  const w = {
+    job: job([P(3, "401")], { deploy_deadline_at: new Date(deadline).toISOString() }), game: { day: 5 },
+    onGet: (n, s) => {
+      if (s.job?.status === "deploying" && clock > deadline + 4 * 60_000) {
+        s.job = null; s.not_applied = [{ number: 3, day: 1, reason: "the change was applied but did not go live by 2:30 am" }];
+        s.processed = [{ n: 1, status: "timed_out", commit_sha: null }];
+      }
+    },
+  };
+  const claude = fakeClaude({ apply: { 3: { action: "points", to: 15 } } });
+  const worker = await fakeWorker(w);
+  const r = await runOnce({ slug: "g", libraryDir: join(TMP, "no-library"), api: worker.api, token: TOKEN, repoUrl: repo.bare, stateDir: join(repo.base, "state"), notifyDir: join(repo.base, "notify"), claude: claude.cmd, audit: false, watch: false, now: () => clock, sleep: async (ms) => { clock += ms; }, deploy: async () => { throw new Error("the deploy trigger answered 503"); } });
+  await worker.stop();
+  const log = g(["log", "--format=%B", "main"], repo.bare);
+  check("backstop: a night it claims (deploy never works) is watched to the end and its final pass reverts the not-applied change", (r.watched ?? 0) > 0 && /Reverts-Proposal: P3/.test(log), J([r, log.slice(0, 300)]));
+}
+{
   // The backstop must not overlap a main run that is still watching.
   const repo = gameRepo();
   const sd = join(repo.base, "state");

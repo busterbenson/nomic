@@ -570,7 +570,8 @@ export async function runOnce(opts) {
   try { fd = openSync(lock, "wx"); } catch { return { status: "busy" }; }
   writeFileSync(fd, String(process.pid));
   closeSync(fd);
-  try { return opts.watch ? await watchNight(opts, lock) : await runPass(opts); }
+  // Any run that claims or resumes a deploy (the main run, the backstop, a run made up on wake) stays with it to the end.
+  try { return opts.watch ? await watchNight(opts, lock) : await afterPass({ ...opts, watch: true }, lock, await runPass(opts), 0); }
   finally { rmSync(lock, { force: true }); }
 }
 
@@ -594,7 +595,23 @@ async function watchNight(opts, lock) {
   const day0 = p?.game?.day;
   while (p && !p.job && p.game?.day === day0 && now() - t0 < COUNT_WAIT_MIN * 60_000) { await sleep(opts.countPollMs ?? COUNT_POLL_MS); touch(); p = await get(); waits++; }
   // 2. The night's work: the same pass the backstop runs.
-  const r = await runPass(opts);
+  return afterPass(opts, lock, await runPass(opts), waits);
+}
+
+// After a pass: a night it claimed or resumed is watched until the site unlocks (or gives up on it), then one more pass
+// reconciles. Shared by the main run and any other run, so a crashed main run's backstop also sees its night through.
+/** @rule 107.6, 107.7, 107.8 */
+async function afterPass(opts, lock, r, waits) {
+  const now = opts.now ?? (() => Date.now());
+  const sleep = opts.sleep ?? ((ms) => new Promise((r2) => setTimeout(r2, ms)));
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const touch = () => { try { utimesSync(lock, new Date(), new Date()); } catch { /* the lock is only a guard */ } };
+  const get = async () => {
+    try {
+      const res = await fetchImpl(`${opts.api.replace(/\/+$/, "")}/${opts.slug}/api/moderator/pending`, { headers: { authorization: `Bearer ${opts.token}` }, signal: AbortSignal.timeout(20_000) });
+      return res.status === 200 ? await res.json() : null;
+    } catch { return null; }
+  };
   // A pass that failed AFTER the claim (the deploy trigger never worked) still owns a claimed night: keep watching and run
   // the final pass, or the day-N tag keeps changes the Worker then lists as not applied, and a later build ships them.
   const claimedButFailed = r.status === "failed" && (await get())?.job?.status === "deploying";
@@ -867,8 +884,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (!repoUrl) { console.error(`moderator: ${slug} is not in games.manifest.json`); process.exit(2); }
   const chalant = join(homedir(), "chalantbot");
   const stateDir = process.env.MODERATOR_STATE_DIR || join(chalant, "logs", "promptocracy-moderator");
-  // The main run of a night (it starts just after the day's end, per the register) stays for the whole night; any other
-  // start (the backstop, a run launchd made up on wake) is one pass.
+  // The main run of a night (it starts just after the day's end, per the register) waits for the count and stays for the
+  // whole night; any other start (the backstop, a run launchd made up on wake) is one pass, but if that pass claims or
+  // resumes a deploy it too stays until the night resolves and reconciles (afterPass).
   let register = null;
   try { register = JSON.parse(readFileSync(join(stateDir, "register.json"), "utf8")); } catch { /* no register yet: one pass */ }
   const watch = !args.includes("--dry-run") && isMainRun(register, slug, Date.now());
