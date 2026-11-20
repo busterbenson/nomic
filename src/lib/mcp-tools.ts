@@ -1,5 +1,5 @@
 // The MCP tools. A THIN ADAPTER: each tool builds a Request for the matching web route and calls that route's
-// own handler (api-rules, api-board, api-me, api-game, api-day, api-turn, api-action, api-end-turn), so validation, guards, log lines
+// own handler (api-rules, api-board, api-me, api-game, api-day, api-turn, api-proposals, api-action, api-end-turn), so validation, guards, log lines
 // and notifications are the web's, and a change to the turn model reaches MCP with no change here.
 // The player is attached to the internal Request (actAs); no cookie or token is forged.
 // NOT here yet: voting, and a catch-all "take an action". They arrive with the moderator.
@@ -13,6 +13,7 @@ import * as apiDay from "../routes/api-day";
 import * as apiEndTurn from "../routes/api-end-turn";
 import * as apiGame from "../routes/api-game";
 import * as apiMe from "../routes/api-me";
+import * as apiProposals from "../routes/api-proposals";
 import * as apiRules from "../routes/api-rules";
 import * as apiTurn from "../routes/api-turn";
 
@@ -20,7 +21,8 @@ type Handler = (ctx: Ctx) => Promise<Response>;
 type Result = { status: number; text: string; data: any };
 
 // Call a web route's handler as `player`. The path only matters to handlers that build links from it.
-async function viaRoute(ctx: Ctx, player: Player, handler: Handler, method: "GET" | "POST", name: string, body?: unknown): Promise<Result> {
+/** @rule 101 */
+async function viaRoute(ctx: Ctx, player: Player, handler: Handler, method: "GET" | "POST", name: string, body?: unknown, params: Record<string, string> = {}): Promise<Result> {
   const url = new URL(`/${ctx.data.game!.slug}/api/${name}`, ctx.request.url);
   const request = new Request(url, {
     method,
@@ -28,7 +30,7 @@ async function viaRoute(ctx: Ctx, player: Player, handler: Handler, method: "GET
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   actAs(request, player);
-  const res = await handler({ ...ctx, request });
+  const res = await handler({ ...ctx, request, params: { ...ctx.params, ...params } });
   const text = await res.text();
   let data: any = null;
   try { data = JSON.parse(text); } catch {}
@@ -80,11 +82,66 @@ export function registerTools(server: McpServer, ctx: Ctx, player: Player) {
     }) }] };
   });
 
+  // A proposal (rule 103): the player's words and the rule they are about; the moderator drafts the exact change.
+  const proposalArgs = {
+    kind: z.enum(["reword", "addclause", "add", "repeal", "move", "mark"]).describe("reword = change the text of a rule or one clause; addclause = add a clause to a rule (target a rule, or a clause to add after it); add = a new rule in a block (target the block, like 400); repeal = remove a rule or a clause; move = move a rule to another block (give `to`); mark = lock a rule (everyone must agree to change it) or remove the lock"),
+    target: z.string().describe("The rule, clause or block number the change is to, like \"402\", \"402.1\" or, for a new rule, the block \"400\""),
+    words: z.string().optional().describe("The change in plain words (reword, addclause, add), up to 2000 characters. With prefilled: true, the exact new text instead"),
+    to: z.string().optional().describe("For move: the block the rule goes to, like \"300\""),
+    title: z.string().optional().describe("For add: a short title for the new rule"),
+    prefilled: z.boolean().optional().describe("For reword: true when `words` is the exact new wording (the rule's current text, edited), so the moderator uses it as written instead of interpreting it"),
+  };
+  const write = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
+
+  server.registerTool("draft_proposal", {
+    description: "Draft a proposal: the moderator turns your words into the exact change (tracked change against the rules), and tells you what it conflicts with and how many votes it needs. Drafting is free and repeatable and is NOT yet a proposal: nothing is on the ballot until you confirm_proposal with the draft's id. Not after you end your turn; not during the midnight lock (the lock message is returned).",
+    inputSchema: proposalArgs,
+    annotations: write,
+  }, async (args) => {
+    const r = await viaRoute(ctx, player, apiProposals.post, "POST", "proposals", args);
+    if (r.status >= 400) return reply(r);
+    const p = r.data?.proposal ?? {};
+    const text = [
+      `Draft id: ${p.id}`,
+      p.head,
+      p.before_text ? `Before: ${p.before_text}` : null,
+      p.after_text ? `After: ${p.after_text}` : null,
+      p.settings && Object.keys(p.settings).length ? `Sets: ${Object.entries(p.settings).map(([k, v]) => `${k} = ${v}`).join(", ")}` : null,
+      p.conflict_note ? `Conflicts: ${p.conflict_note}` : null,
+      p.needs ? `Needs: ${p.needs.mark}, ${p.needs.needed} of ${p.needs.of} votes` : null,
+      "This is only a draft. Confirm it with confirm_proposal to make it your one proposal today (it goes on tomorrow's ballot).",
+    ].filter(Boolean).join("\n");
+    return reply(r, text);
+  });
+
+  server.registerTool("confirm_proposal", {
+    description: "Confirm a draft: it becomes your one proposal of the day (P1, P2, ... in the order confirmed) and goes on tomorrow's ballot. One a day; you can withdraw it until midnight or until you end your turn (ending your turn is final). Not during the midnight lock (the lock message is returned).",
+    inputSchema: { id: z.string().describe("The draft id from draft_proposal") },
+    annotations: write,
+  }, async ({ id }) => {
+    const r = await viaRoute(ctx, player, apiProposals.action("confirm"), "POST", `proposals/${encodeURIComponent(id)}/confirm`, {}, { id });
+    return reply(r, r.data?.message ?? r.text);
+  });
+
+  server.registerTool("withdraw_proposal", {
+    description: "Withdraw your confirmed proposal of today, before midnight and before you end your turn (ending your turn is final: after it a proposal can't be withdrawn). The proposal keeps its number; your proposal for the day is free again. Not during the midnight lock (the lock message is returned).",
+    inputSchema: { id: z.string().describe("The proposal id (returned when you drafted it)") },
+    annotations: write,
+  }, async ({ id }) => {
+    const r = await viaRoute(ctx, player, apiProposals.action("withdraw"), "POST", `proposals/${encodeURIComponent(id)}/withdraw`, {}, { id });
+    return reply(r, r.data?.withdrawn ? `${r.data.withdrawn} is withdrawn.` : r.text);
+  });
+
   server.registerTool("propose", {
-    description: "Propose a change today: your prompt says what you want to change in the rules or the site, in your own words (1 to 2000 characters). The moderator drafts it into exact text. Once a day; not after you end your turn; not during the midnight lock.",
-    inputSchema: { prompt: z.string().describe("Your prompt for this turn") },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-  }, async ({ prompt }) => reply(await viaRoute(ctx, player, apiTurn.post, "POST", "turn", { prompt })));
+    description: "Propose a change today in one step: draft it and confirm it (draft_proposal, then confirm_proposal). Your words say what to change; the moderator drafts the exact text. Only the confirm counts: once a day, on tomorrow's ballot; withdraw it until midnight or until you end your turn (ending your turn is final). Not during the midnight lock (the lock message is returned). To see the draft before it counts, use draft_proposal.",
+    inputSchema: proposalArgs,
+    annotations: write,
+  }, async (args) => reply(await viaRoute(ctx, player, apiTurn.post, "POST", "turn", args)));
+
+  server.registerTool("read_proposals", {
+    description: "Read the proposals you may see: every proposal that has reached a ballot, and your own confirmed proposal of today (hidden from others until tomorrow). Votes are never shown.",
+    annotations: read,
+  }, async () => reply(await viaRoute(ctx, player, apiProposals.get, "GET", "proposals")));
 
   server.registerTool("move", {
     description: "Move your piece to a charted tile within your move distance. Once a day; not after you end your turn; not during the midnight lock. Name the tile by label (like \"3N 2E\") or by integer x and y.",

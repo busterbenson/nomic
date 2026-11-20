@@ -101,7 +101,8 @@ export function renderMarkdown(md) {
   return out.join("\n");
 }
 
-export function mountRulebook(root, md, { settings = {}, revisions = {} } = {}) {
+export function mountRulebook(root, md, { settings = {}, revisions = {}, proposer = null } = {}) {
+  const P = proposer;   // propose.js: what the rulebook draws for proposals (null: a read-only rulebook)
   const RB = parseRules(md);
   if (!RB.sections.length) { root.innerHTML = `<div class="rb-plain"><div class="rbhead"><h2>Rulebook</h2></div>${renderMarkdown(String(md || ""))}</div>`; return { rulebook: RB }; }
   const state = { q: "", open: new Set(RB.sections.flatMap((s) => s.rules.map((r) => r.num))), closedSec: new Set(), history: new Set() };
@@ -127,16 +128,17 @@ export function mountRulebook(root, md, { settings = {}, revisions = {} } = {}) 
       for (const r of s.rules) {
         if (q && !plainOf(r).toLowerCase().includes(ql) && !(r.title + " " + s.title).toLowerCase().includes(ql)) continue;
         secMatch++; matches++;
-        const open = q ? true : state.open.has(r.num), rv = revOf(r.num), own = r.mark && r.mark !== s.change;
-        const chips = `<span class="rev">rev ${rv.rev}${rv.n ? " · " + esc(rv.n) : ""}</span>`
+        const open = q ? true : state.open.has(r.num) || (P && P.flowRule() === r.num), rv = revOf(r.num), own = r.mark && r.mark !== s.change;
+        const chips = (P ? P.ageChip(r) : "") + `<span class="rev">rev ${rv.rev}${rv.n ? " · " + esc(rv.n) : ""}</span>`
           + (own ? `<span class="pill ${r.mark === "unanimous" ? "core" : ""}" title="This rule's own mark overrides its block's.">${r.mark} to change</span>` : "");
         const body = paras(r.paras, q) + r.clauses.map((c) => `<div class="clause" id="${id(c.num)}"><span class="cn">${hl(c.num, q)}</span><div>${paras(c.paras, q)}</div><button class="linkbtn" type="button" data-link="${c.num}" aria-label="Copy link to ${c.num}">Link</button></div>`).join("");
         const hist = state.history.has(r.num)
           ? `<ul class="hist">${(revisions[r.num] && revisions[r.num].length ? revisions[r.num] : []).map((e) => `<li><span class="hh"><b>rev ${e.rev}</b>${e.n ? `<span class="pn">${esc(e.n)}</span>` : ""}</span></li>`).join("")}<li><span class="hh"><b>rev 1</b><span class="m">the text this rule was written with</span></span></li></ul>` : "";
-        rh += `<div class="rule" id="${id(r.num)}" data-open="${open ? 1 : 0}" data-num="${r.num}">
+        rh += `<div class="rule" id="${id(r.num)}" data-open="${open ? 1 : 0}" data-num="${r.num}"${P && P.onBallotRule(r) ? ' data-bal="1"' : ""}>
 <div class="rh"><h3><button type="button" aria-expanded="${open}" aria-controls="rb-${r.num}" data-toggle="${r.num}"><span class="caret" aria-hidden="true">▸</span><span class="rn">${hl(r.num, q)}</span><span class="rt">${hl(esc(r.title), q)}</span><span class="chips">${chips}</span><span class="prev">${esc(previewOf(r))}</span></button></h3><button class="linkbtn" type="button" data-link="${r.num}" aria-label="Copy link to rule ${r.num}">Link</button></div>
-<div class="rbody" id="rb-${r.num}" ${open ? "" : "hidden"}>${body}${hist}<div class="ract"><button class="btn ghost small" type="button" data-hist="${r.num}" aria-expanded="${state.history.has(r.num)}">${state.history.has(r.num) ? "Hide history" : "History"}</button></div></div></div>`;
+<div class="rbody" id="rb-${r.num}" ${open ? "" : "hidden"}>${body}${P ? P.boxHTML(r) + P.proposeHTML(r) : ""}${hist}<div class="ract"><button class="btn ghost small" type="button" data-hist="${r.num}" aria-expanded="${state.history.has(r.num)}">${state.history.has(r.num) ? "Hide history" : "History"}</button></div></div></div>`;
       }
+      if (!q && P) rh += P.blockFootHTML(s);
       if (q && !secMatch) continue;
       const sopen = q ? true : !state.closedSec.has(s.num);
       h += `<section class="rsec" id="${id(s.num)}" data-sec="${s.num}"><h2><button type="button" aria-expanded="${sopen}" data-sectoggle="${s.num}"><span class="caret" aria-hidden="true">▸</span><span class="sn">${s.num}</span><span>${esc(s.title)}</span></button>${markPill(s.change || "majority")}</h2><div ${sopen ? "" : "hidden"}>${rh}</div></section>`;
@@ -147,11 +149,12 @@ export function mountRulebook(root, md, { settings = {}, revisions = {} } = {}) 
   root.innerHTML = `<div class="rb">
 <nav class="rail" aria-label="Contents"><h3>Contents</h3><ol id="rb-rail">${railHTML()}</ol></nav>
 <div class="rbmain">
-<div class="rbhead"><h2>Rulebook</h2></div>
+<div class="rbhead"><h2>Rulebook</h2><span class="rbcount mono" id="rb-count"></span></div>
 <div class="toolbar"><div class="search"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6.5" style="fill:none;stroke:var(--ink-muted);stroke-width:2.2"/><path d="M15 15l6 6" style="stroke:var(--ink-muted);stroke-width:2.2"/></svg><input class="input" id="rb-q" type="search" placeholder="Search rules, or a number" aria-label="Search the rules"></div>
 <button class="btn ghost small jump" id="rb-jump" type="button" aria-expanded="false">Jump to</button><button class="btn ghost small" id="rb-all" type="button">Collapse all</button>
 <div class="sresult" id="rb-result" hidden></div><div class="crumb" id="rb-crumb"></div></div>
 <div class="jumplist" id="rb-jumplist" hidden><ol>${railHTML()}</ol></div>
+<div id="rb-banner-slot"></div>
 ${RB.warnings.length ? `<div class="sheet" role="alert"><b>This file has ${RB.warnings.length} problem${RB.warnings.length === 1 ? "" : "s"}:</b><ul>${RB.warnings.map((w) => `<li>${esc(w)}</li>`).join("")}</ul></div>` : ""}
 <div id="rb-body"></div></div></div>`;
   const $ = (sel) => root.querySelector(sel);
@@ -159,12 +162,22 @@ ${RB.warnings.length ? `<div class="sheet" role="alert"><b>This file has ${RB.wa
   const draw = () => {
     const r = bodyEl && bodyEl.isConnected ? bodyHTML() : null;
     if (!r) return;
+    const a = document.activeElement, keep = a && root.contains(a) && a.id === "pfWords" ? [a.selectionStart, a.selectionEnd] : null;
     bodyEl.innerHTML = r.html;
+    if (keep) { const ta = document.getElementById("pfWords"); if (ta) { ta.focus({ preventScroll: true }); ta.setSelectionRange(keep[0], keep[1]); } }
     const res = $("#rb-result");
     res.hidden = !r.q;
-    if (r.q) { const n = RB.byNum[r.q]; res.innerHTML = `${r.matches} rule${r.matches === 1 ? "" : "s"} match “${esc(r.q)}”` + (n && n.kind !== "block" ? ` · <b>Enter</b> to jump to ${esc(r.q)}` : ""); }
+    if (r.q) { const n = Object.hasOwn(RB.byNum, r.q) ? RB.byNum[r.q] : null; res.innerHTML = `${r.matches} rule${r.matches === 1 ? "" : "s"} match “${esc(r.q)}”` + (n && n.kind !== "block" ? ` · <b>Enter</b> to jump to ${esc(r.q)}` : ""); }
+    $("#rb-banner-slot").innerHTML = P ? P.bannerHTML() : "";
+    $("#rb-count").textContent = `${allNums.length + (P ? P.ghostCount() : 0)} rules`;
     $("#rb-all").textContent = allNums.every((n) => state.open.has(n)) ? "Collapse all" : "Expand all";
   };
+  const reveal = (num) => {   // open the card (or block) a proposal flow is about to show in
+    const n = RB.byNum[num];
+    if (!n) return;
+    if (n.kind === "rule") { state.open.add(num); state.closedSec.delete(n.sec.num); } else state.closedSec.delete(num);
+  };
+  if (P) P.attach({ RB, redraw: () => draw(), reveal });
   draw();
 
   function goto(num) {
@@ -176,6 +189,8 @@ ${RB.warnings.length ? `<div class="sheet" role="alert"><b>This file has ${RB.wa
     if (el) { el.scrollIntoView({ block: "start" }); history.replaceState(null, "", "#" + id(num)); }
   }
   root.addEventListener("click", (e) => {
+    const pe = P && e.target.closest("[data-p]");
+    if (pe && !pe.disabled) { e.preventDefault(); P.click(pe); return; }
     const t = e.target.closest("[data-toggle],[data-sectoggle],[data-hist],[data-link],[data-goto],#rb-all,#rb-jump");
     if (!t) return;
     if (t.dataset.toggle) { const n = t.dataset.toggle; state.open.has(n) ? state.open.delete(n) : state.open.add(n); draw(); }
@@ -188,6 +203,11 @@ ${RB.warnings.length ? `<div class="sheet" role="alert"><b>This file has ${RB.wa
     else if (t.id === "rb-all") { const all = allNums.every((n) => state.open.has(n)); state.open = new Set(all ? [] : allNums); draw(); }
     else if (t.id === "rb-jump") { const l = $("#rb-jumplist"); l.hidden = !l.hidden; t.setAttribute("aria-expanded", String(!l.hidden)); }
   });
+  if (P) {
+    root.addEventListener("input", (e) => P.input(e.target));
+    root.addEventListener("change", (e) => P.input(e.target));
+    root.addEventListener("keydown", (e) => { if (e.key === "Escape" && P.escape()) e.preventDefault(); });
+  }
   $("#rb-q").addEventListener("input", (e) => { state.q = e.target.value; draw(); });
   $("#rb-q").addEventListener("keydown", (e) => { if (e.key === "Enter" && RB.byNum[state.q.trim()]) { e.preventDefault(); goto(state.q.trim()); } });
   if (location.hash.startsWith("#r-")) { const n = location.hash.slice(3).replace(/-/g, "."); if (RB.byNum[n]) goto(n); }
@@ -207,5 +227,5 @@ ${RB.warnings.length ? `<div class="sheet" role="alert"><b>This file has ${RB.wa
   };
   window.addEventListener("scroll", () => { if (!tick) { tick = true; requestAnimationFrame(spy); } }, { passive: true });
   spy();
-  return { rulebook: RB, goto };
+  return { rulebook: RB, goto, redraw: draw };
 }

@@ -18,10 +18,10 @@ console.log("the rulebook parser");
 const T = parseRules(read("templates/RULES.md"));
 check("the starter rules parse with no problems: five blocks, 100 to 500, in file order", T.warnings.length === 0 && T.sections.map((s) => s.num).join() === "100,200,300,400,500", J(T.warnings));
 check("each block is marked: 100 unanimous, the rest majority; no rule overrides its block", T.sections.map((s) => s.change).join() === "unanimous,majority,majority,majority,majority" && T.sections.every((s) => s.rules.every((r) => r.mark === null)) && T.sections.flatMap((s) => s.rules).every((r) => markOf(r) === r.sec.change));
-check("the rules are numbered from 101 within their hundreds block, 20 in all, each under the right block (107 The night is the lock, rule 107.1)", T.sections.map((s) => s.rules.map((r) => r.num).join()).join(" | ") === "101,102,103,104,105,107 | 201,202,203,204 | 301,302 | 401,402,403 | 501,502,503,504,505" && T.sections.every((s) => s.rules.every((r) => Math.floor(Number(r.num) / 100) * 100 === Number(s.num))));
+check("the rules are numbered from 101 within their hundreds block, 23 in all, each under the right block (107 The night is the lock, rule 107.1)", T.sections.map((s) => s.rules.map((r) => r.num).join()).join(" | ") === "101,102,103,104,105,106,107,108,110 | 201,202,203,204 | 301,302 | 401,402,403 | 501,502,503,504,505" && T.sections.every((s) => s.rules.every((r) => Math.floor(Number(r.num) / 100) * 100 === Number(s.num))));
 check("every rule has a title and text", T.sections.flatMap((s) => s.rules).every((r) => r.title && (r.paras.length || r.clauses.length)));
 check("the intro is the paragraph above the first block, not a rule", T.intro.length === 1 && /rules in effect/.test(T.intro[0].s) && !/2xx/.test(T.intro[0].s));
-check("a list inside a rule stays with that rule (rule 103's two options)", T.byNum["103"].paras.some((p) => p.t === "ul" && p.items.length === 2));
+check("a list inside a rule stays with that rule", parseRules("## 100. A [u]\n\n### 101 One\nEither:\n- this, or\n- that.\n\n### 102 Two\nText.\n").byNum["101"].paras.some((p) => p.t === "ul" && p.items.length === 2));
 
 const sample = `# Rules\n\nIntro.\n\n## 100. Core [u]\n\n### 101 One\nText one.\n\n### 102 Two [m]\n**102.1** Clause a.\n\n**102.2** Clause b\ncontinues.\n\n## 200. Rest [majority]\n\n### 201 Three [unanimous]\nText.\n`;
 const S = parseRules(sample);
@@ -59,11 +59,22 @@ check("the renumbering is a map, not a rewrite: old 101-105 stay, 209 to 201, 20
   T.byNum["201"].paras[0].s.startsWith("A game has at most") && T.byNum["202.2"].paras[0].s.startsWith("On your turn") && T.byNum["204"].paras[0].s.startsWith("A player may connect an AI client") && T.byNum["301"].paras[0].s.startsWith("Any player may appeal") && T.byNum["302"].paras[0].s.startsWith("A proposal may change the website") && T.byNum["401"].paras[0].s.startsWith("A player whose proposal passes") && T.byNum["402"].paras[0].s.startsWith("The first player to reach 100") && T.byNum["403"].paras[0].s.startsWith("If the rules are changed so that further play"));
 
 console.log("the day rules (step 1, PR 2)");
-check("the day model replaces the turn model: 103 is prompts (no join order), 203 Time (the 24-hour skip) is gone, and 203 Days, 202.1-202.4 and 107.1 are in, worded as approved",
-  T.byNum["103"].title === "Prompts" && !/order they joined/.test(rules) && !/skipped for that round/.test(rules) && T.byNum["203"].title === "Days" &&
+check("the day model replaces the turn model: 103 is proposals (no join order), 203 Time (the 24-hour skip) is gone, and 203 Days, 202.1-202.4 and 107.1 are in, worded as approved",
+  T.byNum["103"].title === "Proposals" && !/order they joined/.test(rules) && !/skipped for that round/.test(rules) && T.byNum["203"].title === "Days" &&
   T.byNum["202"].clauses.map((c) => c.num).join() === "202.1,202.2,202.3,202.4,202.5" && T.byNum["203"].clauses.map((c) => c.num).join() === "203.1,203.2" && T.byNum["107"].clauses.map((c) => c.num).join() === "107.1" &&
   rules.includes("there is no order of play") && rules.includes("Ending is final: after it they can't move, propose or vote until the next day") && rules.includes("A day runs from midnight to midnight in the game's time zone. [setting: game.timezone]") &&
   rules.includes("A day always runs to midnight, even if every player has ended their turn.") && rules.includes("the game is locked: nobody can move, vote, propose or end their turn, on the site or through an AI client (rule 204)"));
+console.log("the proposal rules (step 1, PR 3)");
+check("103 Proposals is 103.1-103.4 and 105 Votes needed is 105.1-105.5, worded as approved; the moderator moved to 106",
+  T.byNum["103"].clauses.map((c) => c.num).join() === "103.1,103.2,103.3,103.4" && T.byNum["105"].title === "Votes needed" && T.byNum["105"].clauses.map((c) => c.num).join() === "105.1,105.2,105.3,105.4,105.5" &&
+  T.byNum["106"].title === "The moderator" && rules.includes("Drafting costs nothing: only a confirmed proposal is the player's one proposal for the day.") &&
+  rules.includes("Each confirmed proposal gets the next number (P1, P2, ...) and goes on the next day's ballot.") && rules.includes("A withdrawn proposal doesn't use up the day's proposal.") &&
+  rules.includes("The mark sets the votes needed to change, add or repeal any rule in the block.") && rules.includes("The votes a proposal needs are set when it is confirmed, from the marks in effect then.") &&
+  rules.includes("Rules marked unanimous, by their block or by their own mark, are the core rules."));
+check("108.3 (the moderator names conflicts when drafting) and 110.1 (what no proposal can change, refused at drafting) are in, with only the parts that exist yet",
+  T.byNum["108"].clauses.map((c) => c.num).join() === "108.3" && T.byNum["110"].clauses.map((c) => c.num).join() === "110.1" &&
+  rules.includes("When drafting, the moderator names any other rule the proposal would conflict with, so the proposer can change that rule too.") &&
+  rules.includes("A proposal that would change them is refused when it is drafted.") && !/rule 104\.4|rule 107\.6/.test(T.byNum["110.1"].paras[0].s));
 check("505 says what the spawn code does (the chart shape of rule 504.2), not a fixed '2.5 tiles'", !/2\.5 tiles/.test(rules) && rules.includes("every tile that a move onto it would chart (rule 504.2) is already charted"));
 
 console.log("one palette file, one set of pieces");

@@ -7,15 +7,15 @@ Every function that carries out the game should say which rule it implements, wi
 `src/` is only reported for now: these functions have no claim yet. Site plumbing such as sign-in and email goes
 under rule 101 or 102; a follow-up change claims them and moves `src/` into the strict set.
 
-126 of 154 functions outside `src/engine/` are unclaimed.
+129 of 199 functions outside `src/engine/` are unclaimed.
 
 ## src/index.ts (5)
 
-- line 51: `secure`
-- line 61: `notFound`
-- line 67: `run`
-- line 72: `route`
-- line 152: `fetch`
+- line 52: `secure`
+- line 62: `notFound`
+- line 68: `run`
+- line 73: `route`
+- line 158: `fetch`
 
 ## src/lib/auth.ts (6)
 
@@ -60,12 +60,11 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 - line 12: `tooManyLinks`
 - line 21: `issueLink`
 
-## src/lib/mcp-tools.ts (4)
+## src/lib/mcp-tools.ts (3)
 
-- line 23: `viaRoute`
-- line 38: `reply`
-- line 39: `asJson`
-- line 41: `registerTools`
+- line 40: `reply`
+- line 41: `asJson`
+- line 43: `registerTools`
 
 ## src/lib/notify.ts (1)
 
@@ -92,6 +91,12 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 - line 13: `page`
 
+## src/lib/proposals.js (3)
+
+- line 137: `own`
+- line 138: `cites`
+- line 251: `own`
+
 ## src/lib/settings.js (12)
 
 - line 36: `validTimeZone`
@@ -109,33 +114,33 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/lib/util.ts (27)
 
-- line 35: `validShape`
-- line 47: `mixHex`
-- line 49: `legacyInfo`
-- line 53: `colorInfo`
-- line 54: `isOfferedColor`
-- line 57: `colorOf`
-- line 63: `who`
-- line 72: `json`
-- line 82: `readJson`
-- line 91: `base64url`
-- line 97: `randomToken`
-- line 99: `sha256Hex`
-- line 106: `normCode`
-- line 108: `validEmail`
-- line 111: `normEmail`
-- line 115: `cleanName`
-- line 122: `esc`
-- line 127: `siteUrl`
-- line 137: `validSlug`
-- line 143: `plain`
-- line 144: `validRepo`
-- line 146: `validRulesPath`
-- line 148: `validRef`
-- line 151: `gameBase`
-- line 153: `seatsTaken`
-- line 160: `playersLine`
-- line 166: `seatLimit`
+- line 39: `validShape`
+- line 51: `mixHex`
+- line 53: `legacyInfo`
+- line 57: `colorInfo`
+- line 58: `isOfferedColor`
+- line 61: `colorOf`
+- line 67: `who`
+- line 76: `json`
+- line 86: `readJson`
+- line 95: `base64url`
+- line 101: `randomToken`
+- line 103: `sha256Hex`
+- line 110: `normCode`
+- line 112: `validEmail`
+- line 115: `normEmail`
+- line 119: `cleanName`
+- line 126: `esc`
+- line 131: `siteUrl`
+- line 141: `validSlug`
+- line 147: `plain`
+- line 148: `validRepo`
+- line 150: `validRulesPath`
+- line 152: `validRef`
+- line 155: `gameBase`
+- line 157: `seatsTaken`
+- line 164: `playersLine`
+- line 170: `seatLimit`
 
 ## src/routes/api-day.ts (1)
 
@@ -164,6 +169,10 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 ## src/routes/api-notifications.ts (1)
 
 - line 4: `get`
+
+## src/routes/api-proposals.ts (1)
+
+- line 23: `out`
 
 ## src/routes/api-rules.ts (2)
 

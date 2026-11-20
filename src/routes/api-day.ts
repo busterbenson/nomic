@@ -21,7 +21,7 @@ export const get = async (ctx: Ctx) => {
   const locked = !!day && game.status === "playing" && isLocked(game, day, nowMs);
   const rows = (await env.DB.prepare(
     `SELECT p.display_name AS name, p.color, p.turn_order, t.moved_at, t.ended_at,
-            EXISTS (SELECT 1 FROM turns u WHERE u.game_id = p.game_id AND u.player_id = p.id AND u.round = ? AND u.status != 'withdrawn') AS proposed
+            EXISTS (SELECT 1 FROM proposals u WHERE u.game_id = p.game_id AND u.player_id = p.id AND u.day_proposed = ? AND u.status NOT IN ('draft', 'withdrawn')) AS proposed
      FROM players p LEFT JOIN day_turns t ON t.game_id = p.game_id AND t.day = ? AND t.player_id = p.id
      WHERE p.game_id = ? ORDER BY p.turn_order`,
   ).bind(game.day, game.day, game.id).all()).results as any[];

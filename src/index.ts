@@ -22,6 +22,7 @@ import * as apiLogout from "./routes/api-logout";
 import * as apiMe from "./routes/api-me";
 import * as apiRules from "./routes/api-rules";
 import * as apiTurn from "./routes/api-turn";
+import * as apiProposals from "./routes/api-proposals";
 import * as apiBoard from "./routes/api-board";
 import * as apiAction from "./routes/api-action";
 import * as apiDay from "./routes/api-day";
@@ -45,7 +46,7 @@ type Methods = { get?: Handler; post?: Handler };
 const API: Record<string, Methods> = {
   game: apiGame, me: apiMe, join: apiJoin, login: apiLogin, logout: apiLogout,
   turn: apiTurn, rules: apiRules, notifications: apiNotifications, board: apiBoard, action: apiAction,
-  day: apiDay, "end-turn": apiEndTurn,
+  day: apiDay, "end-turn": apiEndTurn, proposals: apiProposals,
 };
 
 const secure = (res: Response) => {
@@ -145,6 +146,11 @@ async function route(request: Request, env: Env, execCtx: ExecutionContext): Pro
   if (sub === ".well-known" && segs.length === 3 && segs[2] === "oauth-authorization-server") return method === "OPTIONS" ? preflight() : run({ get: oauthMeta.authorizationServer }, method, ctx);
   if (sub === "api" && segs.length === 3) return run(API[segs[2]] && Object.hasOwn(API, segs[2]) ? API[segs[2]] : undefined, method, ctx);
   if (sub === "api" && segs.length === 4 && segs[2] === "notifications" && segs[3] === "read") return run(apiNotificationsRead, method, ctx);
+  // /api/proposals/<id>/confirm and /withdraw (rule 103)
+  if (sub === "api" && segs.length === 5 && segs[2] === "proposals" && (segs[4] === "confirm" || segs[4] === "withdraw")) {
+    ctx.params.id = segs[3];
+    return run({ post: apiProposals.action(segs[4]) }, method, ctx);
+  }
   return notFound();
 }
 

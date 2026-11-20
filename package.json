@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "wrangler dev --port 8788 --var MAIL_FROM: --var SITE_URL:",
     "migrate:local": "wrangler d1 migrations apply DB --local",
-    "test": "node scripts/check-rule-claims.mjs && node tests/design.mjs && node tests/engine.mjs && node tests/e2e.mjs && node tests/board.mjs && node tests/day.mjs",
+    "test": "node scripts/check-rule-claims.mjs && node tests/design.mjs && node tests/engine.mjs && node tests/e2e.mjs && node tests/board.mjs && node tests/day.mjs && node tests/proposals.mjs",
     "deploy:dry-run": "wrangler deploy --dry-run"
   },
   "devDependencies": {
