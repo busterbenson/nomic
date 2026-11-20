@@ -73,6 +73,8 @@ export async function deployedSha(env: Env, game: { slug: string }): Promise<str
   return bundled ? bundle.sha ?? null : null;
 }
 
+// How often the midnight run runs (wrangler.toml [triggers], every 5 minutes).
+export const CRON_SLACK_MS = 5 * 60_000;
 // The deploy deadline: a claimed night must be live this long after the 2 am deadline (rule 107.6).
 /** @rule 107.6 */
 export const deployDeadline = (deadlineMs: number) => deadlineMs + DEPLOY_GRACE_MINUTES * 60_000;
@@ -205,7 +207,9 @@ export async function awaitModerator(env: Env, game: any, day: DayRow, nowMs: nu
   const fresh: any = (await env.DB.prepare("SELECT status, deadline_at, commit_sha FROM days WHERE game_id = ? AND n = ?").bind(game.id, day.n).first()) ?? day;
   const deadline = Date.parse(fresh.deadline_at || "") || deadlineAfter(timeZoneOf(game), Date.parse(day.ends_at));
   if (fresh.status === "deploying") {
-    if (fresh.commit_sha && (await deployedSha(env, game)) === fresh.commit_sha) {
+    // A matching bundle counts only until the deploy deadline (plus one cron interval, so a deploy live by 2:30 am is
+    // always seen); later, the night is not applied whatever is live (the next run reconciles).
+    if (fresh.commit_sha && nowMs < deployDeadline(deadline) + CRON_SLACK_MS && (await deployedSha(env, game)) === fresh.commit_sha) {
       try {
         if (await devControl(env, "enact_fail")) throw new Error("test failure: enact"); // local tests only
         await env.DB.batch(await enactStatements(env, game, day.n, nowMs));

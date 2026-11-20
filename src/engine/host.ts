@@ -157,11 +157,13 @@ export async function enactStatements(env: Env, game: any, n: number, nowMs: num
     stmts.push(env.DB.prepare(`UPDATE games SET status = 'over' WHERE id = ? AND status = 'playing' AND ${anyPassed}`).bind(game.id, game.id, n));
   }
   stmts.push(env.DB.prepare(`UPDATE games SET rules_day = ? WHERE id = ? AND rules_day < ? AND ${anyPassed}`).bind(n, game.id, n, game.id, n));
-  // Each enacted proposal raises its rule's revision by one (rule 107.2): 1 + the proposals enacted on it before.
+  // Each enacted proposal raises its rule's revision by one (rule 107.2): 1 + the proposals enacted on it before, counted
+  // by the rule they change (a clause, 402.1, is rule 402; an added rule is its new number).
   for (const q of ordered) {
     stmts.push(env.DB.prepare(
       `UPDATE proposals SET status = 'enacted', decided_at = ?,
-         rev = 1 + (SELECT COUNT(*) FROM proposals e WHERE e.game_id = proposals.game_id AND e.target = proposals.target AND e.status = 'enacted')
+         rev = 1 + (SELECT COUNT(*) FROM proposals e WHERE e.game_id = proposals.game_id AND e.status = 'enacted'
+           AND CAST(CASE WHEN e.kind = 'add' THEN e.new_num ELSE e.target END AS INTEGER) = CAST(CASE WHEN proposals.kind = 'add' THEN proposals.new_num ELSE proposals.target END AS INTEGER))
        WHERE id = ? AND status = 'passed'`,
     ).bind(now, q.id));
   }

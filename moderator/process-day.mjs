@@ -107,6 +107,8 @@ export function prevailing(a, b) {
 
 // The rule a proposal changes, as a number ("402.1" -> 402), or null for a block.
 const ruleOf = (target) => { const m = /^(\d+)/.exec(String(target ?? "")); return m ? Number(m[1]) : null; };
+// The rule a proposal IS about: an added rule's new number (its target is the block), else its target's rule.
+const ownRule = (p) => ruleOf(p.kind === "add" ? p.new_num : p.target);
 
 // RULES.md cut into sections: each rule ("### n ...") up to the next rule or block heading, and each block heading
 // line ("## n00. ..."). {key -> text}: "r402", "b400", and "intro" for what comes before the first heading.
@@ -186,12 +188,29 @@ export function scopeProblems({ beforeMd, afterMd, beforeSettings, afterSettings
     if (k.startsWith("b") && !k.includes(":") && blocks.has(n) && markChange) continue;
     if (k.startsWith("r") && notes.has(n) && a[k] !== undefined && b[k] !== undefined) {
       const added = norm(b[k]).startsWith(norm(a[k])) ? norm(b[k]).slice(norm(a[k]).length) : null;
-      const mine = ruleOf(p.target);
+      const mine = ownRule(p);
       if (added !== null && added.length <= 300 && !/\[setting:|^#/.test(added) && new RegExp(`^[^.]*\\bgives way to (?:rule )?${mine}\\b[^.]*\\.?$`).test(added.trim())) continue;
-      out.push(`RULES.md rule ${n} may only gain a one-sentence note at its end saying it gives way to rule ${ruleOf(p.target)} (rule 108.4)`);
+      out.push(`RULES.md rule ${n} may only gain a one-sentence note at its end saying it gives way to rule ${ownRule(p)} (rule 108.4)`);
       continue;
     }
     out.push(`RULES.md ${k.startsWith("r") ? `rule ${n}` : k.startsWith("b") && !k.includes(":") ? `block ${n}` : "text outside any rule"} changed`);
+  }
+  // A clause proposal (402.1) leaves the rule's other clauses, and the text before its first clause, as they were.
+  if (p.scope === "clause" && /^\d+\.\d+$/.test(String(p.target ?? ""))) {
+    const n = ruleOf(p.target);
+    const clauses = (t) => {
+      const out = { head: "" };
+      let key = "head";
+      for (const line of String(t ?? "").split("\n")) {
+        const c = /^\*\*(\d+\.\d+)\*\*/.exec(line);
+        if (c) key = c[1];
+        out[key] = (out[key] ?? "") + line + "\n";
+      }
+      return out;
+    };
+    const ca = clauses(a[`r${n}`]), cb = clauses(b[`r${n}`]);
+    const own = new Set([String(p.target), String(p.new_num ?? "")]);
+    for (const k of new Set([...Object.keys(ca), ...Object.keys(cb)])) if (!own.has(k) && norm(ca[k]) !== norm(cb[k])) out.push(`RULES.md ${k === "head" ? `rule ${n}'s text outside its clauses` : `clause ${k}`} changed`);
   }
   if (p.after_text && !p.redraft && !markChange) {
     const own = plain([...rules].map((n) => b[`r${n}`] ?? "").join("\n"));
@@ -201,11 +220,13 @@ export function scopeProblems({ beforeMd, afterMd, beforeSettings, afterSettings
   for (const f of changed) {
     const m = /^rules\/(\d+)\.(test\.)?ts$/.exec(f);
     if (m) { if (!rules.has(Number(m[1]))) out.push(`${f} belongs to rule ${m[1]}, which this proposal doesn't change`); continue; }
-    if (f === "rules/rulebook.test.ts" && moduleSetChanged && rulebookAfter) {
+    const moduleOfMine = changed.some((x) => { const m = /^rules\/(\d+)\.ts$/.exec(x); return m && rules.has(Number(m[1])); });
+    if (f === "rules/rulebook.test.ts" && (moduleSetChanged || moduleOfMine) && rulebookAfter) {
       // a module added or removed changes its lists: only lines that name that module may change
-      const without = (t) => modulesComeOrGo.reduce((x, n) => x.replace(new RegExp(`,\\s*${n}\\b|\\b${n}\\s*,\\s*|\\b${n}\\b`, "g"), ""), t).split("\n").map((l) => l.trim()).filter(Boolean).join("\n");
+      const nums = [...new Set([...modulesComeOrGo, ...rules])];
+      const without = (t) => nums.reduce((x, n) => x.replace(new RegExp(`,\\s*${n}\\b|\\b${n}\\s*,\\s*|\\b${n}\\b`, "g"), ""), t).split("\n").map((l) => l.trim()).filter(Boolean).join("\n");
       if (without(rulebookBefore) === without(rulebookAfter)) continue;
-      out.push("rules/rulebook.test.ts changed beyond the lines for the module this proposal adds or removes");
+      out.push("rules/rulebook.test.ts changed beyond the lines for the rules this proposal changes");
       continue;
     }
     if (f.startsWith("rules/") || f.startsWith("rulings/")) out.push(`${f} is not part of the rule this proposal changes`);
@@ -401,7 +422,7 @@ export async function applyOne({ dir, job, p, tonight, budgetMs, model = runMode
       if (result?.conflict && Number.isInteger(Number(result.conflict.rule))) {
         const other = Number(result.conflict.rule);
         conflictRule = other;
-        const mine = ruleOf(p.target);
+        const mine = ownRule(p);
         const claimsIn = (md, n) => [...norm(sections(md)[`r${n}`]).matchAll(/prevails over (?:rule )?(\d+)/gi)].map((m) => Number(m[1]));
         const claimsOf = (t) => [...norm(t).matchAll(/prevails over (?:rule )?(\d+)/gi)].map((m) => Number(m[1]));
         const yieldsIn = (md, n) => [...norm(sections(md)[`r${n}`]).matchAll(/gives way to (?:rule )?(\d+)/gi)].map((m) => Number(m[1]));
@@ -441,6 +462,7 @@ export async function applyOne({ dir, job, p, tonight, budgetMs, model = runMode
       syncManifest(dir);
       const chk = checkGame(dir, `P${p.number}`);
       log?.({ event: "check", number: p.number, attempt, ok: chk.ok, out: chk.out.slice(-800) });
+      if (chk.ok && Date.now() - started > budgetMs) { discard(dir); return over(); } // the checks ran past the budget
       if (chk.ok) {
         const msg = `P${p.number}: ${oneLine(p.title || p.draft_head)} (day ${job.day}, ${p.yes}-${p.no})\n\n${earlier.length ? `Redrafted onto ${earlier.map((t) => `P${t.number}`).join(", ")} (rule 107.3).\n\n` : ""}Proposal: P${p.number}`;
         git(["add", "-A"], dir);

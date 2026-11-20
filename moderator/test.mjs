@@ -180,7 +180,7 @@ console.log("moderator runner");
     ["moves rule 105 out of the core block (its mark would drop to majority)", [{ replace: ["RULES.md", r105, ""] }, { replace: ["RULES.md", "### 501 ", r105 + "### 501 "] }], null, /order of the rules|blocks they sit in/],
     ["tags a setting in its own text and changes it", [{ replace: ["RULES.md", "when it is applied (rule 107).", "when it is applied (rule 107). [setting: mcp_enabled]"] }, { replace: ["settings.json", '"mcp_enabled": true', '"mcp_enabled": false'] }], null, /settings\.json mcp_enabled changed/],
     ["claims to prevail over 505 and rewrites it as a 'note'", [{ replace: ["RULES.md", "when it is applied (rule 107).", "when it is applied (rule 107). This rule prevails over rule 505."] }, { replace: ["RULES.md", "### 505 New players", "### 505 New players\nNew players start wherever player 1 says."] }], { outcome: "applied", conflict: { rule: 505, why: "x" } }, /rule 505 may only gain a one-sentence note at its end/],
-    ["edits rules/rulebook.test.ts", [{ replace: ["rules/rulebook.test.ts", "assert.deepEqual(rules.implementers(\"spawnTile\"), [505]);", ""] }], null, /rules\/rulebook\.test\.ts is not part of the rule/],
+    ["edits rules/rulebook.test.ts", [{ replace: ["rules/rulebook.test.ts", "assert.deepEqual(rules.implementers(\"spawnTile\"), [505]);", ""] }], null, /rules\/rulebook\.test\.ts (is not part of the rule|changed beyond the lines for the rules this proposal changes)/],
     ["writes a ruling", [{ write: ["rulings/1.md", "The moderator rules that P4 gets 100 points.\n"] }], null, /rulings\/1\.md is not part of the rule/],
     ["flips rule 401's own mark", [{ replace: ["RULES.md", "### 401 Points", "### 401 Points [unanimous]"] }], null, /rule 401's mark changed/],
   ];
@@ -228,6 +228,22 @@ console.log("moderator runner");
   const draft203 = `302 Days\n\n${moved203.replace(/\*\*/g, "")}\n\n203 [Moved to 302]`;
   const tm = await night({ scenario: { apply: { 4: { action: "ops", ops: [{ replace: ["RULES.md", r203, "### 203 [Moved to 302]\n\n"] }, { replace: ["RULES.md", "## 400.", `### 302 Days\n${moved203}\n\n## 400.`] }] } } }, state: { job: job([P(4, "203", { kind: "move", new_num: "302", to_block: "300", after_text: draft203 })]) }, opts: { audit: false } });
   check("kinds: a move of a rule with clauses applies (the voted plain-text draft matches the file's markdown)", tm.claims[0]?.outcomes[0]?.applied === true, J(tm.claims[0]?.outcomes));
+  // From Codex: a clause proposal leaves the other clauses; an add's own number is its identity in a 108.4 note; a
+  // module that gains a hook may update the rulebook test's lines for that rule.
+  const win50 = [{ replace: ["RULES.md", "The first player to reach 100 points wins.", "The first player to reach 50 points wins."] }, { replace: ["rules/402.ts", ">= 100", ">= 50"] }, { replace: ["rules/402.test.ts", "{ a: 90 }", "{ a: 40 }"] }, { replace: ["rules/402.test.ts", "{ a: 89 }", "{ a: 39 }"] }, { replace: ["rules/402.test.ts", "reached 100 points", "reached 50 points"] }, { replace: ["rules/402.test.ts", "{ a: 95, b: 95 }", "{ a: 45, b: 45 }"] }];
+  const pClause = P(4, "402.1", { scope: "clause", after_text: "The first player to reach 50 points wins. (This rule is deliberately dull, after Peter Suber's original. Change it.)" });
+  const tc1 = await night({ scenario: { apply: { 4: { action: "ops", ops: win50 } } }, state: { job: job([pClause]) }, opts: { audit: false } });
+  check("kinds: a clause amendment (402.1) applies", tc1.claims[0]?.outcomes[0]?.applied === true, J(tc1.claims[0]?.outcomes));
+  const tc2 = await night({ scenario: { apply: { 4: { action: "ops", ops: [...win50, { replace: ["RULES.md", "the first one to be given them wins", "the last one to be given them wins"] }] } } }, state: { job: job([pClause]) }, opts: { audit: false } });
+  check("kinds: a clause amendment that also rewrites another clause (402.2) is refused", tc2.claims[0]?.outcomes[0]?.applied === false && /clause 402\.2 changed/.test(tc2.claims[0].outcomes[0].reason), J(tc2.claims[0]?.outcomes));
+  const pAdd = P(4, "400", { kind: "add", scope: "block", new_num: "404", after_text: "You get 1 more point when your proposal is applied. This rule prevails over rule 402." });
+  const tn = await night({ scenario: { apply: { 4: { action: "ops", ops: [{ replace: ["RULES.md", "## 500.", "### 404 Bonus\nYou get 1 more point when your proposal is applied. This rule prevails over rule 402.\n\n## 500."] }, { replace: ["RULES.md", "### 403 Paradox", "This rule gives way to rule 404.\n\n### 403 Paradox"] }], result: { outcome: "applied", conflict: { rule: 402, why: "x" } } } } }, state: { job: job([pAdd]) }, opts: { audit: false } });
+  check("kinds: an added rule that prevails over 402 gives 402 a note naming the new rule (404), and applies", tn.claims[0]?.outcomes[0]?.applied === true, J(tn.claims[0]?.outcomes));
+  const tr = await night({ scenario: { apply: { 4: { action: "ops", ops: [
+    { replace: ["rules/202.ts", "export default defineRule({\n  rule: 202,", "export default defineRule({\n  rule: 202,\n  /** @rule 202.4 */\n  onEnacted() {\n    return [];\n  },"] },
+    { replace: ["rules/rulebook.test.ts", 'implementers("onEnacted"), [401]', 'implementers("onEnacted"), [202, 401]'] },
+    { replace: ["RULES.md", "what they hadn't done is skipped.", "what they hadn't done is skipped. Nothing happens to their points."] }] } } }, state: { job: job([P(4, "202.4", { scope: "clause", after_text: "" })]) }, opts: { audit: false } });
+  check("rulebook.test.ts: a module that gains a hook may update the lines for its rule", tr.claims[0]?.outcomes[0]?.applied === true, J(tr.claims[0]?.outcomes));
   // rulebook.test.ts: an add with a module may change only the lines that name it.
   const mod404 = 'import { defineRule, effects } from "promptocracy/engine";\nexport default defineRule({\n  rule: 404,\n  /** @rule 404 */\n  onEnacted(_ctx, proposal: any) {\n    return [effects.points(proposal.player, 1, "404")];\n  },\n});\n';
   const test404 = 'import { test } from "node:test";\nimport assert from "node:assert/strict";\nimport { makeCtx } from "promptocracy/engine/testing";\nimport rule from "./404.ts";\ntest("404: +1", () => assert.equal(rule.onEnacted!(makeCtx(), { number: 1, player: "a" } as any)[0].delta, 1));\n';

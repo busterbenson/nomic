@@ -126,16 +126,25 @@ try {
   check("past the deploy deadline the lock still ends (107.6): not applied with the reason, no points", prop(p8).status === "not_applied" && /could not be given/.test(prop(p8).not_applied_reason) && day(5).status === "timed_out" && game().phase === "open" && score("Cy") === 0, J([prop(p8), day(5)]));
   d1(state, "DELETE FROM dev_controls WHERE key = 'enact_fail'");
 
+  console.log("a bundle that goes live after the deploy deadline");
+  const p9 = ballot(6, "Cy", "401");
+  const d6 = await midnight();
+  await mod("POST", "days/6/claim", { sha: SHA4, outcomes: [{ number: p9, applied: true, commit: SHA4 }] });
+  dev("clock", plus(d6.deadline_at, 40));
+  dev("bundle_sha:mod", SHA4);
+  await cron();
+  check("the claimed commit live only at 2:40 am (past 2:30 and the next tick): not applied, no points, the lock ends", prop(p9).status === "not_applied" && prop(p9).not_applied_reason === DEPLOY_REASON && score("Cy") === 0 && day(6).status === "timed_out" && game().phase === "open", J([prop(p9), day(6)]));
+
   console.log("winning (rule 402)");
   d1(state, `UPDATE players SET score = 95 WHERE id = '${id.Ana}'; UPDATE players SET score = 98 WHERE id = '${id.Bo}'`);
-  const p6 = ballot(6, "Ana", "401"), p7 = ballot(6, "Bo", "402.1");
+  const p6 = ballot(7, "Ana", "401.1"), p7 = ballot(7, "Bo", "402.1");
   await midnight();
-  await mod("POST", "days/6/claim", { sha: SHA4, outcomes: [{ number: p6, applied: true, commit: SHA4 }, { number: p7, applied: true, commit: SHA4 }] });
-  dev("bundle_sha:mod", SHA4);
+  await mod("POST", "days/7/claim", { sha: SHA1.replace(/a/g, "e"), outcomes: [{ number: p6, applied: true, commit: SHA1.replace(/a/g, "e") }, { number: p7, applied: true, commit: SHA1.replace(/a/g, "e") }] });
+  dev("bundle_sha:mod", SHA1.replace(/a/g, "e"));
   await cron();
   const won = d1(state, `SELECT player_id, text FROM events WHERE game_id = '${gid}' AND kind = 'won'`);
   check("two pass 100 the same night: the first given points wins (402.2: P6 is applied first, so Ana); the game is over (402.3)", score("Ana") === 105 && score("Bo") === 108 && won.length === 1 && won[0].player_id === id.Ana && game().status === "over", J([won, game()]));
-  check("rule 401's revisions: P6 is the second change to rule 401 (rev 2)", prop(p6).rev === 2 && prop(p6).status === "enacted");
+  check("rule 401's revisions, counted by rule: P6 (on clause 401.1) is the second change to rule 401 (rev 2)", prop(p6).rev === 2 && prop(p6).status === "enacted");
   const over = await client(A).get("/mod/api/day");
   check("the game over: the day status still reads (the board, rules and history stay readable)", over.status === 200);
 } catch (e) {
