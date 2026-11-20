@@ -145,7 +145,6 @@ export async function countBallot(env: Env, game: any, day: DayRow, nowMs: numbe
     const t = tally({ mark: q.mark, electorate: electors.length, electors, votes: votes.filter((v) => v.proposal_id === q.id), needed: q.needed });
     return { q, t };
   });
-  const anyPassed = writes.some((w) => w.t.passed);
   const deadline = nowIso(deadlineAfter(timeZoneOf(game), Date.parse(day.ends_at)));
   await env.DB.batch([
     ...writes.map(({ q, t }) => env.DB.prepare(
@@ -159,7 +158,9 @@ export async function countBallot(env: Env, game: any, day: DayRow, nowMs: numbe
          AND EXISTS (SELECT 1 FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed')`,
     ).bind(deadline, game.id, day.n, game.id, day.n),
   ]);
-  if (anyPassed) { day.status = "processing"; day.deadline_at = deadline; }
+  // Read back what is stored, not what this run computed: an overlapping run may have counted the ballot first.
+  const fresh: any = await env.DB.prepare("SELECT status, deadline_at FROM days WHERE game_id = ? AND n = ?").bind(game.id, day.n).first();
+  if (fresh) { day.status = fresh.status; day.deadline_at = fresh.deadline_at; }
   return "done";
 }
 
@@ -168,9 +169,11 @@ export async function countBallot(env: Env, game: any, day: DayRow, nowMs: numbe
 // deadline, every passed proposal still unapplied is not applied (rule 107.7): no points, the reason recorded on it,
 // and it goes back to its proposer as a notification with the reason and a suggestion. Then play resumes on the rules
 // as they were: the lock always ends. Guarded by status, so a second run changes nothing and notifies nobody twice.
+// finalizeDay also refuses to close a day that still has a passed proposal waiting.
 /** @rule 107.6, 107.7 */
 export async function awaitModerator(env: Env, game: any, day: DayRow, nowMs: number): Promise<StepResult> {
-  if (day.status !== "processing") return "done";
+  // Decided by what is stored (passed proposals still unapplied), not by this run's copy of the day's status, so a run
+  // that overlapped the count still waits.
   const left: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed'").bind(game.id, day.n).first();
   const timedOut: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'not_applied' AND not_applied_reason = ?").bind(game.id, day.n, DEADLINE_REASON).first();
   if (!(left?.n > 0)) return timedOut?.n > 0 ? "timed_out" : "done";
@@ -264,7 +267,10 @@ export async function finalizeDay(env: Env, game: any, day: DayRow, nowMs: numbe
   const ends = nowIso(nextMidnight(tz, Math.max(ended, nowMs)));
   const DONE = "status IN ('done', 'timed_out')";
   await env.DB.batch([
-    env.DB.prepare("UPDATE days SET status = ?, processed_at = ?, last_error = NULL WHERE game_id = ? AND n = ? AND status IN ('locked', 'processing')").bind(end, now, game.id, day.n),
+    env.DB.prepare(
+      `UPDATE days SET status = ?, processed_at = ?, last_error = NULL WHERE game_id = ? AND n = ? AND status IN ('locked', 'processing')
+         AND NOT EXISTS (SELECT 1 FROM proposals WHERE game_id = ? AND day_ballot = ? AND status IN ('on_ballot', 'passed'))`,
+    ).bind(end, now, game.id, day.n, game.id, day.n),
     env.DB.prepare(
       `INSERT OR IGNORE INTO days (game_id, n, starts_at, ends_at, status, electorate)
        SELECT ?, ?, ?, ?, 'open', (SELECT COUNT(*) FROM players p WHERE p.game_id = ?)

@@ -268,6 +268,14 @@ try {
   setClock("2026-11-02T09:00:00.000Z"); // 1:00 am PST
   await cron(); await cron();
   check("the cron run twice more before the deadline counts nothing twice and changes nothing (still waiting for the moderator)", snap() === s1, snap());
+  // Two overlapping midnight runs (Codex P1 on #15): the second loaded the day as 'locked' before the first counted it.
+  // Replay that stale view: put the day back to 'locked' with P1 still passed and unapplied, and tick.
+  d1(state, `UPDATE days SET status = 'locked' WHERE game_id = '${gid}' AND n = 2`);
+  await cron();
+  const stale = dayRow(2);
+  check("a run that sees the day as locked after it was counted does not unlock it while a passed proposal waits: no day 3, P1 still passed",
+    stale.status !== "done" && !dayRow(3) && prop(1).status === "passed" && gameRow().phase === "locked", J([stale, prop(1), gameRow()]));
+  d1(state, `UPDATE days SET status = 'processing' WHERE game_id = '${gid}' AND n = 2`);
 
   console.log("the 2 am deadline (rules 107.6, 107.7)");
   const scoreBefore = d1(state, `SELECT score FROM players WHERE id = '${idOf("Ana")}'`)[0].score;
