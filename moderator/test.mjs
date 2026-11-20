@@ -3,7 +3,7 @@
 // `claude -p` (moderator/fake-claude.mjs). Nothing here reaches GitHub, Cloudflare or a model.
 //   node moderator/test.mjs
 import { execFileSync } from "node:child_process";
-import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -326,6 +326,10 @@ console.log("moderator runner");
   const late = { job: null, not_applied: [{ number: 3, day: 1, reason: "the change was applied but did not go live by 2:30 am" }], processed: [{ n: 1, status: "timed_out", commit_sha: t.claims[0].sha }] };
   const t2 = await night({ scenario: { apply: {} }, state: late, opts: { repo: t.repo, stateDir: t.stateDir, deployFails: true } });
   check("reconcile: a failed deploy trigger after day-1.1 is pushed is kept as pending (the run doesn't fail the night)", remoteTags(t.repo.bare).includes("day-1.1") && t2.deploys.length === 0 && JSON.parse(readFileSync(join(t.stateDir, "g.state.json"), "utf8")).pendingDeploy?.tag === "day-1.1", J([t2.r, remoteTags(t.repo.bare)]));
+  check("reconcile: the failed deploy is told once (a notification file), not on every retry", t2.notes.filter((f) => /reconcile-deploy-day-1\.1/.test(f)).length === 1, J(t2.notes));
+  for (const f of readdirSync(t2.notifyDir)) renameSync(join(t2.notifyDir, f), join(TMP, `delivered-${f}`));
+  const t2b = await night({ scenario: { apply: {} }, state: late, opts: { repo: t.repo, stateDir: t.stateDir, deployFails: true } });
+  check("reconcile: a second failed retry (the first note already delivered) writes no new note and keeps it pending", t2b.notes.length === 0 && t2b.deploys.length === 0 && JSON.parse(readFileSync(join(t.stateDir, "g.state.json"), "utf8")).pendingDeploy?.tag === "day-1.1", J(t2b.notes));
   const t3 = await night({ scenario: { apply: {} }, state: late, opts: { repo: t.repo, stateDir: t.stateDir } });
   check("reconcile: the next run retries the pending deploy of day-1.1, then clears it", t3.deploys.length === 1 && t3.deploys[0].sha === g(["rev-parse", "day-1.1^{commit}"], t.repo.bare).trim() && !JSON.parse(readFileSync(join(t.stateDir, "g.state.json"), "utf8")).pendingDeploy, J([t3.r, t3.deploys]));
   const t4 = await night({ scenario: { apply: {} }, state: late, opts: { repo: t.repo, stateDir: t.stateDir } });

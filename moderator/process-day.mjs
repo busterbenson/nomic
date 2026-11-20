@@ -638,7 +638,9 @@ export async function runOnce(opts) {
           log({ event: "reconcile_deploy", tag: pendingDeploy.tag, sha: pendingDeploy.sha });
         } catch (e) {
           log({ event: "reconcile_deploy_failed", tag: pendingDeploy.tag, error: String(e.message || e) });
-          notifyFile(notifyDir, `reconcile-deploy-${pendingDeploy.tag}`, `Promptocracy ${slug}: the deploy of ${pendingDeploy.tag} failed`, `${String(e.message || e).slice(0, 300)}\nThe corrected rules are tagged ${pendingDeploy.tag} but not deployed; the next run tries again. Night log: ${nightLog}`);
+          // Told once per pending deploy, not on every 2-minute retry.
+          if (!pendingDeploy.notified) writeState(stateDir, slug, { ...readState(stateDir, slug), pendingDeploy: { ...pendingDeploy, notified: true } });
+          if (!pendingDeploy.notified) notifyFile(notifyDir, `reconcile-deploy-${pendingDeploy.tag}`, `Promptocracy ${slug}: the deploy of ${pendingDeploy.tag} failed`, `${String(e.message || e).slice(0, 300)}\nThe corrected rules are tagged ${pendingDeploy.tag} but not deployed; the next run tries again. Night log: ${nightLog}`);
         }
       }
     }
