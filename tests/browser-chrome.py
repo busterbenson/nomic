@@ -261,7 +261,7 @@ with sync_playwright() as pw:
     check("S1-RUL-02: the legend names changed this week, settled, everyone must agree; unanimous rules show a lock; on-ballot rules a ring and 'On the ballot'", all(w in text(page, "#rb-legend") for w in ["changed this week", "settled", "everyone must agree"]) and page.locator('.bcard[data-card="101"] svg.lk').count() == 1 and page.locator('.bcard.bal[data-card="401"]').count() == 1 and "On the ballot · P1" in text(page, '.bcard[data-card="401"]'))
     check("S1-RUL-02: no use arcs or seal rings; a rule changed lately is warm (none has changed yet, so no row is)", page.locator(".bcard.w1, .bcard.w2").count() == 0)
     TOTAL = page.locator("#rules .bcard:not(.add)").count()
-    check("S1-RUL-13: the tab says N rules, counting the new rule on the ballot (a ghost card), the same N the card nav uses", page.locator('.bcard.ghost').count() == 1 and re.match(rf"Rulebook\s*{TOTAL} rules", text(page, "#tab-rules")) is not None, f"{TOTAL} {text(page, '#tab-rules')}")
+    check("S1-RUL-13: the tab says N rules, counting the new rule on the ballot (a ghost card), the same N the card nav uses", page.locator('.bcard.ghost[data-card="P2"]').count() == 1 and re.match(rf"Rulebook\s*{TOTAL} rules", text(page, "#tab-rules")) is not None, f"{TOTAL} {text(page, '#tab-rules')}")
     page.click('.gtog >> nth=0'); page.wait_for_timeout(100)
     check("S1-RUL-01: a block's All N toggles to a grid and back to a Row", page.locator(".brow.grid").count() == 1 and "Row" in text(page, ".gtog >> nth=0"))
     page.click('.gtog >> nth=0')
@@ -324,7 +324,7 @@ with sync_playwright() as pw:
     page.click('#mroot [data-muse="move"]'); page.wait_for_timeout(700)
     check("S1-RUL-12: Move your piece closes the card and takes you to the board's move bar", page.locator("#mroot .mcard").count() == 0 and page.evaluate("(() => { const r = document.getElementById('movebar').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; })()"))
     # a card for the ghost rule, a pick-a-block flow, and proposing through the card
-    page.locator('.bcard.ghost').click(); page.wait_for_selector("#mroot .mcard")
+    page.locator('.bcard.ghost[data-card="P2"]').click(); page.wait_for_selector("#mroot .mcard")
     check("a ghost (new rule) card: 'new', its text, the proposer, 'On today's ballot'", "A tie goes to the older player." in text(page, "#mroot .mcard") and "On today's ballot" in text(page, "#mroot .mcard") and "Cy" in text(page, "#mroot .chg"))
     page.keyboard.press("Escape")
     page.click('[data-p="pickblock"]'); page.wait_for_selector("#mroot .pmenu")
@@ -347,13 +347,44 @@ with sync_playwright() as pw:
     page.click('#mroot [data-p="open"]'); page.click('#mroot [data-p="kind"][data-k="repeal"]')
     page.wait_for_selector("#mroot .ruling"); page.wait_for_timeout(200)
     check("proposing from a card: the moderator's slip shows in the card (PR 3's flow, moved into the card)", "Repeal rule 403" in text(page, "#mroot .ruling") and page.locator('#mroot [data-p="confirm"]').count() == 1)
+    page.click('#mroot [data-p="cancel"]'); page.wait_for_timeout(100)
+    page.keyboard.press("Escape")
+    # adding a rule to block 400 through its card: the words survive a close, and the new rule gets 404 - the same number P2 was given
+    page.click('.bcard.add[data-n="400"]'); page.wait_for_selector("#pfWords")
+    page.fill("#pfWords", "Draws are replayed.")
+    page.keyboard.press("Escape"); page.wait_for_timeout(100)
+    page.click('.bcard.add[data-n="400"]'); page.wait_for_selector("#pfWords")
+    check("an add-a-rule card keeps the words when it is closed and opened again", page.input_value("#pfWords") == "Draws are replayed.")
+    page.click('#mroot [data-p="draft"]'); page.wait_for_selector("#mroot .ruling"); page.wait_for_timeout(200)
+    check("the moderator's slip for a new rule shows in its card", "Add rule 404 to block 400" in text(page, "#mroot .ruling") and "Draws are replayed." in text(page, "#mroot .ruling"))
     page.click('#mroot [data-p="confirm"]'); page.wait_for_selector("#mroot .chg.mine"); page.wait_for_timeout(300)
     check("after confirming: your pending change shows in the card, with Withdraw", "on tomorrow's ballot" in text(page, "#mroot .chg.mine").lower() and page.locator('#mroot [data-p="withdraw"]').count() == 1)
+    page.keyboard.press("Escape"); page.wait_for_timeout(100)
+    keys = page.evaluate("[...document.querySelectorAll('.bcard.ghost')].map(b => b.dataset.card)")
+    check("two new rules got the same number (404): each is its own card, keyed by its P number", keys == ["P2", "P3"] and page.locator(".bcard.ghost .cn", has_text="404").count() == 2, str(keys))
+    page.locator('.bcard.ghost[data-card="P2"]').click(); page.wait_for_selector("#mroot .mcard")
+    check("the card for P2 is Cy's, not Ada's", "A tie goes to the older player." in text(page, "#mroot .mtext") and "Cy" in text(page, "#mroot .chg"))
+    page.click('#mroot [data-mnav="1"]'); page.wait_for_timeout(150)
+    check("Next from P2 is Ada's own new rule P3", "Draws are replayed." in text(page, "#mroot .mtext") and "Ada" in text(page, "#mroot .chg"), text(page, "#mroot .mcard"))
     page.keyboard.press("Escape")
+    # Back skips a card whose subject has gone; a card that is gone shows the one before it (cards.js with stand-in cards)
+    r = page.evaluate("""async () => {
+      const { createCards } = await import('/js/cards.js');
+      const root = document.createElement('div'); root.hidden = true; document.body.append(root);
+      const alive = { A: true, G: true, B: true };
+      const c = createCards({ root, describe: (s) => (alive[s.key] ? { label: s.key, html: '<p>' + s.key + '</p>' } : null) });
+      c.open({ kind: 'rule', key: 'A' }); c.open({ kind: 'rule', key: 'G' }, { push: true }); c.open({ kind: 'rule', key: 'B' }, { push: true });
+      alive.G = false; c.redraw();
+      const label = root.querySelector('.mbackbtn') ? root.querySelector('.mbackbtn').textContent : null;
+      c.back(); const afterBack = root.querySelector('.mcard p').textContent;
+      c.open({ kind: 'rule', key: 'G' }, { push: true }); alive.A = true; alive.G = false; c.redraw(); const afterGone = root.querySelector('.mcard p') ? root.querySelector('.mcard p').textContent : null;
+      c.close(); root.remove(); return [label, afterBack, afterGone];
+    }""")
+    check("the Back stack drops a card that is gone (Back goes to A, not to a card that no longer exists), and a card that is gone shows the one before", r[0] == "← Back to A" and r[1] == "A" and r[2] == "A", str(r))
     check("the Rulebook banner says it once: 'You proposed P3 today'", re.search(r"You proposed P\d today", text(page, "#rb-banner")) is not None, text(page, "#rb-banner"))
     page.click("#tab-summary"); page.wait_for_timeout(200)
     pr = text(page, "#spropose")
-    check("S1-SUM-09: after proposing: 'Your proposal, 1 of 1 today', the P pill, your player pill, 'On tomorrow's ballot', the tracked change; no 'See it in the Rulebook'", "Your proposal, 1 of 1 today" in pr and re.search(r"P3", pr) and page.locator("#spropose .plpill").count() == 1 and "(you)" in pr and "on tomorrow's ballot" in pr.lower() and page.locator("#spropose del").count() >= 1 and "See it in the Rulebook" not in text(page, "#p-summary"), pr)
+    check("S1-SUM-09: after proposing: 'Your proposal, 1 of 1 today', the P pill, your player pill, 'On tomorrow's ballot', the tracked change; no 'See it in the Rulebook'", "Your proposal, 1 of 1 today" in pr and re.search(r"P3", pr) and page.locator("#spropose .plpill").count() == 1 and "(you)" in pr and "on tomorrow's ballot" in pr.lower() and page.locator("#spropose ins").count() >= 1 and "See it in the Rulebook" not in text(page, "#p-summary"), pr)
     check("S1-SUM-03: the Propose step is done and reads 'Proposed P3'", "Proposed" in text(page, "#sday") and "P3" in text(page, "#sday"))
 
     # ---- moving: the move is final at once, through the existing route and the day's one-move guard

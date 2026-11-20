@@ -129,7 +129,7 @@ export function mountRulebook(root, md, { settings = {}, revisions = {}, propose
     const out = [];
     for (const s of RB.sections) {
       s.rules.forEach((r) => out.push({ key: r.num, num: r.num, rule: r, sec: s }));
-      if (P) P.ghostsOf(s).forEach((g) => out.push({ key: g.new_num || g.n, num: g.new_num || "new", ghost: g, sec: s }));
+      if (P) P.ghostsOf(s).forEach((g) => out.push({ key: g.n, num: g.new_num || "new", ghost: g, sec: s }));   // keyed by the P number: two proposals can be given the same new rule number
     }
     return out;
   }
@@ -251,7 +251,7 @@ ${text}${box}${act ? `<div class="mact" data-slot="rule-action">${act}</div>` : 
     return true;
   }
 
-  if (P) P.attach({ RB, redraw: () => draw(), reveal: (num) => { if (cards && !cards.isOpen()) openRule(num); }, openAdd: (block) => cards && cards.open({ kind: "add", key: block }, { push: cards.isOpen() }), openPick: () => cards && cards.open({ kind: "pick", key: "pick" }), closeAdd: () => { if (cards && cards.current() && cards.current().kind === "add") cards.close(); } });
+  if (P) P.attach({ RB, redraw: () => draw(), openAdd: (block) => cards && cards.open({ kind: "add", key: block }, { push: cards.isOpen() }), openPick: () => cards && cards.open({ kind: "pick", key: "pick" }), closeAdd: () => { if (cards && cards.current() && cards.current().kind === "add") cards.close(); } });
   draw();
 
   function goto(num) {
@@ -278,8 +278,8 @@ ${text}${box}${act ? `<div class="mact" data-slot="rule-action">${act}</div>` : 
     const pe = P && e.target.closest("[data-p]");
     if (pe && !pe.disabled) { e.preventDefault(); P.click(pe); return; }
     const nav = e.target.closest("[data-mnav]");
-    if (nav && cur && cur.kind === "rule") { const list = items(), i = list.findIndex((x) => x.key === cur.key), n = list[(i + Number(nav.dataset.mnav) + list.length) % list.length]; cards.open({ kind: "rule", key: n.key }, { push: false }); if (P) P.cancelFlow(); return; }
-    if (e.target.closest("[data-mhist]") && cur) { cards.open({ ...cur, hist: !cur.hist }, { push: true, replace: true }); return; }
+    if (nav && cur && cur.kind === "rule") { const list = items(), i = list.findIndex((x) => x.key === cur.key), n = list[(i + Number(nav.dataset.mnav) + list.length) % list.length]; cards.open({ kind: "rule", key: n.key }, { push: false }); return; }
+    if (e.target.closest("[data-mhist]") && cur) { cards.open({ ...cur, hist: !cur.hist }, { push: true }); return; }
   });
   if (P) {
     root.addEventListener("input", (e) => P.input(e.target));

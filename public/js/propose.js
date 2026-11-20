@@ -7,7 +7,7 @@
 //     refresh()          reload the page's state after a confirm or a withdraw (it calls P.load() and P.redraw())
 //     pill(by, mine)     the page's player pill (piece + name) for a proposer {name, color}; optional
 //   P.load()             fetch GET /api/proposals
-//   P.attach({ RB, redraw, reveal })   rulebook.js: the parsed rules, a redraw, and "open this rule's card"
+//   P.attach({ RB, redraw, openAdd, openPick, closeAdd })   rulebook.js: the parsed rules, a redraw, and how to open the "add a rule" and "which block" cards
 // Drafting is free and repeatable; only confirming counts. Nothing here decides what is allowed: the server's answers
 // (draft errors, the 110.1 refusal, the lock, one a day) are shown as they come.
 
@@ -71,13 +71,15 @@ const settingsHTML = (p) => {
 const needText = (p) => (p.needs ? `${p.needs.mark} · needs ${p.needs.needed} of ${p.needs.of}` : p.mark || "");
 
 export function createProposer({ api, me, day, refresh, pill }) {
-  const S = { list: [], today: null, ui: null, RB: null, redraw: () => {}, reveal: () => {}, openAdd: () => {}, openPick: () => {}, closeAdd: () => {} };
+  const S = { list: [], today: null, ui: null, RB: null, redraw: () => {}, openAdd: () => {}, openPick: () => {}, closeAdd: () => {} };
 
   /** @rule 103.2 */
   async function load() {
     const r = await api("/api/proposals");
     S.list = r.ok && r.data ? r.data.proposals || [] : [];
     S.today = r.ok && r.data ? r.data.day : null;
+    // What you were writing belongs to the day and the turn it began on: after End turn, the midnight lock, a new day or a proposal made elsewhere it is no longer yours to send.
+    if (S.ui && !S.ui.wId && !S.ui.busy && (S.ui.day !== (day() && day().day) || !can().allowed)) S.ui = null;
   }
 
   /** @rule 103.1 */
@@ -103,7 +105,7 @@ export function createProposer({ api, me, day, refresh, pill }) {
   const playerPill = (p) => (p.by ? (pill ? pill(p.by, p.mine) : `<span class="plpill"><span class="dot" style="background:${/^#[0-9a-f]{6}$/i.test(p.by.color && p.by.color.hex) ? p.by.color.hex : "#888"}"></span>${esc(p.by.name)}${p.mine ? " (you)" : ""}</span>`) : "");
   /** @rule 103.2 */
   /** The card a proposal opens: a new rule's own (ghost) card, else the rule it changes. A change to a block has no card. */
-  const cardKey = (p) => (p.kind === "add" ? p.new_num || p.n : p.kind === "mark" && S.RB && S.RB.byNum[p.target] && S.RB.byNum[p.target].kind === "block" ? null : String(p.target).split(".")[0]);
+  const cardKey = (p) => (!S.RB ? null : p.kind === "add" ? p.n : p.kind === "mark" && S.RB && S.RB.byNum[p.target] && S.RB.byNum[p.target].kind === "block" ? null : String(p.target).split(".")[0]);
   /** @rule 103.2 */
   const pPill = (p) => (p.n ? (cardKey(p) ? `<button type="button" class="ppill" data-seecard="${esc(cardKey(p))}" aria-label="Open proposal ${esc(p.n)}">${esc(p.n)}</button>` : `<span class="ppill">${esc(p.n)}</span>`) : "");
 
@@ -196,7 +198,7 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
   /** @rule 103.1 */
   function proposeHTML(rule) {
     if (!active()) return "";
-    const c = can(), u = S.ui, here = u && u.rule === rule.num;
+    const c = can(), u = S.ui, here = u && u.rule === rule.num && c.allowed;
     const open = here && (u.step === "scope" || u.step === "menu");
     return `<div class="proposeact"><button class="btn ghost small" type="button" data-p="open" data-n="${esc(rule.num)}" aria-expanded="${!!open}"${c.allowed ? "" : ` disabled title="${esc(c.reason || "")}"`}>Propose a change</button>${here ? (open ? menuHTML(rule) : flowHTML()) : ""}</div>`;
   }
@@ -220,7 +222,8 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
     if (m && m.kind === "add" && m.target === sec.num) return chgHTML(m);
     if (m) return `<p class="mnote">You have already proposed today (${esc(m.n)}). One proposal a day.</p>`;
     if (!c.allowed) return `<p class="mnote">${esc(c.reason || "You can't propose right now.")}</p>`;
-    return u && u.kind === "add" && u.rule === sec.num ? flowHTML() : "";
+    if (!(u && u.kind === "add" && u.rule === sec.num)) startAdd(sec.num);   // the card is never an empty shell: it opens on the form
+    return flowHTML();
   }
   // Which block a new rule goes in: the choice the banner's button opens.
   /** @rule 103.1 */
@@ -242,8 +245,11 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
 
   // ---- the clicks -----------------------------------------------------------------------------------------------
   /** @rule 103.1 */
+  const mkUi = (o) => ({ day: day() && day().day, ...o });
   function startAdd(block) {
-    S.ui = { rule: block, step: "write", kind: "add", target: block, words: "", prefilled: false, err: "" };
+    const u = S.ui;
+    if (u && u.kind === "add" && u.rule === block && !u.busy) return;   // opened again: the words you were writing are still there
+    S.ui = mkUi({ rule: block, step: "write", kind: "add", target: block, words: "", prefilled: false, err: "" });
   }
 
   /** @rule 103.1, 110.1 */
@@ -283,17 +289,19 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
   async function withdraw(id) {
     const r = await api(`/api/proposals/${encodeURIComponent(id)}/withdraw`, {});
     if (r.ok) { S.ui = null; await refresh(); return; }
-    S.ui = { wId: id, wErr: (r.data && r.data.error) || "Something went wrong." };
+    S.ui = mkUi({ wId: id, wErr: (r.data && r.data.error) || "Something went wrong." });
     await refresh();
   }
 
   /** @rule 103.1 */
   async function click(el) {
-    const a = el.dataset.p, u = S.ui;
+    const a = el.dataset.p;
+    if (S.ui && S.ui.wId && a !== "withdraw") S.ui = null;   // a withdraw error is said once
+    const u = S.ui;
     if (a === "open") {
       const n = el.dataset.n, rule = S.RB.byNum[n];
       if (u && u.rule === n && (u.step === "scope" || u.step === "menu")) S.ui = null;
-      else { S.ui = { rule: n, step: rule.clauses.length ? "scope" : "menu", scope: "whole" }; S.reveal(n); }
+      else S.ui = mkUi({ rule: n, step: rule.clauses.length ? "scope" : "menu", scope: "whole" });
     } else if (a === "scope") {
       u.scope = el.dataset.s || null; u.step = el.dataset.s ? "menu" : "scope";
     } else if (a === "kind") {
@@ -324,17 +332,15 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
     if (el.id === "pfWords") S.ui.words = el.value;
     else if (el.id === "pfTo") S.ui.to = el.value;
   }
-  /** @rule 103.1 */
-  const cancelFlow = () => { if (S.ui && !S.ui.busy) S.ui = null; };
   /** @rule 103.2 */
   const mineTouches = (rule) => { const p = S.list.find((q) => q.mine && q.status === "confirmed" && touches(q, rule.num)); return p ? p.n : null; };
 
   return {
-    load, click, input, cancelFlow, mineTouches, bannerHTML, proposeHTML, blockMarksHTML, addCardHTML, addFlowHTML, pickHTML, boxHTML, ageChip, onBallotRule,
+    load, click, input, mineTouches, bannerHTML, proposeHTML, blockMarksHTML, addCardHTML, addFlowHTML, pickHTML, boxHTML, ageChip, onBallotRule,
     chgFor: chgHTML, cardKey, rpill, pPill, mine, onBallot: () => onBallot(), canPropose: () => can(),
     ghostsOf: (sec) => ghosts(sec),
     ghostCount: () => (S.RB ? S.RB.sections.reduce((n, s) => n + ghosts(s).length, 0) : 0),
-    attach({ RB, redraw, reveal, openAdd, openPick, closeAdd }) { S.RB = RB; S.redraw = redraw; S.reveal = reveal || S.reveal; S.openAdd = openAdd || S.openAdd; S.openPick = openPick || S.openPick; S.closeAdd = closeAdd || S.closeAdd; },
+    attach({ RB, redraw, openAdd, openPick, closeAdd }) { S.RB = RB; S.redraw = redraw; S.openAdd = openAdd || S.openAdd; S.openPick = openPick || S.openPick; S.closeAdd = closeAdd || S.closeAdd; },
     redraw: () => S.redraw(),
   };
 }

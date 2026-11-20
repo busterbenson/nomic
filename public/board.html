@@ -267,7 +267,7 @@
     if (mine) return `<section class="sw pro" id="spropose" aria-label="Your proposal"><div class="swh"><h2>Your proposal, 1 of 1 today</h2></div>${PROP.chgFor(mine)}</section>`;
     const ended = !!(DAY && DAY.you && DAY.you.ended);
     if (ended || (DAY && DAY.locked)) return `<section class="sw pro" id="spropose" aria-label="No proposal today"><div class="swh"><h2>No proposal today</h2><span class="m">0 of 1 today</span></div></section>`;
-    const why = active ? c.reason : ME ? "The game has not started yet." : "Log in to propose.";
+    const why = active ? c.reason : !ME ? "Log in to propose." : DATA && DATA.game.status === "setup" ? "The game has not started yet." : "You are not a player in this game.";
     const off = active && c.allowed ? "" : ` disabled title="${esc(why)}"`;
     return `<section class="sw pro" id="spropose" aria-label="Propose a change"><div class="swh"><h2>Propose a change</h2><span class="m">0 of 1 today</span>${win}</div>
       <div class="ptiles"><button type="button" class="ptile" data-tab="rules"${off}><span class="pt2">Rulebook</span><span class="pm2">${BOOK && BOOK.count() ? plural(BOOK.count(), "rule") : ""}</span><span class="pa2">+ Change or add a rule</span></button>
@@ -368,7 +368,7 @@
     const ranked = ps.map((p, i) => ({ ...p, i })).sort((a, b) => (b.score - a.score) || (a.i - b.i));
     $("scores").innerHTML = ranked.map(p => {
       const me = ME && ME.player && ME.player.color.key === p.color.key;
-      return `<li class="${me ? "mine" : ""}"><button type="button" class="prow" data-pl="${esc(p.color.key)}" aria-label="${esc(p.name)}${me ? " (you)" : ""}: open player card">${mini(p, "pz")}<span>${esc(p.name)}${me ? ' <span class="muted you">(you)</span>' : ""}<span class="st" data-slot="player-today">${endedBy.has(p.name) ? "turn ended" : ""}</span></span><b>${esc(p.score)}</b></button></li>`;
+      return `<li class="${me ? "mine" : ""}"><button type="button" class="prow" data-pl="${esc(p.color.key)}" id="pr-${esc(p.color.key)}" aria-label="${esc(p.name)}${me ? " (you)" : ""}: open player card">${mini(p, "pz")}<span>${esc(p.name)}${me ? ' <span class="muted you">(you)</span>' : ""}<span class="st" data-slot="player-today">${endedBy.has(p.name) ? "turn ended" : ""}</span></span><b>${esc(p.score)}</b></button></li>`;
     }).join("");
     drawAcct();
     if (TAB === "history") drawBook();
@@ -441,6 +441,7 @@
     const box = $("movebar");
     if (!box) return;
     const move = myMove(), t = SEL && tileAt(SEL.x, SEL.y), pend = t && move.ok && canMoveTo(t) ? t : null;
+    if (SEL && !pend) { SEL = null; if (VIEW) VIEW.select(null, null); }   // a pick that is no longer a move you may make (you moved, the day locked, someone stepped there) goes away
     const me = myPiece(), g = DATA && DATA.game;
     if (!BOARD) { box.innerHTML = ""; return; }
     let lead = "";
@@ -471,12 +472,12 @@
     const m = $("movebar"); const p = document.createElement("p"); p.className = "notice err"; p.setAttribute("role", "alert"); p.textContent = text; m.prepend(p);
   }
   function select(q, r) {
+    // a piece's tile opens that player's card (S1-PLY-03); a tile you may move to is picked (a pending move); any other tile is not
+    const t = q == null ? null : tileAt(q, r), here = t ? piecesAt(t) : [];
+    if (here.length) { SEL = null; if (VIEW) VIEW.select(null, null); drawMoveBar(); openPlayer(here[0].color.key); return; }
     SEL = q == null ? null : { x: q, y: r };
     if (VIEW) VIEW.select(q, r);
     drawMoveBar();
-    // a piece's tile opens that player's card (S1-PLY-03); a bare tile just highlights
-    const t = SEL && tileAt(SEL.x, SEL.y), here = t ? piecesAt(t) : [];
-    if (here.length) { const p = here[0]; SEL = null; if (VIEW) VIEW.select(null, null); drawMoveBar(); openPlayer(p.color.key); }
   }
 
   function drawBoard(b) {
@@ -526,7 +527,7 @@
     if (tab && !tab.disabled) { setTab(tab.dataset.tab, !tab.closest(".btabs")); return; }
     const j = t.closest("[data-jump]");
     if (j) { jumpTo(j.dataset.jump); return; }
-    const inCard = !!t.closest("#mroot");
+    const inCard = CARDS.isOpen();   // with a card up, anything it opens (from its text, or from the preview of one of its pills) goes on its back stack
     const see = t.closest("[data-seecard]");
     if (see && BOOK) {
       if (see.matches(".rpill,.xref,.rref") && !see.dataset.fromprev) { BOOK.preview(see, see.dataset.seecard, see.dataset.clause); return; }

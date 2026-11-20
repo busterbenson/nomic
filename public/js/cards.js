@@ -19,13 +19,19 @@ export function createCards({ root, describe, onClose }) {
   function hidePreview() { const e = document.getElementById("rprev"); if (e) e.remove(); }
 
   // What had focus inside the card, so a redraw (a menu click, a toggle) can give it back to the same control.
-  const sig = (el) => (el && root.contains(el) && el.closest(".mcard") ? { tag: el.tagName, id: el.id, ds: JSON.stringify({ ...el.dataset }), cls: el.className } : null);
+  const sig = (el) => (el && root.contains(el) && el.closest(".mcard") ? { tag: el.tagName, id: el.id, ds: JSON.stringify({ ...el.dataset }), cls: el.className, sel: el.tagName === "TEXTAREA" ? [el.selectionStart, el.selectionEnd] : null } : null);
   const refind = (k) => [...root.querySelectorAll(k.tag.toLowerCase())].find((e) => e.id === k.id && JSON.stringify({ ...e.dataset }) === k.ds && e.className === k.cls);
+  // The cards the Back button can still go to: a card whose subject has gone (a withdrawn proposal's card) drops out of the stack.
+  function livePrev() {
+    while (S.stack.length && !describe(S.stack[S.stack.length - 1])) S.stack.pop();
+    return S.stack.length ? S.stack[S.stack.length - 1] : null;
+  }
   function draw(focusClose) {
-    const d = S.cur ? describe(S.cur) : null;
+    let d = S.cur ? describe(S.cur) : null;
+    if (!d) { const p = livePrev(); if (p) { S.stack.pop(); S.cur = p; d = describe(p); focusClose = true; } }   // the card on screen is gone: go back to the one before
     if (!d) { S.cur = null; S.stack = []; return shut(); }
     const was = !root.hidden, prev = root.querySelector(".mcard"), top = prev ? prev.scrollTop : 0, keep = was && !focusClose ? sig(document.activeElement) : null;
-    const back = S.stack.length ? describe(S.stack[S.stack.length - 1]) : null;
+    const pv = livePrev(), back = pv ? describe(pv) : null;
     root.innerHTML = `<div class="mback" data-mclose></div><div class="mcard ${d.cls || ""}" role="dialog" aria-modal="true" tabindex="-1" aria-label="${esc(d.label)}">${X}${back ? `<button type="button" class="mbackbtn" data-mback>← Back to ${esc(back.backLabel || back.label)}</button>` : ""}${d.html}</div>`;
     root.hidden = false;
     document.body.style.overflow = "hidden";
@@ -33,7 +39,10 @@ export function createCards({ root, describe, onClose }) {
     if (was && S.key === key) c.scrollTop = top;
     S.key = key;
     if (focusClose || !was) { const x = root.querySelector(".mx"); if (x) x.focus({ preventScroll: true }); }
-    else if (keep) { const e = refind(keep) || c; e.focus({ preventScroll: true }); }   // the same control, or the card itself (Tab goes on from there)
+    else if (keep) {   // the same control (with its caret), or the card itself (Tab goes on from there)
+      const e = refind(keep) || c; e.focus({ preventScroll: true });
+      if (keep.sel && e.setSelectionRange) { try { e.setSelectionRange(keep.sel[0], keep.sel[1]); } catch { /* not a text field any more */ } }
+    }
   }
   function shut() {
     hidePreview();
@@ -50,12 +59,13 @@ export function createCards({ root, describe, onClose }) {
     S.cur = spec;
     draw(!same);
   }
-  function back() { hidePreview(); const p = S.stack.pop(); if (p) { S.cur = p; draw(true); } }
+  function back() { hidePreview(); const p = livePrev(); if (p) { S.stack.pop(); S.cur = p; draw(true); } }
   function close() {
     const was = !!S.cur, id = S.opener && S.opener.id;
     S.cur = null; S.stack = []; shut();
-    if (!was || !onClose) return;
-    onClose();   // the page may redraw what the opener was part of: find it again by its id
+    if (!was) return;
+    if (onClose) onClose();
+    // the page may have redrawn what the opener was part of (a refresh): find it again by its id
     const a = document.activeElement;
     if ((!a || a === document.body) && id) { const el = document.getElementById(id); if (el) el.focus({ preventScroll: true }); }
   }
@@ -65,7 +75,7 @@ export function createCards({ root, describe, onClose }) {
     hidePreview();
     const el = document.createElement("div");
     el.className = "preview rprev"; el.id = "rprev"; el.setAttribute("role", "dialog"); el.innerHTML = html;
-    (isOpen() ? root : document.body).appendChild(el);
+    document.body.appendChild(el);   // not inside the card: a redraw of the card must not take it away
     const b = anchor.getBoundingClientRect(), w = Math.min(340, innerWidth - 32);
     const x = Math.min(Math.max(16, b.right - w), innerWidth - w - 16), y = b.bottom + 8;
     el.style.left = x + "px"; el.style.top = y + "px";

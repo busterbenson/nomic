@@ -5,6 +5,7 @@ import { join as pjoin } from "node:path";
 import { ROOT } from "./lib.mjs";
 import { parseRules, markOf, renderMarkdown, hl } from "../public/js/rulebook.js";
 import { TRACED, ROLES, FOOT, HEIGHT } from "../public/js/pieces-data.js";
+import { createProposer } from "../public/js/propose.js";
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = "") => {
@@ -76,6 +77,34 @@ check("108.3 (the moderator names conflicts when drafting) and 110.1 (what no pr
   rules.includes("When drafting, the moderator names any other rule the proposal would conflict with, so the proposer can change that rule too.") &&
   rules.includes("A proposal that would change them is refused when it is drafted.") && !/rule 104\.4|rule 107\.6/.test(T.byNum["110.1"].paras[0].s));
 check("505 says what the spawn code does (the chart shape of rule 504.2), not a fixed '2.5 tiles'", !/2\.5 tiles/.test(rules) && rules.includes("every tile that a move onto it would chart (rule 504.2) is already charted"));
+
+console.log("the propose flow follows the viewer's day (what you were writing is yours only on the day and turn it began)");
+{
+  globalThis.document = { getElementById: () => null };
+  const st = { day: 2, ended: false };
+  const api = async () => ({ ok: true, status: 200, data: { day: st.day, proposals: [] } });
+  const day = () => ({ status: "playing", day: st.day, locked: false, you: { ended: st.ended, can: { propose: { allowed: !st.ended, reason: st.ended ? "Your turn has ended." : "" } } } });
+  const P = createProposer({ api, me: () => ({ player: {} }), day, refresh: async () => {} });
+  const book = parseRules(read("templates/RULES.md"));
+  P.attach({ RB: book, redraw() {}, openAdd() {}, openPick() {}, closeAdd() {} });
+  await P.load();
+  const r401 = book.byNum["401"], b400 = book.byNum["400"];
+  await P.click({ dataset: { p: "open", n: "401" } });
+  check("a menu opened on a rule shows", /class="pmenu"/.test(P.proposeHTML(r401)));
+  st.ended = true; await P.load();
+  check("after End turn (or the lock, or a proposal made elsewhere) the open menu is gone and Propose is off, with its reason", !/class="pmenu"/.test(P.proposeHTML(r401)) && /disabled title="Your turn has ended\."/.test(P.proposeHTML(r401)));
+  st.ended = false; await P.load();
+  await P.click({ dataset: { p: "open", n: "401" } }); st.day = 3; await P.load();
+  check("a menu or slip begun on day 2 is not there on day 3 (its draft would be refused)", !/class="pmenu"/.test(P.proposeHTML(r401)));
+  await P.click({ dataset: { p: "add", n: "400" } });
+  P.input({ id: "pfWords", value: "Draws are replayed." });
+  await P.click({ dataset: { p: "add", n: "400" } });
+  check("opening the add-a-rule card again keeps the words being written", P.addFlowHTML(b400).includes("Draws are replayed."));
+  await P.click({ dataset: { p: "add", n: "100" } });
+  check("a flow on another block starts fresh (one flow at a time, as before)", !P.addFlowHTML(book.byNum["100"]).includes("Draws are replayed.") && P.addFlowHTML(book.byNum["100"]).includes("pfWords"));
+  check("a new rule is keyed by its P number, never its number (two can be given the same one)", P.cardKey({ kind: "add", n: "P3", new_num: "404" }) === "P3" && P.cardKey({ kind: "amend", target: "401.2", n: "P4" }) === "401");
+  delete globalThis.document;
+}
 
 console.log("one palette file, one set of pieces");
 const hexOk = (h) => /^#[0-9A-Fa-f]{6}$/.test(h);
