@@ -166,7 +166,7 @@ function clauseNumbersIn(text) {
 /** @rule 103.1 */
 export function wordsProblem(words) {
   const { lead, loose } = clauseNumbersIn(words);
-  if (HEADING.test(words) || lead.length || loose) return "Write the new text on its own: no headings and no numbered lines (the moderator numbers it).";
+  if (HEADING.test(words) || lead.length || loose) return "Write the new text on its own: no headings and no numbered lines (the moderator numbers it). Cite another rule as (rule 202.4).";
   return null;
 }
 // The sentence for a draft of `target` whose text reaches outside it, or null. A clause is drafted without its number; a
@@ -325,7 +325,7 @@ export function readModelAnswer(book, req, raw) {
   // An edit in place is the player's exact text: the route reads only the conflicts from this answer, so name them all.
   if (req.prefilled) return { after_text: String(req.words), conflicts, settings: {} };
   const fixed = conflicts.filter((n) => fixedWhole(book, n));
-  if (fixed.length) return refuse("110.1", `This would also change ${fixed.map((n) => `rule ${n}`).join(", ")}, which no proposal can change: the site runs ${fixed.length > 1 ? "them" : "it"} the same in every game (rule 110.1).`);
+  if (fixed.length) return refuse("110.1", `This would conflict with ${fixed.map((n) => `rule ${n}`).join(", ")}, which no proposal can change: the site runs ${fixed.length > 1 ? "them" : "it"} the same in every game (rule 110.1). Change the words so they leave ${fixed.length > 1 ? "them" : "it"} alone.`);
   const text = typeof a.after_text === "string" ? a.after_text.trim() : "";
   if (!text || [...text].length > 4000) return { error: "malformed" };
   const node = book.byNum[req.target];

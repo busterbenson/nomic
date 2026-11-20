@@ -10,7 +10,7 @@ node tests/drafter-live.mjs --failed-from results.json --runs 3
 node tests/drafter-live.mjs --list                # what each case expects; which ones call the model
 node tests/drafter-live.mjs --dry-run             # only the cases that need no model (no key needed)
   --rules RULES.md   override the case file's rules   --out results.json   --concurrency 4
-  --max-calls 300 --ledger file   hard cap on model calls, counted in code across runs in the ledger file
+  --max-calls 300 --ledger file   hard cap on model calls, counted in code across runs in the ledger file (default `.drafter-live-ledger.json` in the checkout, gitignored)
 ```
 
 The key is `PROMPTOCRACY_MODEL_API_KEY`, from the environment or `~/chalantbot/.env`. It goes to the drafter as `MODEL_API_KEY` (`MODEL_BASE_URL` unset = the real API) and is never printed or written to a result. Cost is reported at $0.10 / M input and $0.50 / M output tokens.
@@ -54,7 +54,7 @@ An alternative of `expect`:
 | `you` | the draft must be in the you-voice (has "you" or "your") |
 | `keep_min` | kept wording: at least this share of the player's content words must appear in the draft (0 to 1) |
 
-Checks run on **every** drafted answer, whatever the case says: the change stays inside its target (the text is spliced into the book and every part outside the target must be identical; no heading, no other clause's number, no renumbering, no added or dropped clause); protected text (110.1) inside the target is word for word; nothing from the system prompt, and no key, in the draft; no new legalese (`shall`, `may`, `hereby`, `pursuant`, `notwithstanding`, `aforementioned`, `in the event that`: counted against the text it replaces, so the rulebook's existing "may" is not flagged); the answer parses; the call stays under the token caps and was not cut off.
+Checks run on **every** drafted answer, whatever the case says: the change stays inside its target (a draft is spliced in place of the target's text, so no heading, no clause number outside the target, no renumbering, no added or dropped clause); protected text (110.1) inside the target is word for word; nothing from the system prompt, and no key, in the draft; no new legalese (`shall`, `may`, `hereby`, `pursuant`, `notwithstanding`, `aforementioned`, `in the event that`: counted against the text it replaces, so the rulebook's existing "may" is not flagged); the answer parses; the call stays under the token caps and was not cut off.
 
 **Kept wording** is recall over distinct content words: lowercase words of 3+ letters or digits from the player's words, minus a short list of stop words and request words ("make", "change", "reword", "rule", ...), that also appear in the draft, divided by the number of such words. 1 means every word of theirs is in the draft.
 

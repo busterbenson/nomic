@@ -31,7 +31,7 @@ if (!caseFiles.length) caseFiles.push(join(HERE, "drafter-cases.json"));
 const MAX_CALLS = Number(flag("max-calls", 300));
 const RUNS = Math.max(1, Number(flag("runs", 1)));
 const CONCURRENCY = Math.max(1, Number(flag("concurrency", 4)));
-const LEDGER = flag("ledger", join(tmpdir(), "promptocracy-drafter-live-ledger.json"));
+const LEDGER = flag("ledger", join(ROOT, ".drafter-live-ledger.json"));   // per checkout (gitignored), so two agents never share one count
 const OUT = flag("out", join(tmpdir(), `promptocracy-drafter-live-${new Date().toISOString().replace(/[:.]/g, "-")}.json`));
 
 // ---------------------------------------------------------------- the key (never printed)
@@ -135,15 +135,12 @@ const low = (t) => plain(t).toLowerCase();
 const LEAD = /^(?:\*\*)?(\d{3}\.\d+)(?:\*\*)?(?=\s|$)/;   // a clause number leading a line (a bare "100 points" is not one)
 const jeq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-// The change as the midnight step would splice it in: the text of the target (and, for a rule, its clauses) replaced, and
-// nothing else. Returns the problems with the draft being a splice at all, and every part of the book whose text differs
-// from before. A draft that stays inside its target changes no part outside the target.
+// Does the draft stay inside its target? A draft is spliced in place of the target's text, so it changes nothing outside
+// the target exactly when it carries no heading (a new rule or block) and no clause number outside the target's own, and a
+// rule keeps its clauses without renumbering. Returns the problems.
 export function spliceCheck(book, target, after) {
   const problems = [], node = book.byNum[target];
   const family = (n) => n === target || n.startsWith(`${target}.`);
-  const before = new Map();
-  for (const sec of book.sections) for (const r of sec.rules) { before.set(r.num, null); for (const cl of r.clauses) before.set(cl.num, clauseText(cl)); }
-  const next = new Map(before);
   const lines = String(after).split("\n");
   if (lines.some((l) => /^\s{0,3}#{1,6}\s/.test(l))) problems.push("a heading (a new rule or block) inside the draft");
   const lead = lines.map((l) => l.trim().match(LEAD)?.[1]).filter(Boolean);
@@ -156,10 +153,7 @@ export function spliceCheck(book, target, after) {
       if (!family(n) || n === target) problems.push(`${n} at the start of a line in a draft of rule ${target}`);
       else if (!have.has(n) && Number(n.split(".")[1]) <= top) problems.push(`${n} is a new number below the highest existing clause (renumbering)`);
     }
-    for (const n of lead) if (family(n) && n !== target) next.set(n, "(changed)");
   }
-  const outside = [...next].filter(([n, t]) => !family(n) && t !== before.get(n)).map(([n]) => n);
-  if (outside.length) problems.push(`text outside the target changed: ${outside.join(", ")}`);
   return problems;
 }
 
@@ -234,7 +228,7 @@ function mismatches(alt, r, book, c) {
   for (const s of alt.after_includes || []) if (!after.includes(s.toLowerCase())) miss.push(`draft lacks "${s}"`);
   if (alt.after_includes_any && !alt.after_includes_any.some((s) => after.includes(s.toLowerCase()))) miss.push(`draft has none of ${alt.after_includes_any.join(", ")}`);
   for (const s of alt.after_excludes || []) if (after.includes(s.toLowerCase())) miss.push(`draft contains "${s}"`);
-  if (alt.you && !/\byou(r|'ve|'re|'ll)?\b/i.test(r.after_text)) miss.push("not in the you-voice (no 'you' or 'your')");
+  if (alt.you && !/\byou(r|['’](ve|re|ll))?\b/i.test(r.after_text)) miss.push("not in the you-voice (no 'you' or 'your')");
   if (alt.keep_min !== undefined) { const k = keptWording(c.words, r.after_text); if (k < alt.keep_min) miss.push(`kept ${(k * 100).toFixed(0)}% of the player's words, wanted ${(alt.keep_min * 100).toFixed(0)}%`); }
   if (alt.after_unchanged && plain(r.after_text) !== plain(r.before_text)) miss.push("the text changed, but only a setting was asked for");
   for (const n of alt.conflicts_include || []) if (!conflicts.includes(n)) miss.push(`conflicts lack ${n} (got ${conflicts.join(",") || "none"})`);
@@ -299,6 +293,7 @@ async function worker() {
     let r;
     try { r = await als.run(slot, () => pipeline(drafter, book, md, c, env)); }
     catch (e) { if (e instanceof CapReached) { r = { outcome: "skipped", reason: "cap" }; } else r = { outcome: "crashed", reason: String(e?.message || e).slice(0, 200) }; }
+    if (capHit && r.outcome === "failed") r = { outcome: "skipped", reason: "cap" };   // the drafter turns the cap error into "failed"
     const g = r.outcome === "skipped" ? { pass: false, failures: ["not run: API call cap reached"] } : grade(book, c, r, slot);
     results.get(c.id).runs.push({
       got: gotOf(r), pass: g.pass, failures: g.failures, message: r.message || null, conflicts: r.conflicts || null, settings: r.settings || null,
