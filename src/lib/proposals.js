@@ -500,7 +500,8 @@ export const CONFIRM_SQL = `UPDATE proposals SET status = 'confirmed', mark = ?,
            AND c.day_proposed = proposals.day_proposed AND c.status NOT IN ('draft', 'withdrawn')) < ?`;
 // How many proposals a player has confirmed on a day (not drafts, not withdrawn ones). Binds: game id, player id, day.
 export const CONFIRMED_TODAY_SQL = `SELECT COUNT(*) AS n FROM proposals WHERE game_id = ? AND player_id = ? AND day_proposed = ? AND status NOT IN ('draft', 'withdrawn')`;
-// What the site says when a player is at the limit (rule 103.2).
+// What the site says when a player is at the limit.
+/** @rule 103.2 */
 export const proposalLimitMessage = (n) => `You've proposed ${n} today, the most a day (103.2).`;
 // Withdraw (rule 103.3): only today's confirmed proposal. Binds: withdrawn_at, id, day, then dayOpenBinds.
 export const WITHDRAW_SQL = `UPDATE proposals SET status = 'withdrawn', withdrawn_at = ? WHERE id = ? AND status = 'confirmed' AND day_proposed = ?

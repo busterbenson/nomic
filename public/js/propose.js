@@ -335,7 +335,7 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
     else if (el.id === "pfTo") S.ui.to = el.value;
   }
   /** @rule 103.2 */
-  const mineTouches = (rule) => { const p = S.list.find((q) => q.mine && q.status === "confirmed" && touches(q, rule.num)); return p ? p.n : null; };
+  const mineTouches = (rule) => { const ns = S.list.filter((q) => q.mine && q.status === "confirmed" && touches(q, rule.num)).map((q) => q.n); return ns.length ? ns.join(", ") : null; };
 
   return {
     load, click, input, mineTouches, bannerHTML, proposeHTML, blockMarksHTML, addCardHTML, addFlowHTML, pickHTML, boxHTML, ageChip, onBallotRule,

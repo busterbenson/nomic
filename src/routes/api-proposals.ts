@@ -25,7 +25,7 @@ const out = (body: any, status = 200): Out => ({ status, body });
 // scales with the day's proposal limit (proposals.per_day, rule 103.2): the 30 a day that went with one proposal, and 10
 // more for every further proposal, so 3 a day gives 50 and the most (10) gives 120. A player who drafts a few tries per
 // proposal never meets it, and the model calls a player can cost stay bounded by the setting.
-/** @rule 103.1 */
+/** @rule 103.1, 103.2 */
 export const draftsPerDay = (limit: number) => 20 + 10 * limit;
 
 const books = new WeakMap<object, { md: string; book: any; sha: string }>();

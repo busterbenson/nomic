@@ -207,5 +207,27 @@ console.log("the ballot's vote boxes (public/js/ballot.js)");
   check("...and after a finished vote a second one goes through", again === 2);
 }
 
+console.log("several proposals of one player in a day (rule 103.2)");
+{
+  globalThis.document = { getElementById: () => null };
+  const mk = (n, kind, target) => ({ mine: true, status: "confirmed", n: `P${n}`, number: n, kind, target, head: "h", before_text: "", after_text: "x", id: `id${n}`, conflicts: [], settings: {}, day_proposed: 2, day_ballot: 3 });
+  const list = [mk(1, "amend", "401"), mk(3, "addclause", "401"), mk(4, "add", "400")];
+  const st = { made: 2, limit: 3 };
+  const api = async () => ({ ok: true, status: 200, data: { day: 2, proposals: list.slice(0, st.made) } });
+  const day = () => ({ status: "playing", day: 2, locked: false, you: { ended: false, proposals: { made: st.made, limit: st.limit }, can: { propose: st.made >= st.limit ? { allowed: false, reason: `You've proposed ${st.made} today, the most a day (103.2).` } : { allowed: true } } } });
+  const P = createProposer({ api, me: () => ({ player: {} }), day, refresh: async () => {} });
+  const book = parseRules(read("templates/RULES.md"));
+  P.attach({ RB: book, redraw() {}, openAdd() {}, openPick() {}, closeAdd() {} });
+  await P.load();
+  check("two confirmed proposals: mineList has both, in order; the banner names both P-numbers and '2 of 3', and still offers 'Propose a new rule'",
+    P.mineList().map((p) => p.n).join() === "P1,P3" && /P1/.test(P.bannerHTML()) && /P3/.test(P.bannerHTML()) && /\(2 of 3\)/.test(P.bannerHTML()) && /data-p="pickblock"/.test(P.bannerHTML()) && !/class="rbanner done"/.test(P.bannerHTML()), P.bannerHTML());
+  check("a rule two of your proposals touch shows both P-numbers on its chip (the rulebook card)", P.mineTouches({ num: "401" }) === "P1, P3" && P.mineTouches({ num: "402" }) === null);
+  st.made = 3; await P.load();
+  const b = P.bannerHTML();
+  check("at 3 of 3 the banner says '(3 of 3)', is marked done and offers no button; the add flow says the limit",
+    /\(3 of 3\)/.test(b) && /class="rbanner done"/.test(b) && !/data-p="pickblock"/.test(b) && /You(?:'|&#39;)ve proposed 3 today, the most a day \(103\.2\)\./.test(P.addFlowHTML(book.byNum["300"] || { num: "300", rules: [] })) && !/One proposal a day|already proposed/i.test(b), b);
+  check("the add card for a block is disabled with the reason at the limit", /disabled title="You(?:'|&#39;)ve proposed 3 today, the most a day \(103\.2\)\."/.test(P.addCardHTML({ num: "400" })), P.addCardHTML({ num: "400" }));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
