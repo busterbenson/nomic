@@ -7,7 +7,7 @@ import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, re
 import { createServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { ALLOWED, fence, markOf, prevailing, runOnce, ROOT } from "./process-day.mjs";
+import { ALLOWED, fence, markOf, prevailing, ruleAge, runOnce, ROOT } from "./process-day.mjs";
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = "") => { if (ok) pass++; else { fail++; console.log(`FAIL ${name}${detail ? `\n     ${detail}` : ""}`); } };
@@ -221,6 +221,13 @@ console.log("moderator runner");
     const o = t.claims[0]?.outcomes[0];
     check(want === true ? `kinds: ${name} applies` : `kinds: ${name} is refused`, want === true ? o?.applied === true : o && !o.applied && want.test(o.reason), J(o));
   }
+  // A move of a rule with clauses: the draft is plain text ("302.2 ..."), the file has markdown ("**302.2** ...").
+  const r203 = md.slice(md.indexOf("### 203 "), md.indexOf("### 204 "));
+  const body203 = r203.split("\n").slice(1).join("\n").trim();
+  const moved203 = body203.replace(/\*\*203\.(\d+)\*\*/g, "**302.$1**").replace(/\(rule 203\.(\d)\)/g, "(rule 302.$1)");
+  const draft203 = `302 Days\n\n${moved203.replace(/\*\*/g, "")}\n\n203 [Moved to 302]`;
+  const tm = await night({ scenario: { apply: { 4: { action: "ops", ops: [{ replace: ["RULES.md", r203, "### 203 [Moved to 302]\n\n"] }, { replace: ["RULES.md", "## 400.", `### 302 Days\n${moved203}\n\n## 400.`] }] } } }, state: { job: job([P(4, "203", { kind: "move", new_num: "302", to_block: "300", after_text: draft203 })]) }, opts: { audit: false } });
+  check("kinds: a move of a rule with clauses applies (the voted plain-text draft matches the file's markdown)", tm.claims[0]?.outcomes[0]?.applied === true, J(tm.claims[0]?.outcomes));
   // rulebook.test.ts: an add with a module may change only the lines that name it.
   const mod404 = 'import { defineRule, effects } from "promptocracy/engine";\nexport default defineRule({\n  rule: 404,\n  /** @rule 404 */\n  onEnacted(_ctx, proposal: any) {\n    return [effects.points(proposal.player, 1, "404")];\n  },\n});\n';
   const test404 = 'import { test } from "node:test";\nimport assert from "node:assert/strict";\nimport { makeCtx } from "promptocracy/engine/testing";\nimport rule from "./404.ts";\ntest("404: +1", () => assert.equal(rule.onEnacted!(makeCtx(), { number: 1, player: "a" } as any)[0].delta, 1));\n';
@@ -279,6 +286,26 @@ console.log("moderator runner");
   const t = await night({ scenario: { apply: { 3: { action: "points", to: 15 }, 5: { action: "points", to: 20 } } }, state: { job: job([P(3, "401"), P(5, "401")]), refuseClaim: true }, opts: { audit: false } });
   const t2 = await night({ scenario: { apply: {} }, state: { job: null, not_applied: [{ number: 3, day: 1, reason: "x" }, { number: 5, day: 1, reason: "x" }], processed: [] }, opts: { repo: t.repo } });
   check("reconcile: two not-applied changes to the same rule revert cleanly (newest first), back to the old text", t2.r.status === "idle" && J(log(t.repo.bare).slice(0, 2)) === J(["Revert P3: not applied (day 1)", "Revert P5: not applied (day 1)"]) && /gets 10 points/.test(g(["show", "main:RULES.md"], t.repo.bare)), J([t2.r, log(t.repo.bare)]));
+}
+{
+  // A claimed night whose change never took effect (the deploy was late): its day-1 tag holds the change. The next run
+  // reverts it AND tags the corrected rules day-1.1 and deploys them, so the next build doesn't ship the rejected rules.
+  const t = await night({ scenario: { apply: { 3: { action: "points", to: 15 } } }, state: { job: job([P(3, "401")]) }, opts: { audit: false } });
+  check("(the night was claimed and tagged day-1)", t.r.status === "claimed" && remoteTags(t.repo.bare).includes("day-1"));
+  const t2 = await night({ scenario: { apply: {} }, state: { job: null, not_applied: [{ number: 3, day: 1, reason: "the change was applied but did not go live by 2:30 am" }], processed: [{ n: 1, status: "timed_out", commit_sha: t.claims[0].sha }] }, opts: { repo: t.repo } });
+  check("reconcile after a late deploy: the revert is tagged day-1.1 (the tag the build now picks) and deployed", remoteTags(t.repo.bare).includes("day-1.1") && g(["rev-parse", "day-1.1^{commit}"], t.repo.bare).trim() === g(["rev-parse", "main"], t.repo.bare).trim() && /gets 10 points/.test(g(["show", "day-1.1:RULES.md"], t.repo.bare)) && t2.deploys.length === 1, J([remoteTags(t.repo.bare), t2.deploys]));
+  const t3 = await night({ scenario: { apply: {} }, state: { job: null, not_applied: [{ number: 3, day: 1, reason: "x" }], processed: [{ n: 1, status: "timed_out", commit_sha: t.claims[0].sha }] }, opts: { repo: t.repo } });
+  check("and a second run tags nothing more", !remoteTags(t.repo.bare).includes("day-1.2") && t3.deploys.length === 0);
+}
+{
+  // Rule ages (108.1) from the history: a starter rule is 0; a rule added by a proposal is the day its commit names.
+  const repo = gameRepo();
+  const seed = join(repo.base, "seed");
+  writeFileSync(join(seed, "RULES.md"), readFileSync(join(seed, "RULES.md"), "utf8").replace("## 500.", "### 404 Bonus\nYou get 1 more point.\n\n## 500."));
+  g(["commit", "-qam", "P9: Add rule 404 (day 3, 4-1)\n\nProposal: P9"], seed);
+  writeFileSync(join(seed, "RULES.md"), readFileSync(join(seed, "RULES.md"), "utf8").replace("You get 1 more point.", "You get 2 more points."));
+  g(["commit", "-qam", "P12: Amend rule 404 (day 7, 3-2)\n\nProposal: P12"], seed);
+  check("108.1 ages: starter rules are 0; a rule added on day 3 is 3, and amending it on day 7 doesn't make it newer", ruleAge(seed, 401) === 0 && ruleAge(seed, 404) === 3, J([ruleAge(seed, 401), ruleAge(seed, 404)]));
 }
 {
   // A lock left by a process that is gone (a crash, a reboot) does not block the night.

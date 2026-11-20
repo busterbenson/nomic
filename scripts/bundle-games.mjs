@@ -114,8 +114,10 @@ const git = (args, cwd) => execFileSync("git", args, { cwd, env: gitEnv, encodin
 //   day-N     the rules in effect on day N, tagged by the moderator when day N is processed (rule 107.8, later)
 //   day-0.K   a SETUP revision: while the game is being set up (before day 1, rule 203.1) its starter rules may be edited
 //             directly, and each edit that should go live gets the next K (day-0.1, day-0.2 ...). Tags are never moved,
-//             so this is how day 0 changes without moving day-0. Only day 0 has revisions: day-3.1 is not a tag the build
-//             reads, so once play starts only the moderator's day-N tags matter.
+//             so this is how day 0 changes without moving day-0.
+//   day-N.K   a RECONCILE revision (N >= 1): the moderator's next run reverts the changes of a night that was tagged
+//             day-N but whose proposals did not take effect (rule 107.7: the deploy was late, or the unlock failed), and
+//             tags the corrected rules day-N.K, so the next build ships them and not the rejected ones.
 // Order: by day, then revision (day-0 < day-0.1 < day-0.10 < day-1). Numbers: at most 6 digits for a day and 4 for a
 // revision (a longer tag is ignored, so day-99999999999999999999999 cannot turn into 1e+23 and block every deploy).
 export function latestDayTag(url) {
@@ -126,7 +128,7 @@ export function latestDayTag(url) {
     .map((m) => ({ tag: m[1], day: Number(m[2]), rev: m[3] === undefined ? null : Number(m[3]) }))
     // A revision is 1 or more and only on day 0; "day-00", "day-0.01" or "day-0.0" would sort like another tag, so only
     // the plain spelling counts.
-    .filter((t) => (t.rev === null || (t.day === 0 && t.rev >= 1)) && t.tag === (t.rev === null ? `day-${t.day}` : `day-${t.day}.${t.rev}`))
+    .filter((t) => (t.rev === null || t.rev >= 1) && t.tag === (t.rev === null ? `day-${t.day}` : `day-${t.day}.${t.rev}`))
     .map((t) => ({ ...t, rev: t.rev ?? 0 }));
   if (!tags.length) fail(`${url} has no day-N tag yet. Tag the game's main (for example day-0) before this build.`);
   const best = tags.reduce((a, b) => (b.day > a.day || (b.day === a.day && b.rev > a.rev) ? b : a));

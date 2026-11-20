@@ -123,6 +123,8 @@ export function sections(md) {
   return out;
 }
 const norm = (t) => String(t ?? "").replace(/\s+/g, " ").trim();
+// The text as a player reads it, for comparing with a draft: no markdown bold, no heading marks.
+const plain = (t) => norm(String(t ?? "").replace(/\*\*/g, "").replace(/^#{1,6}\s+/gm, ""));
 // What a proposal may touch: the rules (by number) whose text, module and tests it may change. Its target and, for a
 // new or moved rule, its new number; for a mark change on a block, the block heading.
 /** @rule 107.4 */
@@ -192,8 +194,8 @@ export function scopeProblems({ beforeMd, afterMd, beforeSettings, afterSettings
     out.push(`RULES.md ${k.startsWith("r") ? `rule ${n}` : k.startsWith("b") && !k.includes(":") ? `block ${n}` : "text outside any rule"} changed`);
   }
   if (p.after_text && !p.redraft && !markChange) {
-    const own = norm([...rules].map((n) => b[`r${n}`] ?? "").join("\n"));
-    const parts = String(p.after_text).split(/\n\s*\n/).map(norm).filter(Boolean);
+    const own = plain([...rules].map((n) => b[`r${n}`] ?? "").join("\n"));
+    const parts = String(p.after_text).split(/\n\s*\n/).map(plain).filter(Boolean);
     if (!parts.every((x) => own.includes(x))) out.push("the draft that was voted on is not in the rule it changes, word for word");
   }
   for (const f of changed) {
@@ -226,6 +228,17 @@ export function scopeProblems({ beforeMd, afterMd, beforeSettings, afterSettings
     if (JSON.stringify(beforeSettings?.[k]) !== JSON.stringify(afterSettings?.[k]) && !settable.has(k)) out.push(`settings.json ${k} changed, but this proposal doesn't set it`);
   }
   return out;
+}
+
+// The day a rule was added (rule 108.1, "the one added first"): the day of the first commit whose RULES.md has its
+// heading, read from that commit's "(day N, ..." subject; 0 for the starter rules (and anything added in setup).
+// Amending a rule doesn't make it newer, since its heading was already there.
+/** @rule 108.1 */
+export function ruleAge(dir, n) {
+  const log = git(["log", "--reverse", "--format=%s", "-G", `^### ${Number(n)} `, "--", "RULES.md"], dir, { allowFail: true }) ?? "";
+  const first = log.split("\n").find(Boolean) ?? "";
+  const m = /\(day (\d+), /.exec(first);
+  return m ? Number(m[1]) : 0;
 }
 
 // The commits on the current branch that carry a "Proposal: P<k>" or "Reverts-Proposal: P<k>" trailer.
@@ -392,8 +405,8 @@ export async function applyOne({ dir, job, p, tonight, budgetMs, model = runMode
         const claimsIn = (md, n) => [...norm(sections(md)[`r${n}`]).matchAll(/prevails over (?:rule )?(\d+)/gi)].map((m) => Number(m[1]));
         const claimsOf = (t) => [...norm(t).matchAll(/prevails over (?:rule )?(\d+)/gi)].map((m) => Number(m[1]));
         const yieldsIn = (md, n) => [...norm(sections(md)[`r${n}`]).matchAll(/gives way to (?:rule )?(\d+)/gi)].map((m) => Number(m[1]));
-        const them = { number: other, mark: markOf(beforeMd, other) ?? "majority", added: 0, claims: claimsIn(beforeMd, other), yields: yieldsIn(beforeMd, other) };
-        const us = { number: mine ?? 9999, mark: p.mark === "unanimous" || markOf(beforeMd, mine) === "unanimous" ? "unanimous" : "majority", added: p.kind === "add" ? job.day : 0, claims: claimsOf(p.after_text), yields: [] };
+        const them = { number: other, mark: markOf(beforeMd, other) ?? "majority", added: ruleAge(dir, other), claims: claimsIn(beforeMd, other), yields: yieldsIn(beforeMd, other) };
+        const us = { number: mine ?? 9999, mark: p.mark === "unanimous" || markOf(beforeMd, mine) === "unanimous" ? "unanimous" : "majority", added: p.kind === "add" ? job.day : mine ? ruleAge(dir, mine) : job.day, claims: claimsOf(p.after_text), yields: [] };
         if (prevailing(us, them) === them) {
           discard(dir);
           const by = tonight.find((t) => t.applied && ruleOf(t.target) === other);
@@ -540,6 +553,7 @@ export async function runOnce(opts) {
     // Reconcile (rule 107.7): revert any commit on main for a proposal D1 lists as not applied.
     const { applied: onMain, reverted } = proposalCommits(dir);
     let pushed = false;
+    const revertedNow = [];
     // Newest first (git log order), so two changes to the same rule revert cleanly.
     const reasons = new Map(notApplied.map((q) => [q.number, q]));
     for (const [number, c] of onMain) {
@@ -551,14 +565,35 @@ export async function runOnce(opts) {
       }
       git(["commit", "-q", "--amend", "-m", `Revert P${q.number}: not applied (day ${q.day})\n\nIt passed but was not applied: ${clean(q.reason)}.\n\nReverts-Proposal: P${q.number}`], dir);
       log({ event: "reconciled", number: q.number, reverted: c.sha });
+      revertedNow.push(c.sha);
       pushed = true;
     }
+    const tags = new Set((git(["ls-remote", "--tags", "--refs", "origin", "refs/tags/day-*"], dir) ?? "").split("\n").map((l) => l.split("refs/tags/")[1]).filter(Boolean));
     if (pushed) {
       const chk = checkGame(dir, "reconcile");
       if (!chk.ok) throw new Error(`the reconciled rules fail their checks: ${chk.out.slice(-300)}`);
       if (!opts.dryRun) git(["push", "-q", "origin", "HEAD:main"], dir);
+      // If the newest tag still holds a reverted change, the build would ship it: tag the corrected rules as a revision
+      // of that day (day-N.K) and deploy them (rule 107.7).
+      const latest = [...tags].map((t) => /^day-(\d{1,6})(?:\.(\d{1,4}))?$/.exec(t)).filter(Boolean).map((m) => ({ tag: m[0], day: Number(m[1]), rev: Number(m[2] ?? 0) }))
+        .filter((t) => t.tag === (t.rev ? `day-${t.day}.${t.rev}` : `day-${t.day}`)).sort((a, b) => b.day - a.day || b.rev - a.rev)[0];
+      if (latest && latest.day >= 1) {
+        git(["fetch", "-q", "origin", `refs/tags/${latest.tag}:refs/tags/${latest.tag}`], dir, { allowFail: true });
+        const stale = revertedNow.some((c) => git(["merge-base", "--is-ancestor", c, latest.tag], dir, { allowFail: true }) !== null);
+        if (stale) {
+          let k = 1;
+          while (tags.has(`day-${latest.day}.${k}`)) k++;
+          const rev = `day-${latest.day}.${k}`;
+          if (!opts.dryRun) {
+            git(["tag", rev], dir);
+            git(["push", "-q", "origin", `refs/tags/${rev}`], dir);
+            tags.add(rev);
+            await (opts.deploy ?? triggerDeploy)({ slug, day: latest.day, sha: git(["rev-parse", "HEAD"], dir).trim() });
+          }
+          log({ event: "reconcile_tag", tag: rev, replaces: latest.tag });
+        }
+      }
     }
-    const tags = new Set((git(["ls-remote", "--tags", "--refs", "origin", "refs/tags/day-*"], dir) ?? "").split("\n").map((l) => l.split("refs/tags/")[1]).filter(Boolean));
 
     if (!job) {
       // Nights that ended with nothing to apply (or timed out) still get their tag (rule 107.8).

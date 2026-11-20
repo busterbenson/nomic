@@ -120,5 +120,12 @@ proposal whose `Proposal: P<k>` commit is already there for this day); tags are 
 - The moderator token lives only in `~/chalantbot/.env` (`PROMPTOCRACY_MODERATOR_TOKEN_<SLUG>`); D1 keeps its SHA-256.
 - Budget (107.5): a hard timeout (SIGKILL) at the budget, and `--effort` from the stored budget.
 
+Reconcile revisions: when a reverted change is still in the newest day tag (the night was tagged, then its proposals
+did not take effect), the runner tags the corrected main `day-N.K` and triggers the deploy; the bundler reads revisions
+on any day (setup revisions are `day-0.K`).
+
+Rule ages (108.1): the day a rule's heading first appears in RULES.md, from that commit's "(day N, ..." subject; 0 for
+starter rules.
+
 ## Not in this PR
 - the stale-bundle re-lock (`GAMES[slug].day < games.rules_day`), the `code-status` route (PR 8), the recap UI (PR 6).
