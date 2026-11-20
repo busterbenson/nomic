@@ -557,6 +557,15 @@ with sync_playwright() as pw:
                 page.add_style_tag(content="#invite-url{filter:blur(7px)}")   # the join code is a secret: never in a screenshot
                 page.screenshot(path=f"{out}/invite-menu-{kind}-{w}-{scheme}.png", clip={"x": 0, "y": 0, "width": w, "height": 420})
             check(f"invite {tag} ({kind}): no page errors", not errors, str(errors)); c.close()
+            if kind == "setup":
+                # the person who opens that link, logged out: the join page says who invited them
+                c = b.new_context(viewport={"width": w, "height": h}, color_scheme=scheme); page = c.new_page()
+                errors = []; page.on("pageerror", lambda e: errors.append(str(e))); page.on("console", lambda m: errors.append("console: " + m.text) if m.type == "error" else None)
+                page.goto(val); page.wait_for_selector("form#f"); page.wait_for_timeout(400)
+                check(f"join {tag}: opened from Dee's own link, the page says 'Dee invited you' and shows the seats", text(page, ".invitedby") == "Dee invited you" and "2 of 8 players" in text(page, ".seatchip"), text(page, "body")[:200])
+                sideways(page, w, f"join {tag}")
+                if out != "-": page.screenshot(path=f"{out}/join-invited-{w}-{scheme}.png", clip={"x": 0, "y": 0, "width": w, "height": min(h, 700)})
+                check(f"join {tag}: no page errors", not errors, str(errors)); c.close()
         c, page, errors = as_player(w, h, scheme, "tiny", zed_cookie)
         page.click("#me-chip"); page.wait_for_selector("#acct:not([hidden])")
         check(f"invite {tag} (full): the item shows disabled with the reason: 'The game has 1 player.'", page.locator("#acct .acct-invite").count() == 1 and page.locator("#invite-copy").is_disabled() and page.locator("#invite-url").is_disabled() and text(page, "#acct .acct-invite .why") == "The game has 1 player." and page.input_value("#invite-url") == "", text(page, "#acct"))
