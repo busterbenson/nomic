@@ -37,7 +37,8 @@ Owner: Buster Benson. He decides game design; agents build what he approved.
 
 - 600 (hearts + creatures) and 700 (making things) are **starter rules**, but their text enters a game's RULES.md in the step that ships their code (step 2, step 3).
 - 601.4: a player dead for 3 days becomes a **Ghost** (in their color). 601.5: heal 1 heart at the **midnight nearest the actual full moon** in the game's time zone.
-- The 29 approved additions/rewordings are in `docs/rules-parity.md` (e.g. 203.4 the lock, 302 rewording + 302.6 unamendable core, 104.3 vs End turn, give-a-heart limits, 501.4 adjacency = 8 neighbours). A rulebook reorganization (blocks, order, renumbering map) is in progress and needs Buster's approval before anyone renumbers.
+- The 29 approved additions/rewordings are in `docs/rules-parity.md` (give-a-heart limits, 501.4 adjacency = 8 neighbours, End turn vs 104.3, …). Their numbers follow the approved **reorganization** in `docs/rules-reorg.md`: block 100 = rules about rules + everything the shared site does (103 Proposals, 107 The night, 108 When rules conflict, 109 Numbers and settings, 110 What no proposal can change); blocks 200+ = what each game's own rule code does; 302 retired. Use the reorg numbers in rule text and `@rule` tags.
+- **Renumbering is free until the first game officially starts** (Buster, 2026-11-19): moving and renumbering rules for better organization needs no proposal before Rickshaw Game 1 starts. After that, renumbering is a "move" proposal like any other, and the numbers the site's code relies on (110) can't move.
 
 ## Design reference
 
