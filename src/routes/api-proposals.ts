@@ -6,7 +6,7 @@
 //   POST /<slug>/api/proposals/<id>/withdraw  until midnight or End turn (rule 103.3)
 //   GET  /<slug>/api/proposals[?rule=402]     the proposals anyone may see: every one that has reached a ballot, and your
 //                                             own confirmed one ("mine"). Another player's proposal is hidden until it
-//                                             is on the ballot. Votes are never in it.
+//                                             is on the ballot. Votes and totals only once it is counted (rule 104.4).
 // Every write goes through the day's gate (rule 107.1 the lock, rule 202.4 End turn), in the handler and again in the
 // SQL of the write itself. Mechanical kinds are drafted by code (src/lib/proposals.js); rewording in the player's own
 // words by a small model (src/lib/drafter.ts).
@@ -41,10 +41,16 @@ const isUnique = (e: any) => /UNIQUE constraint failed/i.test(String(e?.message 
 /** @rule 103.2 */
 const ALREADY = "You already proposed today. One proposal a day.";
 
-// What a proposal shows. A whitelist: the count's columns (yes, no, absent, needed, electorate, why) are never in it.
-/** @rule 103.1, 103.2, 105.4 */
+// The statuses a proposal has once its ballot is counted: only then are its totals shown (rule 104.4).
+export const COUNTED = ["passed", "failed", "enacted", "not_applied"];
+
+// What a proposal shows. A whitelist: the count's columns (yes, no, absent, why) are in it only once it is counted
+// (rule 104.4); before that, nothing about its votes. The votes it needs come from its ballot day's electorate once it
+// is on a ballot (stored when the day opened), else from `electorate` (today's players, for a draft's slip).
+/** @rule 103.1, 103.2, 104.4, 105.4 */
 export function view(r: any, viewerId?: string | null, electorate?: number) {
   const mark = r.mark ?? r.draft_mark;
+  const stored = Number.isInteger(r.needed) && Number.isInteger(r.electorate);
   return {
     id: r.player_id === viewerId ? r.id : undefined,
     n: r.number ? `P${r.number}` : null,
@@ -58,7 +64,13 @@ export function view(r: any, viewerId?: string | null, electorate?: number) {
     settings: JSON.parse(r.settings || "{}"),
     drafted_by: r.drafted_by,
     mark: mark ?? null,
-    needs: mark && electorate ? { mark, needed: neededOf(mark, electorate), of: electorate } : undefined,
+    needs: mark && stored ? { mark, needed: r.needed, of: r.electorate }
+      : mark && electorate ? { mark, needed: neededOf(mark, electorate), of: electorate } : undefined,
+    result: COUNTED.includes(r.status) ? {
+      yes: r.yes, no: r.no, didnt_vote: r.absent, needed: r.needed, electorate: r.electorate,
+      passed: r.status !== "failed", applied: r.status === "enacted" ? true : r.status === "not_applied" ? false : null,
+      sentence: r.why, not_applied_reason: r.not_applied_reason ?? null,
+    } : undefined,
     day_proposed: r.day_proposed, day_ballot: r.day_ballot ?? null,
     by: r.name ? { name: r.name, color: colorOf(r.color) } : undefined,
     mine: !!viewerId && r.player_id === viewerId,

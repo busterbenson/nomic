@@ -67,7 +67,7 @@ console.log("the moderator's code drafts (rule 103.1), after the mockup's makeDr
 console.log("what no proposal can change (rule 110.1), refused at drafting");
 {
   const refuse = (body, after = null, settings = {}) => { const r = req(body); return fixedRefusal(B, { ...r, ...draftOf(B, r, after), settings }); };
-  check("the fixed parts are the site's floor plus what 110.1 names: 103.2, 107.1, 110.1, 202.4, 203.1", J(fixedParts(B)) === J(["103.2", "107.1", "110.1", "202.4", "203.1"]), J(fixedParts(B)));
+  check("the fixed parts are the site's floor plus what 110.1 names: 103.2, 104.4, 104.5, 107.1, 107.6, 110.1, 202.4, 203.1", J(fixedParts(B)) === J(["103.2", "104.4", "104.5", "107.1", "107.6", "110.1", "202.4", "203.1"]), J(fixedParts(B)));
   check("repealing 107 (it holds the lock, 107.1) is refused, naming rule 107.1 and rule 110.1", /rule 107\.1/.test(refuse({ kind: "repeal", target: "107" })) && /rule 110\.1/.test(refuse({ kind: "repeal", target: "107" })));
   check("rewording 202.4 (End turn), 103.2 (one proposal a day) or 203.1 (midnight to midnight) is refused, and so is changing 110.1 itself (\"this rule included\")",
     ["202.4", "103.2", "203.1", "110.1"].every((t) => refuse({ kind: "amend", target: t, words: "x", prefilled: true }) !== null));
