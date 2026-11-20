@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// THE MODERATOR'S NIGHT (rules 106, 107.2-107.8, 108). Runs on the Mac mini (launchd, every 2 minutes inside each
-// game's night window: moderator/schedule.mjs), one game per run. Everything here is deterministic code: poll the Worker, clone the game repo, apply each passed proposal through
+// THE MODERATOR'S NIGHT (rules 106, 107.2-107.8, 108). Runs on the Mac mini (launchd, twice a night per game: a main
+// run that stays all night and a backstop; moderator/schedule.mjs), one game per run. Everything here is deterministic code: poll the Worker, clone the game repo, apply each passed proposal through
 // ONE model call (moderator/APPLY.md), check what the model wrote (paths, lint, claims, rulebook, tests: the bundler's own
 // checks), commit, push, claim the night, tag day-N, trigger the deploy, reconcile what D1 lists as not applied. The
 // model never runs a command, never sees a secret and never touches git. The plan: moderator/PLAN.md.
@@ -15,11 +15,12 @@
 //   MODERATOR_STATE_DIR (default ~/chalantbot/logs/promptocracy-moderator), MODERATOR_NOTIFY_DIR
 //   (default ~/chalantbot/_notifications), MODERATOR_CLAUDE (default `claude`)
 import { spawn, execFileSync } from "node:child_process";
-import { appendFileSync, closeSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { checkTree } from "../scripts/bundle-games.mjs";
+import { isMainRun } from "./schedule.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const ROOT = resolve(HERE, "..");
@@ -29,7 +30,9 @@ export const ALLOWED = [/^RULES\.md$/, /^settings\.json$/, /^rules\/[A-Za-z0-9_.
 export const RESULT_FILE = "MODERATOR-RESULT.json";
 export const MAX_FIXES = 2;
 export const CLAIM_MARGIN_MIN = 5; // stop applying this long before the deadline, so the claim lands in time
-export const STALE_LOCK_MIN = 90;
+export const STALE_LOCK_MIN = 240; // a main run holds the lock from the count to the deploy (a few hours); it touches it while it waits
+export const COUNT_WAIT_MIN = 15; // the main run waits this long for the Worker's cron to count the day
+export const COUNT_POLL_MS = 30_000, WATCH_POLL_MS = 45_000, DEPLOY_CRON_SLACK_MIN = 5;
 export const PENDING_ALERT_MIN = 30;
 export const AUDIT_MIN = 5; // the drafter audit's time per proposal
 export const LIBRARY_DIR = join(ROOT, "docs", "nomic-library"); // the Nomic library, written separately; optional
@@ -530,20 +533,30 @@ export function notifyFile(dir, name, title, body) {
   return p;
 }
 
+// The deploy trigger. A single pass tries once (a failure is retried by the next run); the main run, which stays until the
+// deploy is live, retries every WATCH_POLL_MS until the deploy deadline (the way the reconcile path retries each run).
+/** @rule 107.8 */
+async function deployWithRetry(opts, d, deployDeadlineAt, now) {
+  const sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const until = Date.parse(deployDeadlineAt);
+  for (;;) {
+    try { return await (opts.deploy ?? triggerDeploy)(d); }
+    catch (e) { if (!opts.watch || !Number.isFinite(until) || now() >= until) throw e; await sleep(opts.watchPollMs ?? WATCH_POLL_MS); }
+  }
+}
+
 // ---- one run --------------------------------------------------------------------------------------------------
 // opts: {slug, api, token, repoUrl, stateDir, notifyDir, claude, model, deploy, audit (bool), openAuditPr, fetchImpl, now}
+// The run: one at a time (the lock), then one pass, or, in watch mode (the MAIN run of a night, see moderator/schedule.mjs),
+// the whole night: wait for the count, one pass, watch the deploy, one more pass. opts.watch turns it on.
 /** @rule 107.2, 107.6, 107.7, 107.8 */
 export async function runOnce(opts) {
-  const { slug, stateDir, notifyDir } = opts;
-  const fetchImpl = opts.fetchImpl ?? fetch;
-  const now = opts.now ?? (() => Date.now());
+  const { slug, stateDir } = opts;
   mkdirSync(stateDir, { recursive: true });
-  const nightLog = join(stateDir, `${slug}.night.jsonl`);
-  const log = (e) => appendFileSync(nightLog, JSON.stringify({ at: new Date(now()).toISOString(), slug, ...e }) + "\n");
-
   // One run at a time: an exclusive lock file. A lock older than STALE_LOCK_MIN is from a run that died.
   // The lock holds the runner's pid: a lock whose process is gone (a crash, a reboot) is stale at once; one older than
-  // STALE_LOCK_MIN is stale whatever it says (the pid may have been reused after a reboot).
+  // STALE_LOCK_MIN is stale whatever it says (the pid may have been reused after a reboot). The backstop run finds the
+  // lock held while the main run is still watching its deploy, and exits ("busy").
   const lock = join(stateDir, `${slug}.lock`);
   if (existsSync(lock)) {
     const pid = Number(readFileSync(lock, "utf8").trim());
@@ -555,6 +568,55 @@ export async function runOnce(opts) {
   try { fd = openSync(lock, "wx"); } catch { return { status: "busy" }; }
   writeFileSync(fd, String(process.pid));
   closeSync(fd);
+  try { return opts.watch ? await watchNight(opts, lock) : await runPass(opts); }
+  finally { rmSync(lock, { force: true }); }
+}
+
+// The main run's night, in one process: wait for the site's count, do the night, watch the deploy until the site unlocks.
+/** @rule 107.2, 107.6, 107.8 */
+async function watchNight(opts, lock) {
+  const now = opts.now ?? (() => Date.now());
+  const sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const touch = () => { try { utimesSync(lock, new Date(), new Date()); } catch { /* the lock is only a guard */ } };
+  const get = async () => {
+    try {
+      const r = await fetchImpl(`${opts.api.replace(/\/+$/, "")}/${opts.slug}/api/moderator/pending`, { headers: { authorization: `Bearer ${opts.token}` }, signal: AbortSignal.timeout(20_000) });
+      return r.status === 200 ? await r.json() : null;
+    } catch { return null; }
+  };
+  // 1. The count is the Worker's cron (every 5 minutes): until a night is processing, or the day moved on (nothing to
+  //    apply: the count finished the night), or COUNT_WAIT_MIN is up, poll. A failed poll ends the wait; runPass reports it.
+  const t0 = now();
+  let p = await get(), waits = 0;
+  const day0 = p?.game?.day;
+  while (p && !p.job && p.game?.day === day0 && now() - t0 < COUNT_WAIT_MIN * 60_000) { await sleep(opts.countPollMs ?? COUNT_POLL_MS); touch(); p = await get(); waits++; }
+  // 2. The night's work: the same pass the backstop runs.
+  const r = await runPass(opts);
+  if (r.status !== "claimed" && r.status !== "deploying") return { ...r, waited: waits };
+  // 3. Watch the deploy: until the site has unlocked (no night pending), or the deploy grace and one cron tick are past.
+  let polls = 0;
+  for (; polls < 600; polls++) {
+    await sleep(opts.watchPollMs ?? WATCH_POLL_MS); touch();
+    const w = await get();
+    if (!w || !w.job) break;
+    const until = Date.parse(w.job.deploy_deadline_at);
+    if (Number.isFinite(until) && now() > until + DEPLOY_CRON_SLACK_MIN * 60_000) break;
+  }
+  // 4. One more pass: it reverts and re-tags whatever the site listed as not applied meanwhile (a night that never went live).
+  const f = await runPass(opts);
+  if (f.status === "failed") return { ...f, watched: polls };
+  return { ...r, watched: polls, final: f.status, waited: waits };
+}
+
+// One pass over the night's state (the backstop's whole run, and the main run's work).
+/** @rule 107.2, 107.6, 107.7, 107.8 */
+async function runPass(opts) {
+  const { slug, stateDir, notifyDir } = opts;
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const now = opts.now ?? (() => Date.now());
+  const nightLog = join(stateDir, `${slug}.night.jsonl`);
+  const log = (e) => appendFileSync(nightLog, JSON.stringify({ at: new Date(now()).toISOString(), slug, ...e }) + "\n");
   let work = null;
   try {
     const api = async (method, path, body) => {
@@ -656,7 +718,7 @@ export async function runOnce(opts) {
           log({ event: "reconcile_deploy_failed", tag: pendingDeploy.tag, error: String(e.message || e) });
           // Told once per pending deploy, not on every 2-minute retry.
           if (!pendingDeploy.notified) writeState(stateDir, slug, { ...readState(stateDir, slug), pendingDeploy: { ...pendingDeploy, notified: true } });
-          if (!pendingDeploy.notified) notifyFile(notifyDir, `reconcile-deploy-${pendingDeploy.tag}`, `Promptocracy ${slug}: the deploy of ${pendingDeploy.tag} failed`, `${String(e.message || e).slice(0, 300)}\nThe corrected rules are tagged ${pendingDeploy.tag} but not deployed; the next run tries again. Night log: ${nightLog}`);
+          if (!pendingDeploy.notified) notifyFile(notifyDir, `reconcile-deploy-${pendingDeploy.tag}`, `Promptocracy ${slug}: the deploy of ${pendingDeploy.tag} failed`, `${String(e.message || e).slice(0, 300)}\nThe corrected rules are tagged ${pendingDeploy.tag} but not deployed; the next run tries again (the moderator runs only inside each game's night window, so that is the next night's). Night log: ${nightLog}`);
         }
       }
     }
@@ -673,7 +735,7 @@ export async function runOnce(opts) {
       // idle run can stop before the clone.
       if (!opts.dryRun && !readState(stateDir, slug).pendingDeploy) {
         const st = readState(stateDir, slug);
-        writeState(stateDir, slug, { ...st, settled: [...new Set([...(st.settled ?? []), ...notApplied.map((q) => q.number)])], tagged: [...new Set([...(st.tagged ?? []), ...done])].slice(-50) });
+        writeState(stateDir, slug, { ...st, settled: [...new Set([...(st.settled ?? []), ...notApplied.map((q) => q.number)])].slice(-500), tagged: [...new Set([...(st.tagged ?? []), ...done])].slice(-50) });
       }
       return { status: "idle", reconciled: pushed, cloned: true, retagged: stale };
     }
@@ -681,8 +743,12 @@ export async function runOnce(opts) {
     if (job.status === "deploying") {
       // Resume after a crash: the claim landed; make sure the tag is pushed and the deploy triggered.
       if (!tags.has(`day-${job.day}`) && !opts.dryRun) { git(["tag", `day-${job.day}`, job.commit_sha], dir); git(["push", "-q", "origin", `refs/tags/day-${job.day}`], dir); }
-      if (state.deployed !== job.commit_sha && !opts.dryRun) { await (opts.deploy ?? triggerDeploy)({ slug, day: job.day, sha: job.commit_sha }); writeState(stateDir, slug, { ...readState(stateDir, slug), deployed: job.commit_sha }); }
-      return { status: "deploying", day: job.day };
+      if (state.deployed !== job.commit_sha && !opts.dryRun) { await deployWithRetry(opts, { slug, day: job.day, sha: job.commit_sha }, job.deploy_deadline_at, now); writeState(stateDir, slug, { ...readState(stateDir, slug), deployed: job.commit_sha }); }
+      // The claim's rules may have changed the game's time zone: a resume that finds a deploying night asks for the schedule
+      // to be regenerated once per day (the run that claimed it asked too, unless it died first).
+      const reschedule = state.rescheduleDay !== job.day;
+      if (reschedule && !opts.dryRun) writeState(stateDir, slug, { ...readState(stateDir, slug), rescheduleDay: job.day });
+      return { status: "deploying", day: job.day, reschedule };
     }
 
     // processing: apply each passed proposal in the Worker's order (the game's own rule 107.2).
@@ -736,8 +802,8 @@ export async function runOnce(opts) {
       return { status: "claim_refused", code: c.status, outcomes };
     }
     if (!tags.has(`day-${job.day}`)) { git(["tag", `day-${job.day}`, head], dir); git(["push", "-q", "origin", `refs/tags/day-${job.day}`], dir); }
-    await (opts.deploy ?? triggerDeploy)({ slug, day: job.day, sha: head });
-    writeState(stateDir, slug, { ...readState(stateDir, slug), deployed: head });
+    await deployWithRetry(opts, { slug, day: job.day, sha: head }, job.deploy_deadline_at, now);
+    writeState(stateDir, slug, { ...readState(stateDir, slug), deployed: head, rescheduleDay: job.day });
     // The drafter audit's cases go to the platform as draft PRs after the night is claimed.
     for (const c of cases) { try { await opts.openAuditPr?.(c); log({ event: "audit_case", id: c.id }); } catch (e) { log({ event: "audit_case_failed", id: c.id, error: String(e.message || e) }); } }
     return { status: "claimed", day: job.day, sha: head, outcomes };
@@ -747,7 +813,6 @@ export async function runOnce(opts) {
     return { status: "failed", error: String(e.message || e) };
   } finally {
     if (work) rmSync(work, { recursive: true, force: true });
-    rmSync(lock, { force: true });
   }
 }
 
@@ -791,15 +856,21 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const repoUrl = process.env[envKey("PROMPTOCRACY_GAME_REPO", slug)] || (repo && `https://github.com/${repo}.git`);
   if (!repoUrl) { console.error(`moderator: ${slug} is not in games.manifest.json`); process.exit(2); }
   const chalant = join(homedir(), "chalantbot");
+  const stateDir = process.env.MODERATOR_STATE_DIR || join(chalant, "logs", "promptocracy-moderator");
+  // The main run of a night (it starts just after the day's end, per the register) stays for the whole night; any other
+  // start (the backstop, a run launchd made up on wake) is one pass.
+  let register = null;
+  try { register = JSON.parse(readFileSync(join(stateDir, "register.json"), "utf8")); } catch { /* no register yet: one pass */ }
+  const watch = !args.includes("--dry-run") && isMainRun(register, slug, Date.now());
   const r = await runOnce({
-    slug, api, token, repoUrl, dryRun: args.includes("--dry-run"), audit: !args.includes("--no-audit"),
-    stateDir: process.env.MODERATOR_STATE_DIR || join(chalant, "logs", "promptocracy-moderator"),
+    watch, slug, api, token, repoUrl, dryRun: args.includes("--dry-run"), audit: !args.includes("--no-audit"),
+    stateDir,
     notifyDir: process.env.MODERATOR_NOTIFY_DIR || join(chalant, "_notifications"),
     openAuditPr: openAuditPrWith({ platformRepo: "busterbenson/promptocracy" }),
   });
   // A night that was claimed, or whose rules were re-tagged, may have changed the game's time zone: ask run.sh to
   // regenerate the register and the schedule (moderator/schedule.mjs) once every game's run is done.
-  if (r.status === "claimed" || r.retagged) { try { writeFileSync(join(process.env.MODERATOR_STATE_DIR || join(chalant, "logs", "promptocracy-moderator"), "reschedule.flag"), new Date().toISOString()); } catch { /* the schedule then waits for the next night */ } }
+  if (r.status === "claimed" || r.reschedule || r.retagged) { try { writeFileSync(join(process.env.MODERATOR_STATE_DIR || join(chalant, "logs", "promptocracy-moderator"), "reschedule.flag"), new Date().toISOString()); } catch { /* the schedule then waits for the next night */ } }
   console.log(JSON.stringify({ at: new Date().toISOString(), slug, ...r }));
   process.exit(r.status === "failed" ? 1 : 0);
 }
