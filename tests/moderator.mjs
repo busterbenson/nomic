@@ -37,7 +37,10 @@ try {
   const prop = (n) => d1(state, `SELECT number, status, rev, commit_sha, not_applied_reason, budget_minutes, budget_effort FROM proposals WHERE game_id = '${gid}' AND number = ${n}`)[0];
   const notes = (who) => d1(state, `SELECT id, kind, body FROM notifications WHERE game_id = '${gid}' AND player_id = '${id[who]}' AND kind IN ('not_applied', 'moderator_note') ORDER BY created_at, id`);
   const plus = (iso, min) => new Date(Date.parse(iso) + min * 60_000).toISOString();
-  const mod = (method, path, body, token = TOKEN) => fetch(`${A}/mod/api/moderator/${path}`, { method, headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(body ? { "content-type": "application/json" } : {}) }, body: body ? J(body) : undefined, signal: AbortSignal.timeout(20000) }).then(async (r) => ({ status: r.status, data: await r.json().catch(() => null) }));
+  // A claim's outcomes carry their applied sequence (seq); a test that doesn't give one gets the array order. `raw` sends as is.
+  const withSeq = (body) => (body?.outcomes && body.outcomes.every((o) => o && !("seq" in o)) ? { ...body, outcomes: body.outcomes.map((o, i) => ({ ...o, seq: i + 1 })) } : body);
+  const mod = (method, path, body, token = TOKEN, raw = false) => modRaw(method, path, raw ? body : withSeq(body), token);
+  const modRaw = (method, path, body, token = TOKEN) => fetch(`${A}/mod/api/moderator/${path}`, { method, headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(body ? { "content-type": "application/json" } : {}) }, body: body ? J(body) : undefined, signal: AbortSignal.timeout(20000) }).then(async (r) => ({ status: r.status, data: await r.json().catch(() => null) }));
   // A proposal on day n's ballot (proposed the day before) with everyone voting `vote`.
   let num = 0;
   const ballot = (n, who, target, vote = "yes") => {
@@ -71,6 +74,11 @@ try {
   const bad2 = await mod("POST", "days/2/claim", { sha: "nope", outcomes: [] });
   const bad3 = await mod("POST", "days/2/claim", { sha: SHA1, outcomes: [{ number: p1, applied: true, commit: SHA1 }, { number: p2, applied: false, reason: "" }] });
   check("a claim must name each passed proposal once, with a 40-hex sha and a reason for each not applied: 400", bad1.status === 400 && bad2.status === 400 && bad3.status === 400 && day(2).status === "processing");
+  const two = (a, b) => ({ sha: SHA1, outcomes: [{ number: p1, applied: true, commit: SHA1, ...a }, { number: p2, applied: true, commit: SHA1, ...b }] });
+  const noSeq = await mod("POST", "days/2/claim", two({}, {}), TOKEN, true);
+  const dupSeq = await mod("POST", "days/2/claim", two({ seq: 1 }, { seq: 1 }), TOKEN, true);
+  const gapSeq = await mod("POST", "days/2/claim", two({ seq: 1 }, { seq: 3 }), TOKEN, true);
+  check("each outcome needs its applied sequence, 1..n once each (seq): missing, repeated or out of range is a 400", noSeq.status === 400 && dupSeq.status === 400 && gapSeq.status === 400 && day(2).status === "processing", J([noSeq, dupSeq, gapSeq]));
   const ok = await mod("POST", "days/2/claim", { sha: SHA1, outcomes: [{ number: p1, applied: true, commit: SHA1 }, { number: p2, applied: false, reason: "its code and tests couldn't be made to pass after 2 fixes. Try splitting it into smaller proposals or simplifying it, and propose it again." }], notes: [{ number: p1, body: "P1: the draft you voted on may not say what you asked for. You asked for 15." }] });
   check("the claim before the deadline: 200, the day deploying with the commit and its tag", ok.status === 200 && ok.data.status === "deploying" && day(2).status === "deploying" && day(2).commit_sha === SHA1 && day(2).tag === "day-2", J(ok));
   check("a not-applied outcome: the proposal not_applied with the reason, and its proposer told (once) with the reason and the suggestion (107.7)", prop(p2).status === "not_applied" && /couldn't be made to pass/.test(prop(p2).not_applied_reason) && notes("Bo").length === 1 && /^P2 passed but was not applied: its code and tests couldn't be made to pass/.test(notes("Bo")[0].body) && /It gave no points/.test(notes("Bo")[0].body), J(notes("Bo")));
@@ -139,11 +147,16 @@ try {
   d1(state, `UPDATE players SET score = 95 WHERE id = '${id.Ana}'; UPDATE players SET score = 98 WHERE id = '${id.Bo}'`);
   const p6 = ballot(7, "Ana", "401.1"), p7 = ballot(7, "Bo", "402.1");
   await midnight();
-  await mod("POST", "days/7/claim", { sha: SHA1.replace(/a/g, "e"), outcomes: [{ number: p6, applied: true, commit: SHA1.replace(/a/g, "e") }, { number: p7, applied: true, commit: SHA1.replace(/a/g, "e") }] });
+  // The moderator applied P7 before P6 (the order rule 107 gave it that night); the bundle now live orders by P-number.
+  // The enactment follows what was applied and committed (the claim's seq), not the live rule's order.
+  await mod("POST", "days/7/claim", { sha: SHA1.replace(/a/g, "e"), outcomes: [{ number: p6, applied: true, commit: SHA1.replace(/a/g, "e"), seq: 2 }, { number: p7, applied: true, commit: SHA1.replace(/a/g, "e"), seq: 1 }] });
   dev("bundle_sha:mod", SHA1.replace(/a/g, "e"));
   await cron();
   const won = d1(state, `SELECT player_id, text FROM events WHERE game_id = '${gid}' AND kind = 'won'`);
-  check("two pass 100 the same night: the first given points wins (402.2: P6 is applied first, so Ana); the game is over (402.3)", score("Ana") === 105 && score("Bo") === 108 && won.length === 1 && won[0].player_id === id.Ana && game().status === "over", J([won, game()]));
+  check("two pass 100 the same night: the first given points wins (402.2), in the order the moderator applied them (P7 seq 1, so Bo, though P6 has the lower number); the game is over (402.3)", score("Ana") === 105 && score("Bo") === 108 && won.length === 1 && won[0].player_id === id.Bo && game().status === "over", J([won, game()]));
+  check("the claim's sequence is stored with each proposal (apply_seq)", J(d1(state, `SELECT number, apply_seq FROM proposals WHERE game_id = '${gid}' AND number IN (${p6}, ${p7}) ORDER BY apply_seq`).map((r) => [r.number, r.apply_seq])) === J([[p7, 1], [p6, 2]]));
+  const night7 = d1(state, `SELECT kind, player_id, night_seq FROM events WHERE game_id = '${gid}' AND day = 7 AND phase = 'night' ORDER BY night_seq`);
+  check("every event the night writes carries its per-night sequence, 1..n in execution order: P7's points, P6's points, the win", J(night7.map((e) => [e.kind, e.player_id, e.night_seq])) === J([["points", id.Bo, 1], ["points", id.Ana, 2], ["won", id.Bo, 3]]), J(night7));
   check("rule 401's revisions, counted by rule: P6 (on clause 401.1) is the second change to rule 401 (rev 2)", prop(p6).rev === 2 && prop(p6).status === "enacted");
   const over = await client(A).get("/mod/api/day");
   check("the game over: the day status still reads (the board, rules and history stay readable)", over.status === 200);

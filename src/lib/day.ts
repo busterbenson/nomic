@@ -16,7 +16,7 @@
 //      by itself)
 //   3. finalize: day N done (or timed_out, when the deadline ended it), day N+1 open with its electorate and ballot,
 //      the game unlocked, in one batch
-import { bundleFor, enactStatements } from "../engine/host";
+import { NEXT_NIGHT_SEQ, bundleFor, enactStatements } from "../engine/host";
 import { getSettings, validTimeZone } from "./settings.js";
 import { Env, nowIso } from "./util";
 
@@ -307,10 +307,10 @@ export async function processDay(env: Env, game: any, day: DayRow, nowMs: number
     console.error(`midnight ${game.slug} day ${day.n} failed (the lock stays on):`, why);
     await env.DB.batch([
       env.DB.prepare(
-        `INSERT INTO events (game_id, kind, text, created_at, day, phase, template, args)
-         SELECT ?, 'night_failed', ?, ?, ?, 'night', 'nightFailed', json_object('day', ?)
+        `INSERT INTO events (game_id, kind, text, created_at, day, phase, template, args, night_seq)
+         SELECT ?, 'night_failed', ?, ?, ?, 'night', 'nightFailed', json_object('day', ?), ${NEXT_NIGHT_SEQ}
          WHERE EXISTS (SELECT 1 FROM days WHERE game_id = ? AND n = ? AND last_error IS NULL AND status IN ('locked', 'processing', 'deploying'))`,
-      ).bind(game.id, `Chalant could not finish processing day ${day.n}. The game stays locked until it does.`, nowIso(nowMs), day.n, day.n, game.id, day.n),
+      ).bind(game.id, `Chalant could not finish processing day ${day.n}. The game stays locked until it does.`, nowIso(nowMs), day.n, day.n, game.id, day.n, game.id, day.n),
       env.DB.prepare("UPDATE days SET last_error = ? WHERE game_id = ? AND n = ? AND status IN ('locked', 'processing', 'deploying')").bind(why, game.id, day.n),
     ]);
     return "failed";

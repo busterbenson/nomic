@@ -118,17 +118,23 @@ export async function orderPassed<T extends { number: number }>(env: Env, game: 
   return order.map((n: number) => passed.find((p) => p.number === n)!);
 }
 
+// The next place in day n's night sequence (events.night_seq): 1 + the highest so far. Every event the night writes
+// takes one, so the night reads back in execution order whichever batch wrote it. Binds (game_id, day).
+/** @rule 107.2 */
+export const NEXT_NIGHT_SEQ = "(SELECT COALESCE(MAX(night_seq), 0) + 1 FROM events WHERE game_id = ? AND day = ?)";
+
 // The night takes effect (the deployed rules are the claimed commit): each applied proposal is enacted in the order
-// they were applied, its points given (rule 401, onEnacted), then the end of the night (rule 402, dayEnd: a win ends
+// the moderator applied and committed them (apply_seq, from its claim; NOT the live rule 107's order, which the night
+// may itself have changed), its points given (rule 401, onEnacted), then the end of the night (rule 402, dayEnd: a win ends
 // the game). Returns the statements for ONE batch. Every one is guarded by "this proposal is still passed" (points,
 // enacted) or "a proposal of this day is still passed" (the win, rules_day), and the points and the win come BEFORE
 // the status changes in the batch, so a second run (or an overlapping one) gives nothing twice.
 /** @rule 107.2, 401, 402 */
 export async function enactStatements(env: Env, game: any, n: number, nowMs: number) {
-  const rows = (await env.DB.prepare("SELECT id, number, player_id, target, kind FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed' AND commit_sha IS NOT NULL ORDER BY number").bind(game.id, n).all()).results as any[];
-  if (!rows.length) return [];
+  // A proposal claimed before apply_seq existed (NULL) goes in P-number order, after any that have one.
+  const ordered = (await env.DB.prepare("SELECT id, number, player_id, target, kind FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed' AND commit_sha IS NOT NULL ORDER BY apply_seq IS NULL, apply_seq, number").bind(game.id, n).all()).results as any[];
+  if (!ordered.length) return [];
   const now = nowIso(nowMs);
-  const ordered = await orderPassed(env, game, rows, nowMs);
   const ctx = await nightContext(env, game, nowMs);
   const rules = rulesFor(game);
   const before: Record<string, number> = Object.fromEntries(ctx.players.map((p: any) => [p.ref, p.score]));
@@ -142,18 +148,18 @@ export async function enactStatements(env: Env, game: any, n: number, nowMs: num
       given.push({ player: e.player, delta: e.delta, reason: e.reason, number: q.number });
       stmts.push(env.DB.prepare(`UPDATE players SET score = score + ? WHERE game_id = ? AND id = ? AND ${stillPassed}`).bind(e.delta, game.id, e.player, q.id));
       stmts.push(env.DB.prepare(
-        `INSERT INTO events (game_id, kind, text, created_at, day, phase, template, args, player_id)
-         SELECT ?, 'points', ?, ?, ?, 'night', 'points', json_object('proposal', ?, 'delta', ?, 'rule', ?), ? WHERE ${stillPassed}`,
-      ).bind(game.id, `+${e.delta}: ${e.reason}`, now, n, q.number, e.delta, e.rule, e.player, q.id));
+        `INSERT INTO events (game_id, kind, text, created_at, day, phase, template, args, player_id, night_seq)
+         SELECT ?, 'points', ?, ?, ?, 'night', 'points', json_object('proposal', ?, 'delta', ?, 'rule', ?), ?, ${NEXT_NIGHT_SEQ} WHERE ${stillPassed}`,
+      ).bind(game.id, `+${e.delta}: ${e.reason}`, now, n, q.number, e.delta, e.rule, e.player, game.id, n, q.id));
     }
   }
   const win = rules.dayEnd(ctx, { before, given: given.map(({ player, delta }) => ({ player, delta })), enacted: ordered.map((q) => q.number) }).find((e: any) => e.type === "win" && known.has(e.player));
   const anyPassed = `EXISTS (SELECT 1 FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed')`;
   if (win) {
     stmts.push(env.DB.prepare(
-      `INSERT INTO events (game_id, kind, text, created_at, day, phase, template, args, player_id)
-       SELECT ?, 'won', ?, ?, ?, 'night', 'won', json_object('rule', ?, 'reason', ?), ? WHERE ${anyPassed}`,
-    ).bind(game.id, `Won: ${win.reason}`, now, n, win.rule, win.reason, win.player, game.id, n));
+      `INSERT INTO events (game_id, kind, text, created_at, day, phase, template, args, player_id, night_seq)
+       SELECT ?, 'won', ?, ?, ?, 'night', 'won', json_object('rule', ?, 'reason', ?), ?, ${NEXT_NIGHT_SEQ} WHERE ${anyPassed}`,
+    ).bind(game.id, `Won: ${win.reason}`, now, n, win.rule, win.reason, win.player, game.id, n, game.id, n));
     stmts.push(env.DB.prepare(`UPDATE games SET status = 'over' WHERE id = ? AND status = 'playing' AND ${anyPassed}`).bind(game.id, game.id, n));
   }
   stmts.push(env.DB.prepare(`UPDATE games SET rules_day = ? WHERE id = ? AND rules_day < ? AND ${anyPassed}`).bind(n, game.id, n, game.id, n));

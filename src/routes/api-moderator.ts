@@ -5,9 +5,11 @@
 //   GET  /<slug>/api/moderator/pending           the night in progress (processing or deploying), its passed proposals in
 //                                                the order the game's rules apply them (107.2), and every not-applied
 //                                                proposal (for the moderator to reconcile the repo with, 107.7)
-//   POST /<slug>/api/moderator/days/:n/claim      {sha, outcomes: [{number, applied: true, commit} | {number, applied: false,
-//                                                reason}], notes?: [{number, body}]}: accepted only while day n is
-//                                                processing and before its deadline (107.6); the day goes to deploying
+//   POST /<slug>/api/moderator/days/:n/claim      {sha, outcomes: [{number, seq, applied: true, commit} | {number, seq,
+//                                                applied: false, reason}], notes?: [{number, body}]}: accepted only while
+//                                                day n is processing and before its deadline (107.6); the day goes to
+//                                                deploying. seq is the order the moderator applied them in (1..n, each
+//                                                once); the enactment follows it (107.2).
 import { clockNow, deployDeadline, notAppliedStatements } from "../lib/day";
 import { orderPassed } from "../engine/host";
 import { Ctx, json, nowIso, readJson, sha256Hex } from "../lib/util";
@@ -75,10 +77,12 @@ export const claim = async (ctx: Ctx) => {
 
   const passed = (await env.DB.prepare("SELECT id, number, player_id FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed'").bind(game.id, n).all()).results as any[];
   const byNum = new Map(passed.map((q) => [q.number, q]));
-  const seen = new Set<number>();
+  const seen = new Set<number>(), seqs = new Set<number>();
   for (const o of body.outcomes) {
     if (!o || !byNum.has(o.number) || seen.has(o.number)) return json({ error: "The outcomes must name each passed proposal once." }, 400);
     seen.add(o.number);
+    if (!Number.isInteger(o.seq) || o.seq < 1 || o.seq > body.outcomes.length || seqs.has(o.seq)) return json({ error: `P${o.number}: each outcome needs its place in the order applied (seq 1 to ${body.outcomes.length}, each once).` }, 400);
+    seqs.add(o.seq);
     if (o.applied === true) { if (typeof o.commit !== "string" || !SHA.test(o.commit)) return json({ error: `P${o.number}: an applied outcome needs its commit.` }, 400); }
     else if (o.applied === false) { if (typeof o.reason !== "string" || !o.reason.trim() || o.reason.length > MAX_REASON) return json({ error: `P${o.number}: a not-applied outcome needs a reason (at most ${MAX_REASON} characters).` }, 400); }
     else return json({ error: `P${o.number}: applied must be true or false.` }, 400);
@@ -96,7 +100,7 @@ export const claim = async (ctx: Ctx) => {
   ];
   for (const o of body.outcomes) {
     const q = byNum.get(o.number);
-    if (o.applied) stmts.push(env.DB.prepare(`UPDATE proposals SET commit_sha = ? WHERE id = ? AND status = 'passed'${mine}`).bind(o.commit, q.id, game.id, n, body.sha));
+    if (o.applied) stmts.push(env.DB.prepare(`UPDATE proposals SET commit_sha = ?, apply_seq = ? WHERE id = ? AND status = 'passed'${mine}`).bind(o.commit, o.seq, q.id, game.id, n, body.sha));
     else {
       stmts.push(...notAppliedStatements(env, game, q, o.reason.trim().replace(/[.\s]+$/, ""), now, mine, [game.id, n, body.sha]));
     }

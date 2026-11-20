@@ -35,15 +35,18 @@ compare of the hex). No hash set, wrong token, or no header: 401 with no detail.
 ```
 The order is decided in the Worker by the bundle's `applyOrder` hook, so the order is the rules in effect that night.
 
-`POST /api/moderator/days/:n/claim {sha, outcomes: [{number, applied: true, commit} | {number, applied: false, reason}], notes?: [{number, body}]}`
+`POST /api/moderator/days/:n/claim {sha, outcomes: [{number, seq, applied: true, commit} | {number, seq, applied: false, reason}], notes?: [{number, body}]}`
+(`seq`: the order the moderator applied them in, 1..n. The enactment follows it, not the live `applyOrder`, which the night may
+have changed.)
 - 200 `{status: "deploying", deploy_deadline_at}`; the day goes `processing -> deploying`, `days.commit_sha = sha`,
   `days.tag = day-N`. Each not-applied outcome: proposal `not_applied`, its reason + the 107.7 suggestion, and the
-  owner's notification (`not-applied-<id>`, once). Each applied outcome: `proposals.commit_sha` (status stays `passed`
+  owner's notification (`not-applied-<id>`, once). Each applied outcome: `proposals.commit_sha` and `apply_seq` (status stays `passed`
   until the unlock). Notes (drafter audit): one notification per note to the proposer (`audit-<id>`, once, kind
   `moderator_note`, at most 600 chars).
 - 409 if the day isn't `processing` or `now >= deadline_at` (107.6: the claim came too late). A repeat of the same
   claim while `deploying` with the same sha answers 200 (the runner restarted after the claim).
-- 400 if the outcomes don't name exactly the passed proposals, or sha isn't 40 hex, or a reason is empty/too long.
+- 400 if the outcomes don't name exactly the passed proposals, or a seq is missing / repeated / outside 1..n, or sha isn't
+  40 hex, or a reason is empty/too long.
 - All writes in one batch, each guarded by `status = 'processing' AND deadline_at > now`.
 
 ## Night states (D1 is authoritative; the repo follows)
@@ -61,8 +64,10 @@ wins, first given points first; game `over`), proposals `enacted` with `rev`, `g
 Then `finalizeDay` opens day N+1 as before. The sha check: `bundleFor(game).bundle.sha` (the commit the build fetched at
 the newest `day-N` tag). `DEV_MODE` only: a `dev_controls` key `bundle_sha:<slug>` stands in for it (tests).
 
-No migration is needed: `days.status` already allows `deploying`, `days.commit_sha` / `days.tag`, `proposals.commit_sha` /
-`rev` / `not_applied_reason` / `budget_*`, and `games.moderator_token_hash` exist (0005-0007).
+One migration, `0008_night_order.sql`: `proposals.apply_seq` (the claim's order) and `events.night_seq` (every event the
+night writes, `points` / `won` / `night_failed`, gets 1 + the highest of its game and day: the night in execution order).
+The rest already exists: `days.status` allows `deploying`, `days.commit_sha` / `days.tag`, `proposals.commit_sha` /
+`rev` / `not_applied_reason` / `budget_*`, and `games.moderator_token_hash` (0005-0007).
 
 ## The runner's state machine (one run, one game)
 
@@ -122,7 +127,10 @@ proposal whose `Proposal: P<k>` commit is already there for this day); tags are 
 
 Reconcile revisions: when a reverted change is still in the newest day tag (the night was tagged, then its proposals
 did not take effect), the runner tags the corrected main `day-N.K` and triggers the deploy; the bundler reads revisions
-on any day (setup revisions are `day-0.K`).
+on any day (setup revisions are `day-0.K`). "Still in the newest tag" is read from the repo (the tag has the proposal's commit and
+not its revert), so a run that died after pushing main still tags it. The deploy is written to the state file
+(`pendingDeploy`) before the tag is pushed and retried on every run until a trigger succeeds; a failed trigger notifies
+and doesn't stop the night.
 
 Rule ages (108.1): the day a rule's heading first appears in RULES.md, from that commit's "(day N, ..." subject; 0 for
 starter rules.

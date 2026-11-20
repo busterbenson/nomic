@@ -104,7 +104,7 @@ async function night({ scenario, state, opts = {} }) {
   const w = await fakeWorker(state);
   const deploys = [], cases = [];
   const stateDir = opts.stateDir ?? join(repo.base, "state"), notifyDir = join(repo.base, "notify");
-  const run = () => runOnce({ slug: "g", libraryDir: opts.libraryDir ?? join(TMP, "no-library"), api: w.api, token: TOKEN, repoUrl: repo.bare, stateDir, notifyDir, claude: claude.cmd, deploy: async (d) => deploys.push(d), openAuditPr: async (c) => cases.push(c), audit: opts.audit ?? true });
+  const run = () => runOnce({ slug: "g", libraryDir: opts.libraryDir ?? join(TMP, "no-library"), api: w.api, token: TOKEN, repoUrl: repo.bare, stateDir, notifyDir, claude: claude.cmd, deploy: async (d) => { if (opts.deployFails) throw new Error("the deploy trigger answered 503"); deploys.push(d); }, openAuditPr: async (c) => cases.push(c), audit: opts.audit ?? true });
   const r = opts.twice ? await Promise.all([run(), run()]) : await run();
   await w.stop();
   const notes = existsSync(notifyDir) ? readdirSync(notifyDir) : [];
@@ -120,6 +120,7 @@ console.log("moderator runner");
   const body = g(["log", "-1", "--format=%B", "main"], t.repo.bare);
   check("happy path: each commit carries the 'Proposal: P5' trailer", /^Proposal: P5$/m.test(body));
   check("happy path: the claim names the head commit and both outcomes as applied, with their commits", t.claims.length === 1 && t.claims[0].sha === g(["rev-parse", "main"], t.repo.bare).trim() && t.claims[0].outcomes.every((o) => o.applied && /^[0-9a-f]{40}$/.test(o.commit)), J(t.claims));
+  check("happy path: each outcome carries its applied sequence (seq 1, 2: the order the commits were made in)", J(t.claims[0].outcomes.map((o) => [o.number, o.seq])) === J([[3, 1], [5, 2]]), J(t.claims[0].outcomes));
   check("happy path: the tag day-1 is pushed at the claimed commit, then the deploy is triggered for it", remoteTags(t.repo.bare).includes("day-1") && g(["rev-parse", "day-1^{commit}"], t.repo.bare).trim() === t.claims[0].sha && t.deploys.length === 1 && t.deploys[0].sha === t.claims[0].sha);
   const rules = g(["show", "main:RULES.md"], t.repo.bare), mod = g(["show", "main:rules/401.ts"], t.repo.bare);
   check("happy path: text, code and tests changed together (107.4)", /gets 15 points/.test(rules) && /proposal\.player, 15,/.test(mod) && /reach 50 points/.test(rules));
@@ -298,6 +299,11 @@ console.log("moderator runner");
   check("reconcile is idempotent: a second run reverts nothing more", !t3.r.reconciled && log(t.repo.bare).filter((s) => /^Revert P3/.test(s)).length === 1);
 }
 {
+  // The Worker's order is whatever rule 107 says (here P5 before P3): the seq in the claim is the order really applied.
+  const t = await night({ scenario: { apply: { 3: { action: "points", to: 15 }, 5: { action: "win", to: 50 } } }, state: { job: job([P(5, "402.1"), P(3, "401")]) }, opts: { audit: false } });
+  check("applied sequence: P5 applied first (seq 1), P3 second (seq 2), as the commits were made", J(t.claims[0]?.outcomes.map((o) => [o.number, o.seq])) === J([[5, 1], [3, 2]]) && J(log(t.repo.bare).slice(0, 2)) === J(["P3: Change 401 (day 1, 4-1)", "P5: Change 402.1 (day 1, 4-1)"]), J([t.claims[0]?.outcomes, log(t.repo.bare)]));
+}
+{
   // Two refused changes to the same rule, both then listed as not applied: reverted newest first, cleanly.
   const t = await night({ scenario: { apply: { 3: { action: "points", to: 15 }, 5: { action: "points", to: 20 } } }, state: { job: job([P(3, "401"), P(5, "401")]), refuseClaim: true }, opts: { audit: false } });
   const t2 = await night({ scenario: { apply: {} }, state: { job: null, not_applied: [{ number: 3, day: 1, reason: "x" }, { number: 5, day: 1, reason: "x" }], processed: [] }, opts: { repo: t.repo } });
@@ -312,6 +318,31 @@ console.log("moderator runner");
   check("reconcile after a late deploy: the revert is tagged day-1.1 (the tag the build now picks) and deployed", remoteTags(t.repo.bare).includes("day-1.1") && g(["rev-parse", "day-1.1^{commit}"], t.repo.bare).trim() === g(["rev-parse", "main"], t.repo.bare).trim() && /gets 10 points/.test(g(["show", "day-1.1:RULES.md"], t.repo.bare)) && t2.deploys.length === 1, J([remoteTags(t.repo.bare), t2.deploys]));
   const t3 = await night({ scenario: { apply: {} }, state: { job: null, not_applied: [{ number: 3, day: 1, reason: "x" }], processed: [{ n: 1, status: "timed_out", commit_sha: t.claims[0].sha }] }, opts: { repo: t.repo } });
   check("and a second run tags nothing more", !remoteTags(t.repo.bare).includes("day-1.2") && t3.deploys.length === 0);
+}
+{
+  // The correction tag is pushed but its deploy trigger fails: the pending deploy is kept in the state file and the
+  // next run retries it (the reverts on main are already done, so nothing else would deploy the corrected rules).
+  const t = await night({ scenario: { apply: { 3: { action: "points", to: 15 } } }, state: { job: job([P(3, "401")]) }, opts: { audit: false } });
+  const late = { job: null, not_applied: [{ number: 3, day: 1, reason: "the change was applied but did not go live by 2:30 am" }], processed: [{ n: 1, status: "timed_out", commit_sha: t.claims[0].sha }] };
+  const t2 = await night({ scenario: { apply: {} }, state: late, opts: { repo: t.repo, stateDir: t.stateDir, deployFails: true } });
+  check("reconcile: a failed deploy trigger after day-1.1 is pushed is kept as pending (the run doesn't fail the night)", remoteTags(t.repo.bare).includes("day-1.1") && t2.deploys.length === 0 && JSON.parse(readFileSync(join(t.stateDir, "g.state.json"), "utf8")).pendingDeploy?.tag === "day-1.1", J([t2.r, remoteTags(t.repo.bare)]));
+  const t3 = await night({ scenario: { apply: {} }, state: late, opts: { repo: t.repo, stateDir: t.stateDir } });
+  check("reconcile: the next run retries the pending deploy of day-1.1, then clears it", t3.deploys.length === 1 && t3.deploys[0].sha === g(["rev-parse", "day-1.1^{commit}"], t.repo.bare).trim() && !JSON.parse(readFileSync(join(t.stateDir, "g.state.json"), "utf8")).pendingDeploy, J([t3.r, t3.deploys]));
+  const t4 = await night({ scenario: { apply: {} }, state: late, opts: { repo: t.repo, stateDir: t.stateDir } });
+  check("reconcile: and the run after that deploys nothing", t4.deploys.length === 0, J(t4.deploys));
+}
+{
+  // A run that died after pushing the revert to main but before tagging it: main has the revert, the newest tag
+  // (day-1) still holds the change. The next run tags the corrected rules day-1.1 and deploys them.
+  const t = await night({ scenario: { apply: { 3: { action: "points", to: 15 } } }, state: { job: job([P(3, "401")]) }, opts: { audit: false } });
+  const w = join(t.repo.base, "crashed");
+  g(["clone", "-q", t.repo.bare, w], t.repo.base);
+  const sha = g(["log", "--format=%H", "--grep=^Proposal: P3$", "main"], w).trim().split("\n")[0];
+  g(["-c", "user.name=t", "-c", "user.email=t@t", "revert", "--no-edit", sha], w);
+  g(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--amend", "-m", "Revert P3: not applied (day 1)\n\nReverts-Proposal: P3"], w);
+  g(["push", "-q", "origin", "HEAD:main"], w);
+  const t2 = await night({ scenario: { apply: {} }, state: { job: null, not_applied: [{ number: 3, day: 1, reason: "x" }], processed: [{ n: 1, status: "timed_out", commit_sha: t.claims[0].sha }] }, opts: { repo: t.repo } });
+  check("reconcile after a crash between pushing main and tagging: the next run tags day-1.1 on main and deploys it", remoteTags(t.repo.bare).includes("day-1.1") && g(["rev-parse", "day-1.1^{commit}"], t.repo.bare).trim() === g(["rev-parse", "main"], t.repo.bare).trim() && t2.deploys.length === 1, J([t2.r, remoteTags(t.repo.bare), t2.deploys]));
 }
 {
   // Rule ages (108.1) from the history: a starter rule is 0; a rule added by a proposal is the day its commit names.

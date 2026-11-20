@@ -170,7 +170,7 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/routes/api-moderator.ts (1)
 
-- line 32: `unauthorized`
+- line 34: `unauthorized`
 
 ## src/routes/api-notifications-read.ts (1)
 

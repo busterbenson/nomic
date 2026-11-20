@@ -262,19 +262,20 @@ export function ruleAge(dir, n) {
   return m ? Number(m[1]) : 0;
 }
 
-// The commits on the current branch that carry a "Proposal: P<k>" or "Reverts-Proposal: P<k>" trailer.
+// The commits on the current branch that carry a "Proposal: P<k>" or "Reverts-Proposal: P<k>" trailer: applied (number ->
+// its newest commit), reverted (the numbers) and reverts (number -> its newest revert commit).
 /** @rule 107.7 */
 export function proposalCommits(dir) {
   const log = git(["log", "--format=%H%x1f%B%x1e"], dir, { allowFail: true }) ?? "";
-  const applied = new Map(), reverted = new Set();
+  const applied = new Map(), reverted = new Set(), reverts = new Map();
   for (const rec of log.split("\x1e").map((s) => s.trim()).filter(Boolean)) {
     const [sha, body] = rec.split("\x1f");
     const rv = /^Reverts-Proposal: P(\d+)$/m.exec(body ?? "");
-    if (rv) { reverted.add(Number(rv[1])); continue; }
+    if (rv) { reverted.add(Number(rv[1])); if (!reverts.has(Number(rv[1]))) reverts.set(Number(rv[1]), sha); continue; }
     const ap = /^Proposal: P(\d+)$/m.exec(body ?? "");
     if (ap && !applied.has(Number(ap[1]))) applied.set(Number(ap[1]), { sha, body });
   }
-  return { applied, reverted };
+  return { applied, reverted, reverts };
 }
 
 // ---- the model call ----------------------------------------------------------------------------------------------
@@ -575,7 +576,6 @@ export async function runOnce(opts) {
     // Reconcile (rule 107.7): revert any commit on main for a proposal D1 lists as not applied.
     const { applied: onMain, reverted } = proposalCommits(dir);
     let pushed = false;
-    const revertedNow = [];
     // Newest first (git log order), so two changes to the same rule revert cleanly.
     const reasons = new Map(notApplied.map((q) => [q.number, q]));
     for (const [number, c] of onMain) {
@@ -587,32 +587,58 @@ export async function runOnce(opts) {
       }
       git(["commit", "-q", "--amend", "-m", `Revert P${q.number}: not applied (day ${q.day})\n\nIt passed but was not applied: ${clean(q.reason)}.\n\nReverts-Proposal: P${q.number}`], dir);
       log({ event: "reconciled", number: q.number, reverted: c.sha });
-      revertedNow.push(c.sha);
       pushed = true;
     }
     const tags = new Set((git(["ls-remote", "--tags", "--refs", "origin", "refs/tags/day-*"], dir) ?? "").split("\n").map((l) => l.split("refs/tags/")[1]).filter(Boolean));
-    if (pushed) {
+    // If the newest tag still holds a change that main has reverted (it has the proposal's commit and not its revert),
+    // the build would ship it: tag the corrected rules as a revision of that day (day-N.K) and deploy them (rule
+    // 107.7). Read from the repo, not from this run's reverts, so a run that died after pushing main still gets here.
+    const latest = [...tags].map((t) => /^day-(\d{1,6})(?:\.(\d{1,4}))?$/.exec(t)).filter(Boolean).map((m) => ({ tag: m[0], day: Number(m[1]), rev: Number(m[2] ?? 0) }))
+      .filter((t) => t.tag === (t.rev ? `day-${t.day}.${t.rev}` : `day-${t.day}`)).sort((a, b) => b.day - a.day || b.rev - a.rev)[0];
+    let stale = false;
+    if (latest && latest.day >= 1) {
+      git(["fetch", "-q", "origin", `refs/tags/${latest.tag}:refs/tags/${latest.tag}`], dir, { allowFail: true });
+      const has = (c) => git(["merge-base", "--is-ancestor", c, latest.tag], dir, { allowFail: true }) !== null;
+      const onHead = proposalCommits(dir);
+      stale = [...onHead.reverts].some(([number, rv]) => onHead.applied.has(number) && has(onHead.applied.get(number).sha) && !has(rv));
+    }
+    if (pushed || stale) {
       const chk = checkGame(dir, "reconcile");
       if (!chk.ok) throw new Error(`the reconciled rules fail their checks: ${chk.out.slice(-300)}`);
-      if (!opts.dryRun) git(["push", "-q", "origin", "HEAD:main"], dir);
-      // If the newest tag still holds a reverted change, the build would ship it: tag the corrected rules as a revision
-      // of that day (day-N.K) and deploy them (rule 107.7).
-      const latest = [...tags].map((t) => /^day-(\d{1,6})(?:\.(\d{1,4}))?$/.exec(t)).filter(Boolean).map((m) => ({ tag: m[0], day: Number(m[1]), rev: Number(m[2] ?? 0) }))
-        .filter((t) => t.tag === (t.rev ? `day-${t.day}.${t.rev}` : `day-${t.day}`)).sort((a, b) => b.day - a.day || b.rev - a.rev)[0];
-      if (latest && latest.day >= 1) {
-        git(["fetch", "-q", "origin", `refs/tags/${latest.tag}:refs/tags/${latest.tag}`], dir, { allowFail: true });
-        const stale = revertedNow.some((c) => git(["merge-base", "--is-ancestor", c, latest.tag], dir, { allowFail: true }) !== null);
-        if (stale) {
-          let k = 1;
-          while (tags.has(`day-${latest.day}.${k}`)) k++;
-          const rev = `day-${latest.day}.${k}`;
-          if (!opts.dryRun) {
-            git(["tag", rev], dir);
-            git(["push", "-q", "origin", `refs/tags/${rev}`], dir);
-            tags.add(rev);
-            await (opts.deploy ?? triggerDeploy)({ slug, day: latest.day, sha: git(["rev-parse", "HEAD"], dir).trim() });
-          }
-          log({ event: "reconcile_tag", tag: rev, replaces: latest.tag });
+      if (pushed && !opts.dryRun) git(["push", "-q", "origin", "HEAD:main"], dir);
+    }
+    if (stale) {
+      let k = 1;
+      while (tags.has(`day-${latest.day}.${k}`)) k++;
+      const rev = `day-${latest.day}.${k}`;
+      if (!opts.dryRun) {
+        const sha = git(["rev-parse", "HEAD"], dir).trim();
+        // The deploy it needs is written down BEFORE the tag is pushed, so a crash or a failed trigger is retried below
+        // on the next run (the tag alone no longer looks stale then).
+        writeState(stateDir, slug, { ...readState(stateDir, slug), pendingDeploy: { tag: rev, day: latest.day, sha } });
+        git(["tag", rev], dir);
+        git(["push", "-q", "origin", `refs/tags/${rev}`], dir);
+        tags.add(rev);
+      }
+      log({ event: "reconcile_tag", tag: rev, replaces: latest.tag });
+    }
+    // A reconcile deploy not yet triggered (this run's, or a run that crashed or whose trigger failed): trigger it. A
+    // failed trigger stays pending for the next run and doesn't stop tonight's work.
+    const pendingDeploy = readState(stateDir, slug).pendingDeploy;
+    if (pendingDeploy && !opts.dryRun) {
+      if (!tags.has(pendingDeploy.tag)) {
+        // Its tag never reached the remote: the stale check above tags the corrected rules again.
+        const { pendingDeploy: _drop, ...rest } = readState(stateDir, slug);
+        writeState(stateDir, slug, rest);
+      } else {
+        try {
+          await (opts.deploy ?? triggerDeploy)({ slug, day: pendingDeploy.day, sha: pendingDeploy.sha });
+          const { pendingDeploy: _done, ...rest } = readState(stateDir, slug);
+          writeState(stateDir, slug, { ...rest, deployed: pendingDeploy.sha });
+          log({ event: "reconcile_deploy", tag: pendingDeploy.tag, sha: pendingDeploy.sha });
+        } catch (e) {
+          log({ event: "reconcile_deploy_failed", tag: pendingDeploy.tag, error: String(e.message || e) });
+          notifyFile(notifyDir, `reconcile-deploy-${pendingDeploy.tag}`, `Promptocracy ${slug}: the deploy of ${pendingDeploy.tag} failed`, `${String(e.message || e).slice(0, 300)}\nThe corrected rules are tagged ${pendingDeploy.tag} but not deployed; the next run tries again. Night log: ${nightLog}`);
         }
       }
     }
@@ -674,7 +700,8 @@ export async function runOnce(opts) {
     }
 
     const head = git(["rev-parse", "HEAD"], dir).trim();
-    const outcomes = tonight.map((t) => (t.applied ? { number: t.number, applied: true, commit: t.commit } : { number: t.number, applied: false, reason: `${t.reason}. ${SUGGESTION}`.slice(0, 400) }));
+    // seq: the order they were applied and committed in (tonight's order), which the enactment follows (rule 107.2).
+    const outcomes = tonight.map((t, i) => (t.applied ? { number: t.number, seq: i + 1, applied: true, commit: t.commit } : { number: t.number, seq: i + 1, applied: false, reason: `${t.reason}. ${SUGGESTION}`.slice(0, 400) }));
     if (opts.dryRun) return { status: "dry-run", outcomes, head };
     if (tonight.some((t) => t.applied && !t.resumed) || pushed) git(["push", "-q", "origin", "HEAD:main"], dir);
     const c = await api("POST", `days/${job.day}/claim`, { sha: head, outcomes, notes });
