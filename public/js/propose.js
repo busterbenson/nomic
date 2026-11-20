@@ -243,7 +243,7 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
     let html;
     if (m) html = `<p>You proposed ${pPill(m)} today. It is on tomorrow's ballot (rule ${rpill("103.2")}).</p>`;
     else if (!c.allowed) html = `<p>${esc(c.reason || "You can't propose right now.")}</p>`;
-    else html = `<p><b>You haven't proposed a change today.</b> </p><button type="button" class="btn ghost small" data-p="pickblock">Propose a new rule</button>`;
+    else html = `<p><b>You haven't proposed a change today.</b></p><button type="button" class="btn ghost small" data-p="pickblock">Propose a new rule</button>`;
     return `<div class="rbanner${m || !c.allowed ? " done" : ""}" id="rb-banner">${html}</div>`;
   }
 

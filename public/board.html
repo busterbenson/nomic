@@ -128,6 +128,8 @@
     ME = me.ok ? me.data : null;
     await loadInvite();
     if (PROP) PROP.redraw();
+    if (BOOK) BOOK.redraw();
+    drawBook();   // the ballot's Yes / No and the Propose card depend on who is looking
     if (VIEW && ME && ME.player) VIEW.setMe(ME.player.color.key);
     drawWho();
     drawMoveBar();
