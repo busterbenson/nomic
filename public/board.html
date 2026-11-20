@@ -363,12 +363,12 @@
     const game = data.game, ps = data.players || [];
     document.title = game.name || "Promptocracy";
     $("title").textContent = game.name || "Promptocracy";
-    const endedBy = new Set(((DAY && DAY.players) || []).filter(p => p.ended).map(p => p.name));
+    const endedBy = new Set(((DAY && DAY.players) || []).filter(p => p.ended).map(p => p.color.key));   // by color: names are not unique, colors are
     // Highest points first; ties keep join order.
     const ranked = ps.map((p, i) => ({ ...p, i })).sort((a, b) => (b.score - a.score) || (a.i - b.i));
     $("scores").innerHTML = ranked.map(p => {
       const me = ME && ME.player && ME.player.color.key === p.color.key;
-      return `<li class="${me ? "mine" : ""}"><button type="button" class="prow" data-pl="${esc(p.color.key)}" id="pr-${esc(p.color.key)}" aria-label="${esc(p.name)}${me ? " (you)" : ""}: open player card">${mini(p, "pz")}<span>${esc(p.name)}${me ? ' <span class="muted you">(you)</span>' : ""}<span class="st" data-slot="player-today">${endedBy.has(p.name) ? "turn ended" : ""}</span></span><b>${esc(p.score)}</b></button></li>`;
+      return `<li class="${me ? "mine" : ""}"><button type="button" class="prow" data-pl="${esc(p.color.key)}" id="pr-${esc(p.color.key)}" aria-label="${esc(p.name)}${me ? " (you)" : ""}: open player card">${mini(p, "pz")}<span>${esc(p.name)}${me ? ' <span class="muted you">(you)</span>' : ""}<span class="st" data-slot="player-today">${endedBy.has(p.color.key) ? "turn ended" : ""}</span></span><b>${esc(p.score)}</b></button></li>`;
     }).join("");
     drawAcct();
     drawMoveBar();   // what the bar says depends on the game (setting up, playing)
@@ -383,7 +383,7 @@
     const R = (BOARD && BOARD.rules) || {}, S = (BOARD && BOARD.settings) || {};
     const chip = (num, label) => `<button type="button" class="rref" data-seecard="${num}" data-clause="${label || num}" aria-haspopup="dialog" aria-label="Preview rule ${label || num}">${label || num}</button>`;
     const row = (k, v, refs, text, slot) => `<div class="cs"><dt>${k}</dt><dd>${v}</dd><span class="rr">${refs}</span>${text ? `<p>${text}</p>` : ""}${slot ? `<div class="ca slot" data-slot="${slot}"></div>` : ""}</div>`;
-    const ended = ((DAY && DAY.players) || []).find(q => q.name === p.name);
+    const ended = ((DAY && DAY.players) || []).find(q => q.color.key === p.color.key);
     const today = ended ? (ended.ended ? "Turn ended" : [ended.moved ? "moved" : "", ended.proposed ? "proposed" : ""].filter(Boolean).join(" · ") || "Nothing yet") : "";
     const rows = [row("Points", esc(p.score), chip("401") + chip("402"), "", "points-text"),
       row("Today", esc(today), chip("202"), "", "player-today"),
@@ -452,7 +452,7 @@
     else if (g && g.status === "setup") lead = `<div class="mb"><span><b>Setting up.</b> ${plural((DATA.players || []).length, "player")} of ${esc(g.max_players)} joined.</span></div>`;
     else if (DAY && DAY.locked) lead = `<div class="mb"><span class="hint">The day is being processed.</span></div>`;
     else if (!ME) lead = `<div class="mb"><span class="hint">Log in to play.</span></div>`;
-    else if (move.ok) lead = `<div class="mb"><span class="hint">Pick a highlighted tile to move, or open <button type="button" class="linkbtn inl" data-pl="${esc(myKey() || "")}">your card</button>.</span></div>`;
+    else if (move.ok) lead = `<div class="mb"><span class="hint">You have not moved today.</span></div>`;   // a state, not an instruction: the dashed tiles say where
     else lead = `<div class="mb"><span class="hint">${esc(move.why || "")}</span></div>`;
     box.innerHTML = lead + `<span class="slot" data-slot="bar-action"></span><span class="mbr"><button class="linkbtn" id="board-toggle" type="button" aria-expanded="${BOARD_OPEN}">${BOARD_OPEN ? "Hide board" : "Show board"}</button></span>`;
     $("playtop").classList.toggle("collapsed", !BOARD_OPEN);

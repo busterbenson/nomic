@@ -6,7 +6,7 @@ import re, sys
 from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
 
-base, out, cookie = sys.argv[1:4]
+base, out, cookie, sam_cookie = sys.argv[1:5]
 host = urlparse(base).hostname
 failed = []
 SLUG = "chrome"
@@ -178,7 +178,7 @@ with sync_playwright() as pw:
     bw = box(page, "#board-wrap")
     check("S1-BRD-01: the board is a 420 px band in the page flow", round(bw["h"]) == 420 and page.evaluate("getComputedStyle(document.getElementById('board-wrap')).position") != "fixed", str(bw))
     check("S1-ACC-06: the board's button is named You (not My piece), with Zoom - and +", text(page, ".board-ctl") .startswith("You") and "My piece" not in text(page, "body") and page.locator('.board-ctl [aria-label="Zoom out"]').count() == 1)
-    check("S1-MOV-01: nothing picked: one line, no filled button", "Pick a highlighted tile" in text(page, "#movebar") and page.locator("#movebar .btn:not(.ghost)").count() == 0, text(page, "#movebar"))
+    check("S1-MOV-01: nothing picked: one line (a state, no instruction), no filled button", "You have not moved today." in text(page, "#movebar") and "Pick a" not in text(page, "#movebar") and page.locator("#movebar .btn:not(.ghost)").count() == 0, text(page, "#movebar"))
     check("S1-MOV-02: the tiles you may move to are highlighted", page.locator("#board-wrap polygon.reach").count() == 8, str(page.locator("#board-wrap polygon.reach").count()))
     n0 = page.evaluate("document.querySelectorAll('#board-wrap polygon.top').length")
     click_tile(page, 3, 0)
@@ -441,6 +441,19 @@ with sync_playwright() as pw:
     page.keyboard.press("Escape")
     check("phone: no page errors (light)", not errors, str(errors))
     c.close()
+    # ================= two players with the same name: turn state follows the color, not the name =================
+    c = b.new_context(viewport={"width": 1280, "height": 900}); c.add_cookies([{"name": "s", "value": sam_cookie, "domain": host, "path": "/dupes"}]); page = c.new_page()
+    errors = []; page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(base + "/dupes/"); page.wait_for_selector("#scores li"); page.wait_for_function("document.getElementById('rules').textContent.indexOf('Loading') < 0"); page.wait_for_timeout(400)
+    page.locator("#scores li .prow >> nth=0").click(); page.wait_for_selector("#mroot .mcard")
+    first = text(page, "#mroot .cstats"); you = "(you)" in text(page, "#mroot h2"); page.keyboard.press("Escape")
+    page.locator("#scores li .prow >> nth=1").click(); page.wait_for_selector("#mroot .mcard")
+    second = text(page, "#mroot .cstats"); page.keyboard.press("Escape")
+    turn_ended = [("Turn ended" in x) for x in ([first, second] if you else [second, first])]   # [the viewer's card, the other Sam's]
+    check("two players named Sam: only the one who ended their turn says so, in their card (matched by color)", turn_ended == [False, True], f"{first} | {second}")
+    check("two players named Sam: no page errors", not errors, str(errors))
+    c.close()
+
     # ================= logged out, and a game still being set up =================
     c = b.new_context(viewport={"width": 1280, "height": 900}); page = c.new_page()
     errors = []; page.on("pageerror", lambda e: errors.append(str(e))); page.on("console", lambda m: errors.append("console: " + m.text) if m.type == "error" and "401" not in m.text else None)   # logged out, /api/me answers 401 by design: the browser logs it

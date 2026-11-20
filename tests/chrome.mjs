@@ -39,9 +39,17 @@ try {
   // a second game still being set up (one player, not started), seen by nobody logged in
   const open = await createGame(state, { slug: "setup", name: "Setting Up", repo: "busterbenson/chrome-game", rulesBase: stub.base });
   await join(srv.base, "setup", open.code, { email: "dee@example.com", name: "Dee", color: "marigold" });
+  // a game where two players share a name (joining does not need unique names): one has ended their turn, the other has not
+  const dup = await createGame(state, { slug: "dupes", name: "Same Names", repo: "busterbenson/chrome-game", rulesBase: stub.base });
+  const sam1 = await join(srv.base, "dupes", dup.code, { email: "sam1@example.com", name: "Sam", color: "teal" });
+  const sam2 = await join(srv.base, "dupes", dup.code, { email: "sam2@example.com", name: "Sam", color: "vermilion" });
+  startPlaying(state, "dupes");
+  const e = await sam2.post("/dupes/api/end-turn", {});
+  if (e.status !== 200) throw new Error("end turn: " + e.text);
+  const samCookie = [...sam1.jar].find(([k]) => k === "s|/dupes")[1];
   const cookie = [...ada.jar].find(([k]) => k === "s|/chrome")[1];
   if (process.env.CHROME_SERVE) { console.log("SERVE", srv.base, cookie); await new Promise((res) => setTimeout(res, Number(process.env.CHROME_SERVE) * 1000)); }   // for debugging: keep the fixture up
-  const r = await promisify(execFile)("/usr/local/bin/python3", [ROOT + "/tests/browser-chrome.py", srv.base, shots || "-", cookie], { timeout: 240000, maxBuffer: 1 << 24 });
+  const r = await promisify(execFile)("/usr/local/bin/python3", [ROOT + "/tests/browser-chrome.py", srv.base, shots || "-", cookie, samCookie], { timeout: 240000, maxBuffer: 1 << 24 });
   process.stdout.write(r.stdout);
 } catch (e) {
   failed = true;
