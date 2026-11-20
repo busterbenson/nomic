@@ -7,7 +7,7 @@ Every function that carries out the game should say which rule it implements, wi
 `src/` is only reported for now: these functions have no claim yet. Site plumbing such as sign-in and email goes
 under rule 101 or 102; a follow-up change claims them and moves `src/` into the strict set.
 
-132 of 227 functions outside `src/engine/` are unclaimed.
+136 of 238 functions outside `src/engine/` are unclaimed.
 
 ## src/index.ts (5)
 
@@ -32,6 +32,10 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 - line 15: `chartAll`
 - line 24: `ensureTiles`
 - line 33: `loadTiles`
+
+## src/lib/drafter.ts (1)
+
+- line 61: `send`
 
 ## src/lib/email.ts (3)
 
@@ -91,13 +95,16 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 - line 13: `page`
 
-## src/lib/proposals.js (5)
+## src/lib/proposals.js (8)
 
-- line 145: `own`
-- line 146: `cites`
-- line 208: `obj`
-- line 323: `refuse`
-- line 325: `own`
+- line 146: `own`
+- line 147: `cites`
+- line 178: `own`
+- line 182: `add`
+- line 268: `obj`
+- line 383: `refuse`
+- line 385: `own`
+- line 465: `typeOf`
 
 ## src/lib/settings.js (12)
 
@@ -116,33 +123,33 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/lib/util.ts (27)
 
-- line 39: `validShape`
-- line 51: `mixHex`
-- line 53: `legacyInfo`
-- line 57: `colorInfo`
-- line 58: `isOfferedColor`
-- line 61: `colorOf`
-- line 67: `who`
-- line 76: `json`
-- line 86: `readJson`
-- line 95: `base64url`
-- line 101: `randomToken`
-- line 103: `sha256Hex`
-- line 110: `normCode`
-- line 112: `validEmail`
-- line 115: `normEmail`
-- line 119: `cleanName`
-- line 126: `esc`
-- line 131: `siteUrl`
-- line 141: `validSlug`
-- line 147: `plain`
-- line 148: `validRepo`
-- line 150: `validRulesPath`
-- line 152: `validRef`
-- line 155: `gameBase`
-- line 157: `seatsTaken`
-- line 164: `playersLine`
-- line 170: `seatLimit`
+- line 41: `validShape`
+- line 53: `mixHex`
+- line 55: `legacyInfo`
+- line 59: `colorInfo`
+- line 60: `isOfferedColor`
+- line 63: `colorOf`
+- line 69: `who`
+- line 78: `json`
+- line 88: `readJson`
+- line 97: `base64url`
+- line 103: `randomToken`
+- line 105: `sha256Hex`
+- line 112: `normCode`
+- line 114: `validEmail`
+- line 117: `normEmail`
+- line 121: `cleanName`
+- line 128: `esc`
+- line 133: `siteUrl`
+- line 143: `validSlug`
+- line 149: `plain`
+- line 150: `validRepo`
+- line 152: `validRulesPath`
+- line 154: `validRef`
+- line 157: `gameBase`
+- line 159: `seatsTaken`
+- line 166: `playersLine`
+- line 172: `seatLimit`
 
 ## src/routes/api-ballot.ts (1)
 

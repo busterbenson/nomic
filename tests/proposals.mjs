@@ -11,7 +11,7 @@ import { join as pjoin } from "node:path";
 import { ROOT, client, createGame, d1, join, migrate, newState, startPlaying, startRulesStub, startServer } from "./lib.mjs";
 import { dayOpenBinds } from "../src/lib/day-gate.js";
 import {
-  DRAFT_INSERT_SQL, WITHDRAW_SQL, citedIn, draftOf, fixedParts, fixedRefusal, markFor, modelPrompt, needsModel, parseBook, readModelAnswer, readRequest, referencesTo, settingsText, textOf,
+  DRAFT_INSERT_SQL, WITHDRAW_SQL, answerSchema, citedIn, conflictCandidates, draftOf, fixedParts, fixedRefusal, markFor, modelPrompt, needsModel, parseBook, readModelAnswer, readRequest, referencesTo, settingsText, textOf,
 } from "../src/lib/proposals.js";
 
 let pass = 0, fail = 0;
@@ -194,6 +194,122 @@ console.log("the live eval's findings, kept as recorded answers (Rickshaw day-0.
     referencesTo(parseBook(readFileSync(pjoin(ROOT, "tests/fixtures/rickshaw-day-0.2/RULES.md"), "utf8").replace("(rule 504.2)", "(504.2)")), "504").includes("505"));
   check("a refusal's sentence is clipped to 300 characters, whatever the model wrote into the setting's value",
     ans("504.2", `{"after_text": "x", "conflicts": [], "settings": {"board.chart_radius": ${J("v".repeat(500))}}}`).message?.length <= 300);
+}
+
+// ---------------------------------------------------------------- the drafter upgrades (conflict candidates, structured output)
+console.log("the drafter upgrades: the 110.1 floor on a game that lacks the clauses, conflict candidates, the answer schema");
+{
+  const RB = parseBook(readFileSync(pjoin(ROOT, "tests/fixtures/rickshaw-day-0.2/RULES.md"), "utf8"));
+  const rq = (target, words, extra = {}) => readRequest(RB, { kind: "amend", target, words, ...extra });
+  // The live eval's baseline answer for conf-vote-third (2026-11-20, claude-haiku-5-5): reword rule 104 to "a third of players".
+  // Rickshaw's day-0.2 text has no 104.4 or 104.5, which the site's floor lists; the draft was refused for rules the game does not have.
+  const raw = "{\"after_text\": \"A proposal passes if at least a third of all players vote yes within 48 hours of the moderator publishing its final text. A proposal that changes a core rule (1xx) also passes if at least a third of all players vote yes. Votes are counted by code, not by the moderator.\", \"conflicts\": [\"301\"], \"settings\": {}}";
+  const r = rq("104", "A proposal passes if a third of the players vote yes, core rules included.");
+  const a = readModelAnswer(RB, r, raw);
+  const d = draftOf(RB, r, a.after_text);
+  check("rewording rule 104 on a game whose text has no 104.4 or 104.5 is not refused for them (110.1 protects what the game has)",
+    !a.error && fixedRefusal(RB, { ...r, ...d, settings: {} }) === null, J(fixedRefusal(RB, { ...r, ...d, settings: {} })));
+  check("a reword of a rule that really holds a fixed clause (202, with 202.4) is still refused when the clause changes",
+    typeof fixedRefusal(RB, { ...rq("202", "x"), ...draftOf(RB, rq("202", "x"), textOf(RB.byNum["202"]).replace("end their turn at any time", "end their turn at noon")), settings: {} }) === "string");
+
+  // Conflict candidates: found by code, before the model is asked.
+  const nums = (target, words) => conflictCandidates(RB, target, words).map((c) => c.num);
+  check("candidates for 'a third of the players' on 104 name 105 (the votes rule, same block) and never 104 itself", nums("104", "A proposal passes if a third of the players vote yes.").includes("105") && !nums("104", "x").some((n) => n === "104" || n.startsWith("104.")), J(nums("104", "a third of the players vote yes")));
+  check("candidates include the parts that cite the target (505 cites 504.2) and the parts the target cites (202.1 cites 203)", nums("504.2", "x").includes("505") && nums("202.1", "x").includes("203"), J([nums("504.2", "x"), nums("202.1", "x")]));
+  check("candidates include a part sharing a setting key with the target (203.1 and game.timezone), in any block", conflictCandidates(parseBook("# R\n\n## 100. A [majority]\n\n### 101 One\nThe zone is set. [setting: game.timezone]\n\n## 200. B [majority]\n\n### 201 Two\nDays follow the zone. [setting: game.timezone]\n"), "101", "x").some((c) => c.num === "201" && /setting/.test(c.why)));
+  check("the list is short (at most 8), a block has no candidates, and an unknown number has none", nums("203.1", "the day and the turn and the players vote for points to move").length <= 8 && J(conflictCandidates(RB, "100", "x")) === "[]" && J(conflictCandidates(RB, "999", "x")) === "[]");
+  const withC = modelPrompt(RB, "RULEBOOK", r, { candidates: true }), without = modelPrompt(RB, "RULEBOOK", r);
+  check("candidates are listed in the prompt only when asked for, after the current text and before the player's words, which stay last",
+    /Parts the code found.*105 \(/s.test(withC.user) && !/Parts the code found/.test(without.user) && withC.user.indexOf("Parts the code found") < withC.user.indexOf("<words>") && withC.user.trimEnd().endsWith("</words>"));
+  check("the prompt without candidates is the rulebook then the request, as it was; the rulebook part is the same for every request of a game",
+    without.user === without.rulebook + without.rest && modelPrompt(RB, "RULEBOOK", rq("401", "x"), { candidates: true }).rulebook === without.rulebook && without.system === modelPrompt(RB, "RULEBOOK", rq("401", "y")).system);
+
+  // Structured output: the schema the model's answer is held to.
+  const sc = answerSchema();
+  const walk = (n) => (n && typeof n === "object" ? [n, ...Object.values(n).flatMap(walk)] : []);
+  const objs = walk(sc).filter((n) => n.type === "object");
+  check("the answer schema keeps additionalProperties:false on every object, and uses no keyword structured outputs refuse (min/max, length, pattern)",
+    objs.length >= 3 && objs.every((o) => o.additionalProperties === false) && !/"(minimum|maximum|minLength|maxLength|pattern|multipleOf|minItems|maxItems)"/.test(J(sc)), J(sc).slice(0, 200));
+  check("the schema names the answer's five fields and every setting the game has, with board.island as an object of numbers",
+    J(Object.keys(sc.properties)) === J(["after_text", "conflicts", "settings", "refuse", "checked"]) && "board.island" in sc.properties.settings.properties && sc.properties.settings.properties["board.island"].properties.width.type === "number" && "max_players" in sc.properties.settings.properties && sc.properties.settings.properties.mcp_enabled.type === "boolean");
+  check("the recorded answers still read the same through the post-checks (structured output changes the shape's guarantee, not the checks)", !readModelAnswer(RB, r, JSON.stringify(JSON.parse(raw))).error);
+
+  // Structured output makes the model fill every field it can: the live eval (combo run, 2026-11-20) recorded this answer for
+  // ord-two-rules-needed, a draft with an empty "refuse". An empty refuse beside a draft is no refusal.
+  const emptyRefuse = "{\"after_text\": \"The first player to reach 50 points wins. (This rule is deliberately dull, after Peter Suber's original. Change it.)\", \"conflicts\": [\"401\"], \"settings\": {}, \"refuse\": \"\"}";
+  const er = readModelAnswer(RB, rq("402", "Make the first to 50 points win, and give 5 points for every move."), emptyRefuse);
+  check("a draft with an empty \"refuse\" beside it reads as the draft, with its conflicts", !er.error && er.after_text.startsWith("The first player to reach 50") && J(er.conflicts) === J(["401"]), J(er));
+  check("an empty \"refuse\" with no draft is still malformed, and a refusal with words is still a refusal",
+    readModelAnswer(RB, rq("402", "x"), '{"refuse": "", "conflicts": []}').error === "malformed" && readModelAnswer(RB, rq("402", "x"), '{"refuse": "Not a change to this rule.", "after_text": ""}').reason === "declined");
+
+  // The candidates the model checked join its own conflicts; unknown, own and false ones don't.
+  const ck = readModelAnswer(RB, r, '{"after_text": "A proposal passes if a third of all players vote yes.", "conflicts": ["301"], "settings": {}, "checked": [{"num": "105", "collides": true}, {"num": "102", "collides": false}, {"num": "104", "collides": true}, {"num": "999", "collides": true}, {"num": "103", "collides": "yes"}]}');
+  check("a candidate the model checked with collides true joins its conflicts (union, no duplicates); false, own, unknown and non-boolean ones don't", !ck.error && J(ck.conflicts) === J(["301", "105"]), J(ck));
+  check("the candidate paragraph asks for 'checked' only when there are candidates", /"checked"/.test(withC.user) && !/"checked"/.test(without.user) && !/"checked"/.test(without.system));
+
+  // Review findings (pass 1): the 110.1 floor guard, prefilled edits with candidates, defaults filled in by structured output,
+  // fixed parts never offered as candidates.
+  check("a reword of 104 on a game without 104.4 can't smuggle a '104.4 ...' clause in (the floor guard doesn't open that door)",
+    typeof readModelAnswer(RB, rq("104", "x"), '{"after_text": "A proposal passes if a third vote yes.\\n\\n104.4 Everyone sees every vote at once.", "conflicts": [], "settings": {}}').message === "string" &&
+    readModelAnswer(RB, rq("104", "x"), '{"after_text": "A proposal passes if a third vote yes.\\n\\n104.4 Everyone sees every vote at once.", "conflicts": [], "settings": {}}').reason === "scope");
+  const pw = "A player whose proposal passes gets 10 points.";
+  const prefC = readModelAnswer(RB, rq("401", pw, { prefilled: true }), '{"after_text": "something else", "conflicts": ["402"], "settings": {}, "checked": [{"num": "403", "collides": true}, {"num": "402", "collides": false}]}');
+  check("a prefilled edit with candidates keeps the player's exact words and joins the checked candidates to its conflicts", prefC.after_text === pw && J(prefC.conflicts) === J(["402", "403"]), J(prefC));
+  const filled = readModelAnswer(RB, rq("504.2", "make the chart radius 3"), '{"after_text": "When you move, every tile within three tiles of you is charted. [setting: board.chart_radius]", "conflicts": [], "settings": {"max_players": 8, "board.island": {"width": 8, "height": 8}, "mcp_enabled": true, "board.chart_radius": 3}}');
+  check("settings structured output filled with the game's defaults for settings the words never named are ignored, the one asked for stays", !filled.error && J(filled.settings) === J({ "board.chart_radius": 3 }), J(filled));
+  check("an unnamed setting set to something other than its default is still refused as scope",
+    readModelAnswer(RB, rq("504.2", "x"), '{"after_text": "When you move, tiles near you are charted.", "conflicts": [], "settings": {"max_players": 3}}').reason === "scope");
+  check("fixed parts (110.1, 202.4) and rules made only of them (110) are never offered as candidates: naming one would refuse the draft",
+    !nums("202", "tidy it").some((n) => fixedParts(RB).includes(n)) && !nums("203.1", "x").includes("110.1") && ["103.1", "103.4", "105.1", "101", "104"].every((t) => !nums(t, "the day and the proposals and the votes").includes("110")), J(["103.1", "104"].map((t) => nums(t, "the day and the proposals and the votes"))));
+  const island = readModelAnswer(RB, rq("504.2", "x"), '{"after_text": "When you move, tiles near you are charted.", "conflicts": [], "settings": {"board.island": {"height": 8, "width": 8}}}');
+  check("an untagged setting at its default is ignored whatever order its fields come in", !island.error && J(island.settings) === "{}", J(island));
+
+  // The drafter's request (src/lib/drafter.ts), with fetch captured: no network, no key.
+  const { build } = await import("esbuild");
+  const tmp = mkdtempSync(pjoin(tmpdir(), "promptocracy-drafter-flags-"));
+  await build({ entryPoints: [pjoin(ROOT, "src/lib/drafter.ts")], bundle: true, format: "esm", platform: "node", outfile: pjoin(tmp, "drafter.mjs"), logLevel: "silent" });
+  const drafter = await import(pjoin(tmp, "drafter.mjs"));
+  const sentWith = async (flags) => {
+    const real = globalThis.fetch; let sent = null;
+    globalThis.fetch = async (url, init) => { sent = JSON.parse(init.body); return new Response(JSON.stringify({ content: [{ type: "text", text: raw }], usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 3000 } }), { status: 200 }); };
+    const log = console.log; console.log = () => {};
+    try { await drafter.draftRewording({ MODEL_API_KEY: "stub-key-not-real", DRAFTER_FLAGS: flags }, RB, readFileSync(pjoin(ROOT, "tests/fixtures/rickshaw-day-0.2/RULES.md"), "utf8"), r); } finally { globalThis.fetch = real; console.log = log; }
+    return sent;
+  };
+  const F = (v) => J(drafter.drafterFlags({ DRAFTER_FLAGS: v }));
+  check("DRAFTER_FLAGS: a comma list turns exactly those on, 'none' turns all off, '-name' removes one from the default",
+    F("candidates,cache") === J({ candidates: true, cache: true, structured: false }) && F("none") === J({ candidates: false, cache: false, structured: false }) &&
+    F("-cache") === J({ ...drafter.DEFAULT_FLAGS, cache: false }) && F("") === J(drafter.DEFAULT_FLAGS) && F("nonsense") === F("") && F("-structured") === J({ candidates: true, cache: false, structured: false }) && F("NONE") === F("none"));
+  check("the default levers: candidates on; structured off until a setting's number in the text stays in step (chart radius 3); caching off (a write costs more than it saves when drafts are minutes apart)", J(drafter.DEFAULT_FLAGS) === J({ candidates: true, cache: false, structured: false }));
+  const plainReq = await sentWith("none"), allReq = await sentWith("candidates,cache,structured");
+  check("with every lever off the request is what it was: a string user message, effort low, no format", typeof plainReq.messages[0].content === "string" && plainReq.output_config.effort === "low" && !("format" in plainReq.output_config) && !/Parts the code found/.test(plainReq.messages[0].content));
+  check("with caching the instructions come first and the rulebook is its own block ending in the cache breakpoint; the player's words are in the last block, after it",
+    Array.isArray(allReq.messages[0].content) && allReq.messages[0].content[0].cache_control?.type === "ephemeral" && allReq.messages[0].content[0].text.startsWith("The rulebook:") && !("cache_control" in allReq.messages[0].content[1]) &&
+    allReq.messages[0].content[1].text.includes("<words>") && !allReq.messages[0].content[0].text.includes("<words>") && typeof allReq.system === "string");
+  check("with structured output the request carries output_config.format as a json_schema (the effort stays), and the candidates ride in the last block",
+    allReq.output_config.effort === "low" && allReq.output_config.format?.type === "json_schema" && J(allReq.output_config.format.schema) === J(answerSchema()) && /Parts the code found/.test(allReq.messages[0].content[1].text));
+  check("the cached part is byte-identical for two different players' requests (the cache can hit)",
+    J((await sentWith("cache")).messages[0].content[0]) === J((await sentWith("cache")).messages[0].content[0]));
+  // A 400 on the schema: ask once more without it; a 400 without the schema is just a failure. Every request seen, in order.
+  const seq = async (flags, statuses) => {
+    const real = globalThis.fetch, seen = [], err = console.error; let i = 0;
+    globalThis.fetch = async (url, init) => { seen.push(JSON.parse(init.body)); const st = statuses[Math.min(i++, statuses.length - 1)]; return new Response(JSON.stringify(st === 200 ? { content: [{ type: "text", text: raw }] } : { error: {} }), { status: st }); };
+    console.error = () => {};
+    let outcome;
+    try { outcome = (await drafter.draftRewording({ MODEL_API_KEY: "stub-key-not-real", DRAFTER_FLAGS: flags }, RB, readFileSync(pjoin(ROOT, "tests/fixtures/rickshaw-day-0.2/RULES.md"), "utf8"), r)).conflicts; } catch (e) { outcome = e.code; } finally { globalThis.fetch = real; console.error = err; }
+    return { seen, outcome };
+  };
+  const cachedRetry = await seq("cache,structured,candidates", [400, 200]);
+  check("the schema retry keeps the cache block and the candidates, and drops only the format", cachedRetry.seen.length === 2 && J(cachedRetry.seen[0].messages) === J(cachedRetry.seen[1].messages) && Array.isArray(cachedRetry.seen[1].messages[0].content) && !("format" in cachedRetry.seen[1].output_config));
+  const retried = await seq("structured", [400, 200]), notRetried = await seq("none", [400, 200]), twice = await seq("structured", [400, 400]);
+  check("the API refusing the schema (400) is asked again once without it, and that answer is used", retried.seen.length === 2 && "format" in retried.seen[0].output_config && !("format" in retried.seen[1].output_config) && J(retried.outcome) === J(["301"]), J(retried.outcome));
+  check("a 400 with no schema is a failure at once (no second request), and a second 400 is a failure after exactly one retry", notRetried.seen.length === 1 && notRetried.outcome === "failed" && twice.seen.length === 2 && twice.outcome === "failed");
+  const errs = []; const realErr = console.error; console.error = (...x) => errs.push(x.join(" "));
+  const protoNames = F("constructor") === F("") && F("__proto__") === F("") && F("candidates,cahce") === J({ candidates: true, cache: false, structured: false }) && F("-cahce") === F("") && F("none,-cache") === F("none");
+  const mixed = F("candidates,-cache"), spaced = F(" Cache , STRUCTURED "), typo = F("cahce");
+  console.error = realErr;
+  check("DRAFTER_FLAGS: a list with a plus name is exactly those on ('candidates,-cache' = candidates only), spaces and case don't matter, a misspelt name changes nothing and says so",
+    mixed === J({ candidates: true, cache: false, structured: false }) && spaced === J({ candidates: false, cache: true, structured: true }) && typo === F("") && protoNames && errs.some((e) => /unknown DRAFTER_FLAGS name cahce/.test(e)), J(errs));
 }
 
 // ---------------------------------------------------------------- migration 0006 on a database with data
