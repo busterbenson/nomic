@@ -118,6 +118,26 @@ async function mine(ctx: Ctx, player: any, raw: unknown, nowMs: number): Promise
   const t = await findTicket(env, game.id, raw);
   if (!t || t.player_id !== player.id) return out({ error: "There is no such ticket of yours." }, 404);
   if (t.state !== "Draft") return out({ error: `W${t.number} is ${t.state === "Proposed" ? "on the ballot" : t.state.toLowerCase()}, so it can't be changed.` }, 409);
+  // A draft that still points at a proposal is a confirm that did not finish (or a withdraw that did not reach it): settle it.
+  if (t.proposal_id) {
+    const q: any = await env.DB.prepare("SELECT number, status, created_at FROM proposals WHERE id = ?").bind(t.proposal_id).first();
+    const now = nowIso(nowMs);
+    if (q && (q.status === "confirmed" || q.status === "on_ballot")) {
+      await env.DB.batch([
+        env.DB.prepare("UPDATE tickets SET state = 'Proposed', proposed_at = COALESCE(proposed_at, ?), updated_at = ? WHERE id = ? AND state = 'Draft' AND proposal_id = ?").bind(now, now, t.id, t.proposal_id),
+        env.DB.prepare("INSERT INTO ticket_log (ticket_id, day, kind, text, at) SELECT id, ?, 'proposed', ?, ? FROM tickets WHERE id = ? AND state = 'Proposed' AND proposal_id = ?").bind(game.day, `Put on tomorrow's ballot as P${q.number}.`, now, t.id, t.proposal_id),
+      ]);
+      return out({ error: `W${t.number} is on the ballot as P${q.number}, so it can't be changed.` }, 409);
+    }
+    if (q && q.status === "draft" && nowMs - Date.parse(q.created_at) < 60_000) {
+      // another confirm of this ticket is in flight right now (a draft left from a minute ago is a confirm that died: settled below)
+      return out({ error: `W${t.number} is being put on the ballot. Reload and look again.` }, 409);
+    }
+    await env.DB.batch([
+      env.DB.prepare("UPDATE tickets SET proposal_id = NULL, updated_at = ? WHERE id = ? AND state = 'Draft' AND proposal_id = ?").bind(now, t.id, t.proposal_id),
+      env.DB.prepare("DELETE FROM proposals WHERE id = ? AND status = 'draft' AND kind = 'commission'").bind(t.proposal_id),
+    ]);
+  }
   return { t, game };
 }
 
@@ -135,12 +155,13 @@ export async function edit(ctx: Ctx, player: any, raw: unknown, body: any, nowMs
   const sets: string[] = [], binds: unknown[] = [];
   for (const k of ["title", "brief", "estimate", "running_cost"]) if (k in f) { sets.push(`${k} = ?`); binds.push(f[k]); }
   if ("makes" in f) { sets.push("makes = ?"); binds.push(JSON.stringify(f.makes)); }
-  const guard = `id = ? AND state = 'Draft' AND player_id = ? AND EXISTS (SELECT 1 FROM games g WHERE g.id = tickets.game_id AND ${"g.status = 'playing' AND g.phase = 'open' AND g.day = ?"})`;
+  const guard = `id = ? AND state = 'Draft' AND player_id = ? AND proposal_id IS NULL AND EXISTS (SELECT 1 FROM games g WHERE g.id = tickets.game_id AND ${"g.status = 'playing' AND g.phase = 'open' AND g.day = ?"})`;
   const stmts = [env.DB.prepare(`UPDATE tickets SET ${[...sets, "updated_at = ?"].join(", ")} WHERE ${guard}`).bind(...binds, now, t.id, player.id, game.day)];
   if ("tasks" in f) {
-    const ok = "EXISTS (SELECT 1 FROM tickets WHERE id = ? AND state = 'Draft' AND player_id = ?)";
-    stmts.push(env.DB.prepare(`DELETE FROM ticket_tasks WHERE ticket_id = ? AND ${ok}`).bind(t.id, t.id, player.id));
-    f.tasks.forEach((text: string, i: number) => stmts.push(env.DB.prepare(`INSERT INTO ticket_tasks (ticket_id, pos, text) SELECT ?, ?, ? WHERE ${ok}`).bind(t.id, i + 1, text, t.id, player.id)));
+    // the tasks follow the same gate as the fields: your draft, not on a ballot, the day open
+    const ok = "EXISTS (SELECT 1 FROM tickets x JOIN games g ON g.id = x.game_id WHERE x.id = ? AND x.state = 'Draft' AND x.player_id = ? AND x.proposal_id IS NULL AND g.status = 'playing' AND g.phase = 'open' AND g.day = ?)";
+    stmts.push(env.DB.prepare(`DELETE FROM ticket_tasks WHERE ticket_id = ? AND ${ok}`).bind(t.id, t.id, player.id, game.day));
+    f.tasks.forEach((text: string, i: number) => stmts.push(env.DB.prepare(`INSERT INTO ticket_tasks (ticket_id, pos, text) SELECT ?, ?, ? WHERE ${ok}`).bind(t.id, i + 1, text, t.id, player.id, game.day)));
   }
   const res = await env.DB.batch(stmts);
   if (!(res[0]?.meta?.changes > 0)) return out({ error: "The day changed under you. Reload and try again." }, 409);
@@ -164,7 +185,7 @@ export async function confirm(ctx: Ctx, player: any, raw: unknown, nowMs: number
   if (problem) {
     if (!problem.refuse) return out({ error: problem.error }, 400);
     await env.DB.batch([
-      env.DB.prepare("UPDATE tickets SET state = 'Refused', decided_at = ?, updated_at = ? WHERE id = ? AND state = 'Draft'").bind(now, now, t.id),
+      env.DB.prepare("UPDATE tickets SET state = 'Refused', decided_at = ?, updated_at = ? WHERE id = ? AND state = 'Draft' AND proposal_id IS NULL").bind(now, now, t.id),
       env.DB.prepare("INSERT OR IGNORE INTO ticket_log (ticket_id, day, kind, text, at) SELECT id, ?, 'refused', ?, ? FROM tickets WHERE id = ? AND state = 'Refused'").bind(game.day, problem.error, now, t.id),
     ]);
     return out({ error: problem.error, state: "Refused" }, 422);
@@ -173,18 +194,21 @@ export async function confirm(ctx: Ctx, player: any, raw: unknown, nowMs: number
   const pid = crypto.randomUUID();
   const ins = await env.DB.prepare(COMMISSION_DRAFT_SQL).bind(pid, player.id, t.brief, t.title, `Commission W${t.number}: ${t.title}`, sha, now, game.id, ...dayOpenBinds(game.day, nowMs, player.id)).run();
   if (!(ins?.meta?.changes > 0)) return out({ error: "The day changed under you. Reload and try again." }, 409);
-  await env.DB.prepare("UPDATE tickets SET proposal_id = ?, updated_at = ? WHERE id = ? AND state = 'Draft' AND proposal_id IS NULL").bind(pid, now, t.id).run();
-  const res = await confirmProposal(ctx, player, pid, nowMs);
-  if (res.status >= 400) {
-    await env.DB.batch([
-      env.DB.prepare("UPDATE tickets SET proposal_id = NULL WHERE id = ? AND proposal_id = ? AND state = 'Draft'").bind(t.id, pid),
-      env.DB.prepare("DELETE FROM proposals WHERE id = ? AND status = 'draft' AND kind = 'commission'").bind(pid),
-    ]);
-    return res;
+  const undo = () => env.DB.batch([
+    env.DB.prepare("UPDATE tickets SET proposal_id = NULL WHERE id = ? AND proposal_id = ? AND state = 'Draft'").bind(t.id, pid),
+    env.DB.prepare("DELETE FROM proposals WHERE id = ? AND status = 'draft' AND kind = 'commission'").bind(pid),
+  ]);
+  const link = await env.DB.prepare("UPDATE tickets SET proposal_id = ?, updated_at = ? WHERE id = ? AND state = 'Draft' AND proposal_id IS NULL").bind(pid, now, t.id).run();
+  if (!(link?.meta?.changes > 0)) {   // another confirm of this ticket got there first: one ticket, one proposal
+    await env.DB.prepare("DELETE FROM proposals WHERE id = ? AND status = 'draft' AND kind = 'commission'").bind(pid).run();
+    return out({ error: `W${t.number} is being put on the ballot. Reload and look again.` }, 409);
   }
+  let res: Out;
+  try { res = await confirmProposal(ctx, player, pid, nowMs); } catch (e) { await undo(); throw e; }   // a draft proposal is undone; a confirmed one is settled by mine() next time
+  if (res.status >= 400) { await undo(); return res; }
   const number = res.body?.proposal?.number;
   await env.DB.batch([
-    env.DB.prepare("UPDATE tickets SET state = 'Proposed', proposed_at = ?, updated_at = ? WHERE id = ? AND state = 'Draft' AND proposal_id = ?").bind(now, now, t.id, pid),
+    env.DB.prepare("UPDATE tickets SET state = 'Proposed', proposed_at = ?, updated_at = ? WHERE id = ? AND state = 'Draft' AND proposal_id = ? AND EXISTS (SELECT 1 FROM proposals WHERE id = ? AND status = 'confirmed')").bind(now, now, t.id, pid, pid),
     env.DB.prepare("INSERT INTO ticket_log (ticket_id, day, kind, text, at) SELECT id, ?, 'proposed', ?, ? FROM tickets WHERE id = ? AND state = 'Proposed' AND proposal_id = ?").bind(game.day, `Put on tomorrow's ballot as P${number}.`, now, t.id, pid),
   ]);
   const fresh = await findTicket(env, game.id, t.number);

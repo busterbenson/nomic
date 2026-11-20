@@ -12,11 +12,11 @@ let pass = 0, fail = 0;
 const check = (name, ok, detail = "") => { if (ok) { pass++; console.log(`  ok    ${name}`); } else { fail++; console.log(`  FAIL  ${name}${detail ? "  -> " + detail : ""}`); } };
 const J = JSON.stringify;
 
-console.log("migration 0009 on a database with data");
+console.log("migration 0010 on a database with data");
 const st = newState(), cfgDir = mkdtempSync(pjoin(tmpdir(), "promptocracy-mig9-"));
 try {
   mkdirSync(pjoin(cfgDir, "m"));
-  for (const f of readdirSync(pjoin(ROOT, "migrations")).filter((f) => f < "0009")) copyFileSync(pjoin(ROOT, "migrations", f), pjoin(cfgDir, "m", f));
+  for (const f of readdirSync(pjoin(ROOT, "migrations")).filter((f) => f < "0010")) copyFileSync(pjoin(ROOT, "migrations", f), pjoin(cfgDir, "m", f));
   const cfg = pjoin(cfgDir, "wrangler.toml");
   writeFileSync(cfg, `name = "mig"\nmain = "${ROOT}/src/index.ts"\ncompatibility_date = "2026-11-01"\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "promptocracy"\ndatabase_id = "639f045e-df2d-406e-91a4-a1facc4ca2fe"\nmigrations_dir = "${cfgDir}/m"\n`);
   const W = pjoin(ROOT, "node_modules/.bin/wrangler");
@@ -44,7 +44,7 @@ try {
   const snap = () => J(["proposals ORDER BY id", "votes ORDER BY proposal_id, player_id", "vote_events ORDER BY id", "events ORDER BY id", "players ORDER BY id", "days ORDER BY n", "electors ORDER BY day, player_id"].map((t) => sql(`SELECT * FROM ${t}`)));
   const before = snap();
   const nBefore = [sql("SELECT COUNT(*) AS n FROM proposals")[0].n, sql("SELECT COUNT(*) AS n FROM votes")[0].n, sql("SELECT COUNT(*) AS n FROM vote_events")[0].n];
-  copyFileSync(pjoin(ROOT, "migrations", "0009_workshop.sql"), pjoin(cfgDir, "m", "0009_workshop.sql"));
+  copyFileSync(pjoin(ROOT, "migrations", "0010_workshop.sql"), pjoin(cfgDir, "m", "0010_workshop.sql"));
   run(["d1", "migrations", "apply", "DB"]);
 
   check("every proposal, vote and vote event is copied unchanged (all columns, ids and numbers), and nothing else moved", snap() === before && J(nBefore) === J([6, 3, 4]));

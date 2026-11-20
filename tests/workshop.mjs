@@ -130,6 +130,16 @@ try {
   check("withdrawing it sends the ticket back to a draft, unlinked, with a log line", wd.status === 200 && tk(3).state === "Draft" && tk(3).proposal_id === null && d1(state, `SELECT kind FROM ticket_log WHERE ticket_id = '${tk(3).id}' ORDER BY id`).map((r) => r.kind).join() === "proposed,withdrawn", wd.text);
   check("her draft W4 and W3 are both drafts now, so confirming W3 again is P2 (P1 keeps its number, withdrawn)", (await Ana.post(`${T}/W3/confirm`, {})).data?.ticket?.proposal === "P2" && prop(1).status === "withdrawn");
 
+  console.log("a confirm that did not finish is settled, not stuck");
+  // W4 is a draft. A draft proposal made a moment ago means a confirm is in flight; one made an hour ago is a confirm that died.
+  const stray = (iso) => d1(state, `INSERT INTO proposals (id, game_id, player_id, day_proposed, kind, scope, target, draft_head, drafted_by, base_sha, status, created_at) VALUES ('stray', '${gid}', '${id.Ana}', 1, 'commission', 'block', '800', 'h', 'code', 's', 'draft', '${iso}'); UPDATE tickets SET proposal_id = 'stray' WHERE number = 4`);
+  stray("2026-11-10T19:00:00.000Z");
+  const flight = await Ana.post(`${T}/W4/edit`, { title: "changed" });
+  check("a draft whose proposal is a moment old is a confirm in flight: it can't be edited (409)", flight.status === 409 && /being put on the ballot/.test(flight.data.error) && tk(4).title === "A second thing");
+  d1(state, `UPDATE proposals SET created_at = '2026-11-10T18:00:00.000Z' WHERE id = 'stray'`);
+  const healed = await Ana.post(`${T}/W4/edit`, { title: "A second thing" });
+  check("one an hour old is a confirm that died: the edit settles it first (the link is cleared, the stray draft proposal deleted) and goes through",
+    healed.status === 200 && tk(4).proposal_id === null && d1(state, "SELECT COUNT(*) AS n FROM proposals WHERE id = 'stray'")[0].n === 0, healed.text);
   console.log("day 1: Bo's commission with a price, Cy's ordinary proposal");
   const b = await commission(Bo, good({ title: "A lantern", brief: "A lantern that never goes out.", makes: [{ kind: "entry", name: "Lantern" }], estimate: 1, tasks: [] }));
   check("Bo's W2 is P3", b.n === "W2" && b.k.data.ticket.proposal === "P3");
@@ -137,7 +147,8 @@ try {
   await Cy.post(`/wk/api/proposals/${cyp.data.proposal.id}/confirm`, {});
   check("Cy's ordinary proposal is P4", prop(4)?.kind === "repeal");
   // The prices: Gremlin sets them later; for the count's sake Ana's commission costs 3 and she has 5.
-  d1(state, `UPDATE tickets SET price = 3, price_reason = 'Test price.' WHERE number = 3; UPDATE players SET score = 5 WHERE id = '${id.Ana}'`);
+  // Bo's costs 7 and Bo has -3 points (rule modules can take a score below 0): the count must still finish, and pays what he has (nothing).
+  d1(state, `UPDATE tickets SET price = 3, price_reason = 'Test price.' WHERE number = 3; UPDATE tickets SET price = 7 WHERE number = 2; UPDATE players SET score = 5 WHERE id = '${id.Ana}'; UPDATE players SET score = -3 WHERE id = '${id.Bo}'`);
 
   console.log("midnight: the ballot");
   await midnight();
@@ -159,8 +170,8 @@ try {
   check("P2 and P3 are approved (not 'passed': nothing for the moderator to apply); P4 passed", prop(2).status === "approved" && prop(3).status === "approved" && prop(4).status === "passed", J([prop(2), prop(3), prop(4)]));
   check("W3 is Approved, first in the queue; W2 second; each with its log line", tk(3).state === "Approved" && tk(3).queue_pos === 1 && tk(2).state === "Approved" && tk(2).queue_pos === 2 &&
     /Approved: P2 passed\. Paid 3 points\. Place 1 in the queue\./.test(d1(state, `SELECT text FROM ticket_log WHERE ticket_id = '${tk(3).id}' AND kind = 'approved'`)[0].text) &&
-    /Approved: P3 passed\. Place 2 in the queue\./.test(d1(state, `SELECT text FROM ticket_log WHERE ticket_id = '${tk(2).id}' AND kind = 'approved'`)[0].text));
-  check("the price came out of Ana's points (5 to 2), once; Bo's free commission cost nothing", score("Ana") === 2 && tk(3).paid === 3 && !!tk(3).paid_at && score("Bo") === 0 && tk(2).paid === 0, `${score("Ana")}`);
+    /Approved: P3 passed\. Paid 0 of 7 points\. Place 2 in the queue\./.test(d1(state, `SELECT text FROM ticket_log WHERE ticket_id = '${tk(2).id}' AND kind = 'approved'`)[0].text));
+  check("the price came out of Ana's points (5 to 2), once; Bo could not pay his 7 (he is at -3): the count finished, he paid 0 and his score is untouched, and the log says what was paid", score("Ana") === 2 && tk(3).paid === 3 && !!tk(3).paid_at && score("Bo") === -3 && tk(2).paid === 0, `${score("Ana")} ${score("Bo")}`);
   check("the day's log says W3 was approved and who paid", d1(state, `SELECT text FROM events WHERE game_id = '${gid}' AND kind = 'commission_approved' ORDER BY id`).map((r) => r.text).join("|") === "W3 was approved. Ana paid 3 points.|W2 was approved.");
   const pend = await rf(`${A}/wk/api/moderator/pending`, { headers: { authorization: `Bearer ${TOKEN}` } }).then((r) => r.json());
   check("the moderator's pending list has only P4: the commissions are left out", d2.status === "processing" && J(pend.job.passed.map((p) => p.number)) === J([4]) && !J(pend).includes("commission"), J(pend.job.passed.map((p) => [p.number, p.kind])));
@@ -177,7 +188,10 @@ try {
   check("the counted ballot shows the commission's result (passed, nothing applied) and the ticket's state", hist.status === "approved" && hist.result.passed === true && hist.result.applied === null && hist.ticket.state === "Approved" && hist.ticket.queue === 1, J(hist));
 
   console.log("day 2: a commission that fails goes Refused; a commission alone on a ballot needs no moderator; the queue continues");
-  const c1 = await commission(Ana, good({ title: "A drum", makes: [{ kind: "entry", name: "Drum" }] }), "W4");   // her draft from the refused second attempt
+  await Ana.post(`${T}/W4/edit`, good({ title: "A drum", makes: [{ kind: "entry", name: "Drum" }] }));   // her draft from the refused second attempt
+  const pair = await Promise.all([Ana.post(`${T}/W4/confirm`, {}), Ana.post(`${T}/W4/confirm`, {})]);
+  const c1 = { k: pair.find((r) => r.status === 200) || pair[0] };
+  check("two confirms of one ticket racing make one proposal: one answers 200, the other 409, and no stray draft proposal is left", J(pair.map((r) => r.status).sort()) === J([200, 409]) && d1(state, `SELECT COUNT(*) AS n FROM proposals WHERE kind = 'commission' AND title = 'A drum'`)[0].n === 1, J(pair.map((r) => r.text)));
   const c2 = await commission(Cy, good({ title: "A bell", makes: [{ kind: "entry", name: "Bell" }] }));
   check("W4 and W5 are confirmed as P5 and P6", c1.k.data.ticket.proposal === "P5" && c2.k.data.ticket.proposal === "P6", J([c1.k.text, c2.k.text]));
   await midnight();
@@ -212,6 +226,11 @@ try {
   check("the thread already holds Gremlin's and Chalant's posts for the later steps: they read as their own authors", th2.slice(2).map((x) => x.author).join() === "gremlin,chalant" && th2[2].by === undefined);
   check("a ticket can't be given a post by a player id that isn't in the game (the database refuses it)", (() => { try { d1(state, `INSERT INTO ticket_posts (ticket_id, game_id, author_kind, player_id, body, at) VALUES ('${tk(3).id}', '${gid}', 'player', 'nobody', 'x', 'x')`); return false; } catch { return true; } })());
 
+  console.log("withdrawing an ordinary proposal still works (the commission hook is not in its way)");
+  const ow = await Bo.post("/wk/api/proposals", { kind: "repeal", target: "403" });
+  const oc = await Bo.post(`/wk/api/proposals/${ow.data.proposal.id}/confirm`, {});
+  const owd = await Bo.post(`/wk/api/proposals/${ow.data.proposal.id}/withdraw`, {});
+  check("an ordinary proposal can be confirmed, withdrawn and (the day's slot freed) proposed again", oc.status === 200 && owd.status === 200 && d1(state, `SELECT status FROM proposals WHERE id = '${ow.data.proposal.id}'`)[0].status === "withdrawn" && d1(state, "SELECT COUNT(*) AS n FROM tickets WHERE state = 'Proposed' AND proposal_id IS NULL")[0].n === 0);
   console.log("the midnight lock (rule 107.1)");
   dev("clock", plus(day(game().day).ends_at, 1));
   const lk = [await Ana.post(T, {}), await Cy.post(`${T}/W3/edit`, { title: "x" }), await Ana.post(`${T}/W3/confirm`, {})];

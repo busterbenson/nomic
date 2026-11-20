@@ -17,6 +17,7 @@ export function ticketNumber(v) {
   return m ? Number(m[1]) : null;
 }
 
+/** @rule 801.2 */
 const clean = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 const RULE_NUM = /^\d{3}(?:\.\d{1,3})?$/;
 
@@ -143,7 +144,7 @@ export function countTicketStatements(db, game, q, result, day, now) {
   return [
     db.prepare(
       `UPDATE tickets SET state = 'Approved', approved_at = ?, decided_at = ?, updated_at = ?,
-         paid = MIN(price, COALESCE((SELECT score FROM players WHERE game_id = tickets.game_id AND id = tickets.player_id), 0)),
+         paid = MAX(0, MIN(price, COALESCE((SELECT score FROM players WHERE game_id = tickets.game_id AND id = tickets.player_id), 0))),
          queue_pos = (SELECT COALESCE(MAX(x.queue_pos), 0) + 1 FROM tickets x WHERE x.game_id = tickets.game_id)
        WHERE proposal_id = ? AND state IN ('Draft', 'Proposed') AND EXISTS (SELECT 1 FROM proposals WHERE id = ? AND status = 'approved')`,
     ).bind(now, now, now, q.id, q.id),
@@ -155,14 +156,15 @@ export function countTicketStatements(db, game, q, result, day, now) {
     db.prepare(`UPDATE tickets SET paid_at = ? WHERE proposal_id = ? AND state = 'Approved' AND paid_at IS NULL`).bind(now, q.id),
     db.prepare(
       `INSERT OR IGNORE INTO ticket_log (ticket_id, day, kind, text, at)
-       SELECT t.id, ?, 'approved', 'Approved: P' || CAST(? AS INTEGER) || ' passed. ' || CASE WHEN t.paid > 0 THEN 'Paid ' || t.paid || CASE WHEN t.paid = 1 THEN ' point' ELSE ' points' END || '. ' ELSE '' END || 'Place ' || t.queue_pos || ' in the queue.', ?
+       SELECT t.id, ?, 'approved', 'Approved: P' || CAST(? AS INTEGER) || ' passed. ' || CASE WHEN t.paid < t.price THEN 'Paid ' || t.paid || ' of ' || t.price || CASE WHEN t.price = 1 THEN ' point' ELSE ' points' END || '. ' WHEN t.paid > 0 THEN 'Paid ' || t.paid || CASE WHEN t.paid = 1 THEN ' point' ELSE ' points' END || '. ' ELSE '' END || 'Place ' || t.queue_pos || ' in the queue.', ?
        FROM tickets t WHERE ${mine} AND t.state = 'Approved' AND t.paid_at = ?`,
     ).bind(day, q.number, now, q.id, now),
     db.prepare(
       `INSERT INTO events (game_id, kind, text, created_at, day, phase, player_id)
        SELECT t.game_id, 'commission_approved', 'W' || t.number || ' was approved.' || CASE WHEN t.paid > 0 THEN ' ' || p.display_name || ' paid ' || t.paid || CASE WHEN t.paid = 1 THEN ' point.' ELSE ' points.' END ELSE '' END, ?, ?, 'night', t.player_id
        FROM tickets t JOIN players p ON p.game_id = t.game_id AND p.id = t.player_id
-       WHERE ${mine} AND t.state = 'Approved' AND t.paid_at = ? AND EXISTS (SELECT 1 FROM ticket_log l WHERE l.ticket_id = t.id AND l.kind = 'approved' AND l.at = ?)`,
+       WHERE ${mine} AND t.state = 'Approved' AND t.paid_at = ? AND EXISTS (SELECT 1 FROM ticket_log l WHERE l.ticket_id = t.id AND l.kind = 'approved' AND l.at = ?)
+         AND NOT EXISTS (SELECT 1 FROM events e WHERE e.game_id = t.game_id AND e.kind = 'commission_approved' AND e.text LIKE 'W' || t.number || ' was approved.%')`,
     ).bind(now, day, q.id, now, now),
   ];
 }

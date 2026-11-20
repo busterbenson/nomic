@@ -13,6 +13,10 @@
 -- new children first, drop the old children, drop the old parent, rename the new parent into place, rename the children).
 -- Every column, CHECK, index and row is carried over unchanged; only the two lists grow.
 --
+-- Numbered 0010 because the proposals-per-day change is 0009 (it replaces the unique one-a-day index with a plain index). A rebuild
+-- recreates the indexes as they stand, so this file must be written against whichever of the two lands first: if that change is
+-- in, `proposals_one_a_day` below becomes `proposals_day_count` (non-unique, as its 0009 makes it).
+--
 -- What it does to existing rows: nothing. Every proposal, vote and vote event is copied as it is (same ids, numbers,
 -- statuses), and the five new tables start empty.
 

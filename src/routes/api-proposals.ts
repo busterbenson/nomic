@@ -198,6 +198,8 @@ export async function withdraw(ctx: Ctx, player: any, id: string, nowMs: number)
   if (!row || row.status === "draft") return out({ error: "There is no such proposal of yours." }, 404);
   if (row.status !== "confirmed" || row.day_proposed !== game.day) return out({ error: `P${row.number} is ${row.status === "withdrawn" ? "already withdrawn" : "on the ballot now"}, so it can't be withdrawn.` }, 409);
   const now = nowIso(nowMs);
+  // A withdrawn commission sends its ticket back to a draft in the same batch (rule 801.1): it is not a proposal any more.
+  const gone = "EXISTS (SELECT 1 FROM proposals WHERE id = ? AND status = 'withdrawn' AND withdrawn_at = ?)";
   const res = await env.DB.batch([
     env.DB.prepare(
       WITHDRAW_SQL,
@@ -206,15 +208,10 @@ export async function withdraw(ctx: Ctx, player: any, id: string, nowMs: number)
       `INSERT INTO events (game_id, kind, text, created_at, day, phase, player_id)
        SELECT ?, 'proposal_withdrawn', ?, ?, ?, 'day', ? WHERE EXISTS (SELECT 1 FROM proposals WHERE id = ? AND status = 'withdrawn' AND withdrawn_at = ?)`,
     ).bind(game.id, `${who(player.display_name, player.color)} withdrew their proposal.`, now, game.day, player.id, id, now),
+    env.DB.prepare(`INSERT INTO ticket_log (ticket_id, day, kind, text, at) SELECT id, ?, 'withdrawn', ?, ? FROM tickets WHERE proposal_id = ? AND state IN ('Proposed', 'Draft') AND ${gone}`).bind(game.day, `Withdrawn from the ballot (P${row.number}). Back to a draft.`, now, id, id, now),
+    env.DB.prepare(`UPDATE tickets SET state = 'Draft', proposal_id = NULL, proposed_at = NULL, updated_at = ? WHERE proposal_id = ? AND state IN ('Proposed', 'Draft') AND ${gone}`).bind(now, id, id, now),
   ]);
   if (!(res[0]?.meta?.changes > 0)) return out({ error: "The day changed under you. Reload and try again." }, 409);
-  // A withdrawn commission sends its ticket back to a draft (rule 801.1): it is not a proposal any more.
-  if (row.kind === "commission") {
-    await env.DB.batch([
-      env.DB.prepare("INSERT INTO ticket_log (ticket_id, day, kind, text, at) SELECT id, ?, 'withdrawn', ?, ? FROM tickets WHERE proposal_id = ? AND state = 'Proposed'").bind(game.day, `Withdrawn from the ballot (P${row.number}). Back to a draft.`, now, id),
-      env.DB.prepare("UPDATE tickets SET state = 'Draft', proposal_id = NULL, proposed_at = NULL, updated_at = ? WHERE proposal_id = ? AND state = 'Proposed'").bind(now, id),
-    ]);
-  }
   return out({ ok: true, withdrawn: `P${row.number}` });
 }
 
