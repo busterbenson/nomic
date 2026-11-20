@@ -1,7 +1,7 @@
 // Reading and charting a game's board. A tile is CHARTED (it has a row) or it is not; a charted tile has
 // no properties. Charting happens in ONE place, chartTile, so a later rule that gives new tiles some
 // content has one function to change. Charting a charted tile does nothing.
-import { chartOffsets, chartedAround, islandCoords } from "./geometry.js";
+import { islandCoords } from "./geometry.js";
 import { getSettings } from "./settings.js";
 import { Env, nowIso } from "./util";
 
@@ -19,12 +19,6 @@ export async function chartAll(env: Env, gameId: string, coords: number[][], z =
   }
 }
 
-// Every tile a piece standing at (x, y, z) charts, under the game's chart radius.
-export function chartAroundStatements(env: Env, game: { id: string; settings: string }, x: number, y: number, z: number, now = nowIso()) {
-  const radius = getSettings(game.settings)["board.chart_radius"];
-  return chartedAround(x, y, radius).map(([tx, ty]) => chartTile(env, game.id, tx, ty, z, now));
-}
-
 // A game's starting island is charted the first time anything needs the board (a join, a read), from
 // the game's settings. Insert-if-absent, so two requests doing it at once cannot clash.
 export async function ensureTiles(env: Env, game: { id: string; settings: string }): Promise<void> {
@@ -32,18 +26,6 @@ export async function ensureTiles(env: Env, game: { id: string; settings: string
   const row: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM tiles WHERE game_id = ?").bind(game.id).first();
   if (row?.n >= width * height) return; // a game that has moved only ever has more; fewer means an island cut short, so finish it
   await chartAll(env, game.id, islandCoords(width, height));
-}
-
-// Where a new piece may start: a charted ground tile, unoccupied (unless pieces may share), whose WHOLE chart
-// shape (chartOffsets, the 21 tiles of a 5x5 square without corners) is already charted. Spawning charts
-// nothing. `alias` is the tile's alias in the query; the binds, in order, are spawnBinds().
-export const spawnWhere = (alias: string) =>
-  `AND (? = 1 OR NOT EXISTS (SELECT 1 FROM players o WHERE o.game_id = ${alias}.game_id AND o.x = ${alias}.x AND o.y = ${alias}.y AND o.z = ${alias}.z))
-   AND (SELECT COUNT(*) FROM tiles c WHERE c.game_id = ${alias}.game_id AND c.z = ${alias}.z
-        AND (c.x - ${alias}.x) * (c.x - ${alias}.x) + (c.y - ${alias}.y) * (c.y - ${alias}.y) <= ?) = ?`;
-export function spawnBinds(game: { settings: string }, shared: boolean) {
-  const r = getSettings(game.settings)["board.chart_radius"];
-  return [shared ? 1 : 0, (r + 0.5) ** 2, chartOffsets(r).length];
 }
 
 export type TileRow = { x: number; y: number; z: number };

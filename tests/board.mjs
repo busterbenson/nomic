@@ -605,6 +605,35 @@ try {
     check("a link carrying a shape that is not one of the nine seats a pawn, and one carrying a real shape keeps it", l2 === "/legacy/?notice=joined" && rows[1].shape === "pawn" && l3 === "/legacy/?notice=joined" && rows[2].shape === "wizard", J(rows));
   }
 
+  console.log("a game with a bundle runs on its own rules");
+  {
+    const bg = await createGame(state, { slug: "bundled", name: "Bundled", max: 2, ...R });
+    const bea = await join(A, "bundled", bg.code, { email: "bea@example.com", name: "Bea", color: "teal" });
+    const bob = await join(A, "bundled", bg.code, { email: "bob@example.com", name: "Bob", color: "cobalt" });
+    const rules = await client(A).get("/bundled/api/rules");
+    check("/api/rules answers from the bundle (the fixture's text), not from the repo the game row names", rules.status === 200 && /rules of the bundled fixture game/.test(rules.text) && /markdown/.test(rules.headers.get("content-type")) && rules.headers.get("cache-control") === "public, max-age=60", rules.text.slice(0, 80));
+    check("a game with no bundle still reads its rules from its repo, as before", (await client(A).get("/hex/api/rules")).text === "# Rules\n");
+    check("the fixture's own spawn rule (505: the last open tile) placed the pieces on (1,1) and then (1,0), not on random tiles", J(playersOf("bundled").map((p) => [p.x, p.y])) === "[[1,1],[1,0]]", J(playersOf("bundled")));
+    d1(state, `UPDATE games SET status = 'playing', round = 1, turn = 0, last_move = '' WHERE slug = 'bundled'`);
+    const mv = await bea.post("/bundled/api/action", { kind: "move", x: 0, y: 0 });
+    check("the fixture's own rule 202 refuses the move (409), with its own words: the game's module, not the starter pack's, decides", mv.status === 409 && mv.data.error === "Moves are closed in the fixture game.", mv.text);
+    check("the engine's own gate still comes first: out of turn is 403 whatever the rule says", (await bob.post("/bundled/api/action", { kind: "move", x: 0, y: 0 })).status === 403);
+    const turn = await bea.post("/bundled/api/turn", { prompt: "Make the fixture friendlier." });
+    check("a proposal is not a move: the fixture's 202 lets it through", turn.status === 200 && turn.data.ok === true, turn.text);
+    check("nothing moved", J(playersOf("bundled").map((p) => [p.x, p.y])) === "[[1,1],[1,0]]");
+  }
+
+  console.log("a rule that throws is a clean 500, not a crash");
+  {
+    const tg = await createGame(state, { slug: "throwing", name: "Throwing", max: 2, ...R });
+    const tia = await join(A, "throwing", tg.code, { email: "tia@example.com", name: "Tia", color: "teal" });
+    d1(state, `UPDATE games SET status = 'playing', round = 1, turn = 0, last_move = '' WHERE slug = 'throwing'`);
+    const tp = await tia.post("/throwing/api/turn", { prompt: "Anything." });
+    check("a proposal whose rule 202 throws answers 500 with a plain message (not a stack trace), and records no turn", tp.status === 500 && tp.data.error === "A rule could not be checked. Try again later." && !/boom|Error|at /.test(tp.text) && d1(state, `SELECT COUNT(*) AS n FROM turns WHERE game_id = '${gidOf("throwing")}'`)[0].n === 0, tp.text);
+    const tm = await tia.post("/throwing/api/action", { kind: "move", x: 0, y: 1 });
+    check("a move in the same game is not touched by that rule: it is judged by the game's other rules (an uncharted-free island tile, 200)", tm.status === 200, tm.text);
+  }
+
   console.log("static files");
   const js = await client(A).get("/js/board.js");
   check("the board's script is served as JavaScript", js.status === 200 && /javascript/.test(js.headers.get("content-type")), js.status + " " + js.headers.get("content-type"));

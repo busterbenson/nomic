@@ -11,7 +11,10 @@ import { fileURLToPath } from "node:url";
 
 export const ROOT = pjoin(dirname(fileURLToPath(import.meta.url)), "..");
 const WRANGLER = pjoin(ROOT, "node_modules", ".bin", "wrangler");
-const env = { ...process.env, WRANGLER_SEND_METRICS: "false", NO_COLOR: "1", CI: "1" };
+// GAMES_SOURCE: wrangler's [build] step (scripts/bundle-games.mjs) reads the fixture games in tests/fixtures/games
+// instead of fetching real ones from GitHub, so tests never reach the network. BUNDLE_SKIP_TESTS: the bundle's own
+// tests run once, in tests/engine.mjs, not on every `wrangler dev` start.
+const env = { ...process.env, WRANGLER_SEND_METRICS: "false", NO_COLOR: "1", CI: "1", GAMES_SOURCE: "tests/fixtures/games", BUNDLE_SKIP_TESTS: "1" };
 
 export function newState() {
   return mkdtempSync(pjoin(tmpdir(), "promptocracy-test-"));

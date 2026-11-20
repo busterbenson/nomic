@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "wrangler dev --port 8788 --var MAIL_FROM: --var SITE_URL:",
     "migrate:local": "wrangler d1 migrations apply DB --local",
-    "test": "node tests/design.mjs && node tests/e2e.mjs && node tests/board.mjs",
+    "test": "node scripts/check-rule-claims.mjs && node tests/design.mjs && node tests/engine.mjs && node tests/e2e.mjs && node tests/board.mjs",
     "deploy:dry-run": "wrangler deploy --dry-run"
   },
   "devDependencies": {
@@ -16,5 +16,16 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
     "zod": "^4.6.7"
+  },
+  "exports": {
+    "./engine": {
+      "types": "./src/engine/api.d.ts",
+      "default": "./src/engine/api.js"
+    },
+    "./engine/testing": "./src/engine/testing.js",
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": ">=22.13"
   }
 }
