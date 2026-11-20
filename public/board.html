@@ -271,7 +271,7 @@
     const off = active && c.allowed ? "" : ` disabled title="${esc(why)}"`;
     return `<section class="sw pro" id="spropose" aria-label="Propose a change"><div class="swh"><h2>Propose a change</h2><span class="m">0 of 1 today</span>${win}</div>
       <div class="ptiles"><button type="button" class="ptile" data-tab="rules"${off}><span class="pt2">Rulebook</span><span class="pm2">${BOOK && BOOK.count() ? plural(BOOK.count(), "rule") : ""}</span><span class="pa2">+ Change or add a rule</span></button>
-      <button type="button" class="ptile" data-tab="catalog" disabled><span class="pt2">Catalog</span><span class="pm2">0 entries</span><span class="pa2">+ Propose a thing</span></button></div><p class="mnote">${active && !c.allowed ? esc(c.reason) : "Catalog proposals are not open yet."}</p></section>`;
+      <button type="button" class="ptile" data-tab="catalog" disabled><span class="pt2">Catalog</span><span class="pm2">0 entries</span><span class="pa2">+ Propose a thing</span></button></div>${active && !c.allowed ? `<p class="mnote">${esc(c.reason)}</p>` : ""}</section>`;
   }
   function summaryHTML() {
     const bl = ballotList();

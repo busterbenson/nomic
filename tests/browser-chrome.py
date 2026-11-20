@@ -230,6 +230,7 @@ with sync_playwright() as pw:
     check("Today's ballot lists P1 and P2 with the proposer's pill, what it needs, and the tracked change", "P1" in ball and "P2" in ball and "Bo" in ball and "Cy" in ball and "needs 2 of 3 votes" in ball and page.locator("#sballot ins").count() >= 2, ball)
     check("ballot-vote slots are in place under each proposal and empty (votes are PR 4)", page.locator('#sballot [data-slot="ballot-vote"]').count() == 2 and all(page.locator('#sballot [data-slot="ballot-vote"]').nth(i).inner_text() == "" for i in range(2)))
     pr = text(page, "#spropose")
+    check("the Propose card says nothing extra: no caption under the tiles while proposing is open (AGENTS.md rule 4); the Catalog tile is a disabled button", page.locator("#spropose .mnote").count() == 0 and page.locator("#spropose .ptile:disabled").count() == 1)
     check("S1-SUM-08: the Propose card: 'Propose a change', '0 of 1 today', '+10 if it passes', Rulebook (count, + Change or add a rule), Catalog (count, + Propose a thing)", "Propose a change" in pr and "0 of 1 today" in pr and "+10 if it passes" in pr and re.search(r"Rulebook\s*\d+ rules\s*\+ Change or add a rule", pr) and re.search(r"Catalog\s*0 entries\s*\+ Propose a thing", pr), pr)
     page.click('#sday [data-jump="ballot"]'); page.wait_for_timeout(700)
     check("S1-SUM-04: Vote jumps to the first ballot item", page.evaluate("(() => { const r = document.querySelector('#sballot li').getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight; })()"))
