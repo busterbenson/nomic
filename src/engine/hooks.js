@@ -22,8 +22,8 @@ import { validCoord } from "../lib/geometry.js";
 //             error when the rules are assembled, so a proposal that removes or doubles it fails its tests). A
 //             precedence rule between competing handlers (the lowest rule number wins for now) is NOT built: it waits for
 //             Buster's approval, and until then two handlers fail the assembly rather than silently picking one.
-// wired: the engine calls it today. A hook that is not wired is accepted in a module (so its type is settled
-//        and a later change fills it in), is never called, and its "exactly one" rule is not enforced yet.
+// wired: the engine calls it today. A module that implements a hook that is not wired is refused (it would bundle
+//        and never run); the name is reserved so a later change can wire it. Its "exactly one" rule waits too.
 export const HOOKS = Object.freeze({
   actionAllowed: { mode: "veto", wired: true },
   afterAction: { mode: "sequence", wired: true },
@@ -207,6 +207,9 @@ function moduleProblems(mod) {
     if (k === "rule") continue;
     if (!Object.hasOwn(HOOKS, k)) out.push(`${label}: unknown hook ${k}`);
     else if (typeof mod[k] !== "function") out.push(`${label}: ${k} must be a function`);
+    // A handler for a hook the engine doesn't call yet would bundle and silently never run, so a game could
+    // believe its rule is in force when it isn't. Refuse it until the engine wires that hook.
+    else if (!HOOKS[k].wired) out.push(`${label}: ${k} is not run by the engine yet, so this handler would never run`);
   }
   return out;
 }
