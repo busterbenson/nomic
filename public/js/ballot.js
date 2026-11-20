@@ -47,6 +47,8 @@ export function createBallot({ api, pill, refreshed, player = () => true }) {
 <p class="vturn mono">${t.voted} of ${t.of} voted${who ? `: ${who}` : ""}</p>${can ? "" : `<p class="vwhy">${esc((it.can_vote && it.can_vote.reason) || "")}</p>`}${m}</div>`;
   }
 
+  // Put the last answer into the boxes already on the page (no redraw, no network).
+  const paint = () => { if (MSG && typeof document !== "undefined") for (const m of document.querySelectorAll(`[data-vbox="${MSG.n}"] .vmsg`)) { m.textContent = MSG.text; m.className = "vmsg" + (MSG.err ? " err" : ""); } };
   /** @rule 104.3 */
   async function click(el) {
     const n = el.dataset.pn, vote = el.dataset.vote;
@@ -55,7 +57,9 @@ export function createBallot({ api, pill, refreshed, player = () => true }) {
     let r;
     try { r = await api("/api/votes", { proposal: n, vote }); } catch (e) { r = { ok: false, data: { error: "Couldn't reach the game. Check your connection and try again." } }; } finally { BUSY = false; }
     MSG = { n, text: (r.data && (r.ok ? r.data.message : r.data.error)) || (r.ok ? `${n}: you voted ${LABEL[vote]}.` : "Something went wrong."), err: !r.ok };
+    paint();   // the message shows at once, whether or not the reload that follows works
     try { await refreshed(); } catch (e) { /* the vote itself is in; the next reload shows it */ }
+    paint();   // ...and again once the boxes were drawn afresh
     // The toast fades (the vote stays). The message nodes are emptied in place: no redraw, so a card or a form being typed in is left alone.
     TIMER = setTimeout(() => { MSG = null; if (typeof document !== "undefined") for (const m of document.querySelectorAll(".vmsg")) { m.textContent = ""; m.className = "vmsg"; } }, 9000);
   }
