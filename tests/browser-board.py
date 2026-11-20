@@ -11,7 +11,11 @@ with sync_playwright() as p:
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.goto(f"{base}/{slug}/")
-    page.wait_for_function("document.getElementById('dock').textContent.trim().length > 0")
+    # the game has loaded once its name is drawn (the dock under the board can be empty: proposing is in the rulebook)
+    try:
+        page.wait_for_function("t => document.getElementById('title').textContent === t", arg=title, timeout=15000)
+    except Exception:
+        pass
     page.wait_for_function("document.getElementById('rules').textContent.indexOf('Loading') < 0")
     got_title = page.inner_text("#title")
     rules_text = page.inner_text("#rules")
