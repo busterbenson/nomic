@@ -10,10 +10,11 @@ node tests/drafter-live.mjs --failed-from results.json --runs 3
 node tests/drafter-live.mjs --list                # what each case expects; which ones call the model
 node tests/drafter-live.mjs --dry-run             # only the cases that need no model (no key needed)
   --rules RULES.md   override the case file's rules   --out results.json   --concurrency 4
+  --flags none|a,b   which drafter levers to use: candidates, cache, structured (see `DRAFTER_FLAGS` in src/lib/drafter.ts); omitted = the drafter's default
   --max-calls 300 --ledger file   hard cap on model calls, counted in code across runs in the ledger file (default `.drafter-live-ledger.json` in the checkout, gitignored)
 ```
 
-The key is `PROMPTOCRACY_MODEL_API_KEY`, from the environment or `~/chalantbot/.env`. It goes to the drafter as `MODEL_API_KEY` (`MODEL_BASE_URL` unset = the real API) and is never printed or written to a result. Cost is reported at $0.10 / M input and $0.50 / M output tokens.
+The key is `PROMPTOCRACY_MODEL_API_KEY`, from the environment or `~/chalantbot/.env`. It goes to the drafter as `MODEL_API_KEY` (`MODEL_BASE_URL` unset = the real API) and is never printed or written to a result. Cost is reported at $0.10 / M input and $0.50 / M output tokens, with prompt-cache reads at 0.1x and cache writes at 1.25x the input price. The summary also gives cost per draft (per model call) and the p50 and p95 latency of a call; the results file has them too. The token cap in `limits` counts the whole prompt (uncached + cache reads + cache writes), so caching doesn't loosen it.
 
 ## The case file
 

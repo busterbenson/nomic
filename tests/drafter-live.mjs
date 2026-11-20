@@ -2,7 +2,7 @@
 // `npm test` or the build: it needs the model key and it costs money. Run it by hand:
 //
 //   node tests/drafter-live.mjs [cases.json ...] [--only id,id] [--failed-from results.json] [--runs N]
-//        [--rules RULES.md] [--max-calls 300] [--ledger file] [--out results.json] [--concurrency 4] [--dry-run] [--list]
+//        [--rules RULES.md] [--flags none|a,b] [--max-calls 300] [--ledger file] [--out results.json] [--concurrency 4] [--dry-run] [--list]
 //
 // It runs the REAL drafter (the same Messages API call the Worker makes) and the same checks the draft route runs
 // (readRequest, draftRewording, draftOf, fixedRefusal) over a real game's RULES.md, then grades each answer IN CODE, never
@@ -20,12 +20,13 @@ import { clauseText, draftOf, fixedParts, fixedRefusal, needsModel, parseBook, r
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PRICE_IN = 0.10 / 1e6, PRICE_OUT = 0.50 / 1e6;   // dollars per token (Haiku 5.5)
+const PRICE_CACHE_READ = PRICE_IN * 0.1, PRICE_CACHE_WRITE = PRICE_IN * 1.25;   // 0.1x to read, 1.25x to write a 5-minute entry
 
 // ---------------------------------------------------------------- arguments
 const argv = process.argv.slice(2);
 const flag = (name, dflt = null) => { const i = argv.indexOf(`--${name}`); return i < 0 ? dflt : argv[i + 1]; };
 const has = (name) => argv.includes(`--${name}`);
-const VALUE_FLAGS = ["only", "failed-from", "runs", "rules", "max-calls", "ledger", "out", "concurrency"];
+const VALUE_FLAGS = ["only", "failed-from", "runs", "rules", "max-calls", "ledger", "out", "concurrency", "flags"];
 const caseFiles = argv.filter((a, i) => !a.startsWith("--") && !VALUE_FLAGS.includes((argv[i - 1] || "").replace(/^--/, "")));
 if (!caseFiles.length) caseFiles.push(join(HERE, "drafter-cases.json"));
 const MAX_CALLS = Number(flag("max-calls", 300));
@@ -47,6 +48,7 @@ if (!KEY && !has("dry-run") && !has("list")) { console.error("No PROMPTOCRACY_MO
 
 // ---------------------------------------------------------------- the call counter: a wrapper on fetch
 const ledger = existsSync(LEDGER) ? JSON.parse(readFileSync(LEDGER, "utf8")) : { calls: 0, input_tokens: 0, output_tokens: 0 };
+for (const k of ["cache_read_tokens", "cache_write_tokens"]) ledger[k] ||= 0;   // older ledgers lack them
 const saveLedger = () => writeFileSync(LEDGER, JSON.stringify(ledger, null, 2));
 const als = new AsyncLocalStorage();
 class CapReached extends Error {}
@@ -58,16 +60,22 @@ globalThis.fetch = async (url, init) => {
   ledger.calls++;
   saveLedger();
   const slot = als.getStore();
+  const t0 = performance.now();
   const res = await realFetch(url, init);
   let body = null;
   try { body = await res.clone().json(); } catch { /* not JSON */ }
+  const ms = Math.round(performance.now() - t0);
   const u = body?.usage || {};
+  const cr = u.cache_read_input_tokens || 0, cw = u.cache_creation_input_tokens || 0;
   ledger.input_tokens += u.input_tokens || 0; ledger.output_tokens += u.output_tokens || 0;
+  ledger.cache_read_tokens += cr; ledger.cache_write_tokens += cw;
   saveLedger();
   if (slot) {
     slot.calls++;
     slot.status = res.status;
-    slot.usage = { input: u.input_tokens || 0, output: u.output_tokens || 0 };
+    slot.ms = ms;
+    // `input` is the whole prompt (uncached + cache reads + cache writes), so the token cap means the same with or without caching.
+    slot.usage = { input: (u.input_tokens || 0) + cr + cw, output: u.output_tokens || 0, uncached: u.input_tokens || 0, cache_read: cr, cache_write: cw };
     slot.stop_reason = body?.stop_reason || null;
     slot.raw = Array.isArray(body?.content) ? body.content.filter((b) => b?.type === "text").map((b) => b.text).join("") : (body?.error?.type || "");
   }
@@ -281,7 +289,8 @@ if (has("dry-run")) selected = selected.filter((c) => !needsApi(c));
 
 const drafter = await loadDrafter();
 const env = KEY ? { MODEL_API_KEY: KEY } : {};
-const startCalls = ledger.calls, startIn = ledger.input_tokens, startOut = ledger.output_tokens;
+if (flag("flags")) env.DRAFTER_FLAGS = flag("flags");   // which levers the drafter uses (see src/lib/drafter.ts); omitted = the drafter's own default
+const startCalls = ledger.calls, startIn = ledger.input_tokens, startOut = ledger.output_tokens, startCR = ledger.cache_read_tokens, startCW = ledger.cache_write_tokens;
 const results = new Map(selected.map((c) => [c.id, { id: c.id, group: c.group, want: wantOf(c), runs: [] }]));
 
 const jobs = selected.flatMap((c) => Array.from({ length: RUNS }, () => c));
@@ -297,7 +306,7 @@ async function worker() {
     const g = r.outcome === "skipped" ? { pass: false, failures: ["not run: API call cap reached"] } : grade(book, c, r, slot);
     results.get(c.id).runs.push({
       got: gotOf(r), pass: g.pass, failures: g.failures, message: r.message || null, conflicts: r.conflicts || null, settings: r.settings || null,
-      after_text: r.after_text ?? null, model_said: slot.raw ? String(slot.raw).slice(0, 2500) : null, calls: slot.calls, usage: slot.usage, stop_reason: slot.stop_reason,
+      after_text: r.after_text ?? null, model_said: slot.raw ? String(slot.raw).slice(0, 2500) : null, calls: slot.calls, usage: slot.usage, ms: slot.ms ?? null, stop_reason: slot.stop_reason,
     });
   }
 }
@@ -317,10 +326,14 @@ for (const x of rows) {
   if (!ok) for (const f of [...new Set(x.runs.flatMap((r) => r.failures))]) console.log(`        - ${f}`);
 }
 const passed = rows.filter((x) => x.pass_runs === x.runs.length).length;
-const dIn = ledger.input_tokens - startIn, dOut = ledger.output_tokens - startOut;
-const cost = dIn * PRICE_IN + dOut * PRICE_OUT;
-console.log(`\n${passed}/${rows.length} cases pass. This run: ${ledger.calls - startCalls} API calls, ${dIn} input + ${dOut} output tokens = $${cost.toFixed(4)}. Ledger: ${ledger.calls}/${MAX_CALLS} calls, $${(ledger.input_tokens * PRICE_IN + ledger.output_tokens * PRICE_OUT).toFixed(4)} in all.`);
+const dIn = ledger.input_tokens - startIn, dOut = ledger.output_tokens - startOut, dCR = ledger.cache_read_tokens - startCR, dCW = ledger.cache_write_tokens - startCW;
+const costOf = (i, o, cr, cw) => i * PRICE_IN + o * PRICE_OUT + cr * PRICE_CACHE_READ + cw * PRICE_CACHE_WRITE;
+const cost = costOf(dIn, dOut, dCR, dCW);
+const nCalls = ledger.calls - startCalls;
+const lat = rows.flatMap((x) => x.runs.map((r) => r.ms)).filter((m) => m != null).sort((a, b) => a - b);
+const p50 = lat.length ? lat[Math.floor((lat.length - 1) / 2)] : null, p95 = lat.length ? lat[Math.min(lat.length - 1, Math.ceil(lat.length * 0.95) - 1)] : null;
+console.log(`\n${passed}/${rows.length} cases pass. This run: ${nCalls} API calls, ${dIn} uncached input + ${dCR} cache-read + ${dCW} cache-write + ${dOut} output tokens = $${cost.toFixed(4)}${nCalls ? ` ($${(cost / nCalls).toFixed(5)} per draft)` : ""}${p50 !== null ? `; latency p50 ${p50} ms, p95 ${p95} ms` : ""}. Ledger: ${ledger.calls}/${MAX_CALLS} calls, $${costOf(ledger.input_tokens, ledger.output_tokens, ledger.cache_read_tokens, ledger.cache_write_tokens).toFixed(4)} in all.`);
 if (capHit) console.log(`STOPPED at the API call cap (${MAX_CALLS}).`);
-writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), rules: rulesPath, runs: RUNS, calls: ledger.calls - startCalls, input_tokens: dIn, output_tokens: dOut, cost_usd: Number(cost.toFixed(6)), cases: rows }, null, 2));
+writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), flags: flag("flags") || null, rules: rulesPath, runs: RUNS, calls: nCalls, input_tokens: dIn, cache_read_tokens: dCR, cache_write_tokens: dCW, output_tokens: dOut, cost_usd: Number(cost.toFixed(6)), cost_per_draft_usd: nCalls ? Number((cost / nCalls).toFixed(6)) : null, latency_p50_ms: p50, latency_p95_ms: p95, cases: rows }, null, 2));
 console.log(`results: ${OUT}`);
 process.exit(passed === rows.length ? 0 : 1);

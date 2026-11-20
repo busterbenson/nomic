@@ -17,6 +17,8 @@ export type Env = {
   MODEL_API_KEY?: string;
   MODEL_BASE_URL?: string;
   MODEL_NAME?: string;
+  // Which drafter levers are on (src/lib/drafter.ts): "candidates,cache,structured", "none", or "-cache" to drop one from the default.
+  DRAFTER_FLAGS?: string;
 };
 export type Ctx = {
   request: Request;
