@@ -8,6 +8,8 @@
 //       browser form post (not JSON), it is guarded by an Origin check: the Origin
 //       header must match SITE_URL (or the request's own origin when SITE_URL is unset).
 import { createSession } from "../lib/auth";
+import { clockNow } from "../lib/day";
+import { joinLock, joinOpenSql } from "../lib/invite";
 import { RuleError, chooseSpawn } from "../engine/host";
 import { ensureTiles } from "../lib/board";
 import { notify } from "../lib/notify";
@@ -42,6 +44,7 @@ export const get = async ({ env, request, data }: Ctx) => {
   );
 };
 
+/** @rule 102.3, 102.4, 505 */
 export const post = async (ctx: Ctx) => {
   const { env, request } = ctx;
   const game = ctx.data.game!;
@@ -94,10 +97,17 @@ export const post = async (ctx: Ctx) => {
   const existing: any = await env.DB.prepare("SELECT id FROM players WHERE game_id = ? AND email = ?").bind(game.id, t.email).first();
   if (existing) return back(game.slug, "welcome-back", await createSession(env, game, existing.id));
 
+  // Joining a game in play waits out the midnight lock like every other write (rule 107.1). The link is not spent: it works
+  // again once the night is processed, if it has not expired.
+  const nowMs = await clockNow(env);
+  if (await joinLock(env, game, nowMs)) {
+    await env.DB.prepare("UPDATE login_tokens SET used_at = NULL WHERE token_hash = ?").bind(hash).run();
+    return back(game.slug, "join-locked");
+  }
   // The board has to exist before anyone can be placed on it.
   await ensureTiles(env, game);
   // The game's spawn rule (505 in the starter rules) picks the tile; one statement then checks "setup", "not full",
-  // picks the next turn_order AND still finds the tile charted and as occupied as the rule saw it. Two people
+  // picks the next turn_order (a game in setup or in play can take a player, rule 102.3) AND still finds the tile charted and as occupied as the rule saw it. Two people
   // verifying at once cannot take the same seat or overfill the game. If both were given the same tile, the loser's
   // insert is refused and the rule is asked again (up to 3 times). Spawning charts nothing.
   const playerId = crypto.randomUUID();
@@ -113,15 +123,15 @@ export const post = async (ctx: Ctx) => {
                 (SELECT COUNT(*) FROM players WHERE game_id = g.id),
                 (SELECT COUNT(*) = 0 FROM players WHERE game_id = g.id), ?, ?, ?, ?
          FROM games g
-         WHERE g.id = ? AND g.status = 'setup' AND (SELECT COUNT(*) FROM players WHERE game_id = g.id) < ?
+         WHERE g.id = ? AND g.status IN ('setup', 'playing') AND ${joinOpenSql} AND (SELECT COUNT(*) FROM players WHERE game_id = g.id) < ?
            AND EXISTS (SELECT 1 FROM tiles t WHERE t.game_id = g.id AND t.x = ? AND t.y = ? AND t.z = ?)
            AND (SELECT COUNT(*) FROM players o WHERE o.game_id = g.id AND o.x = ? AND o.y = ? AND o.z = ?) = ?`,
-      ).bind(playerId, t.email, t.display_name, color, shape, now, x, y, z, game.id, seatLimit(game), x, y, z, x, y, z, spawn.occupants).run();
+      ).bind(playerId, t.email, t.display_name, color, shape, now, x, y, z, game.id, nowIso(nowMs), seatLimit(game), x, y, z, x, y, z, spawn.occupants).run();
       joined = (r.meta?.changes ?? 0) > 0;
       if (!joined) {
         // Ask again only if the seat is still there (the game is in setup and not full): a lost race for a tile.
         const st: any = await env.DB.prepare("SELECT g.status AS status, (SELECT COUNT(*) FROM players WHERE game_id = g.id) AS n FROM games g WHERE g.id = ?").bind(game.id).first();
-        if (!st || st.status !== "setup" || st.n >= seatLimit(game)) break;
+        if (!st || st.status === "over" || st.n >= seatLimit(game)) break;
       }
     }
   } catch (e) {

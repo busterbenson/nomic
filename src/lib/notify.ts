@@ -10,6 +10,7 @@ export type NotifyOpts = {
   body: string;
   link?: string; // site-relative, e.g. "/<slug>/"
   email?: boolean; // also send an email
+  skipPlayerId?: string; // no in-game row and no email for this player (the one who did it)
   exceptPlayerId?: string; // do not EMAIL this player (they still get the in-game row)
   baseUrl?: string; // absolute site URL for links in emails
 };
@@ -20,9 +21,10 @@ export async function notify(
   game: { id: string; slug: string; name: string },
   opts: NotifyOpts,
 ): Promise<void> {
-  const players = (
+  let players = (
     await env.DB.prepare("SELECT id AS player_id, email FROM players WHERE game_id = ?").bind(game.id).all()
   ).results as { player_id: string; email: string }[];
+  players = players.filter((p) => p.player_id !== opts.skipPlayerId);
   const created = nowIso();
   const rows = players.map((p) => ({ ...p, id: crypto.randomUUID() }));
   if (!rows.length) return;

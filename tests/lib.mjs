@@ -44,6 +44,17 @@ export function migrate(state) {
 // A stub for raw.githubusercontent.com: GET /<owner>/<repo>/<ref>/<path>. Tests
 // never reach GitHub. `files` maps "/owner/repo/main/RULES.md" -> text; `calls`
 // counts hits per path; a path in `broken` answers 500.
+// A port nothing is listening on right now: bind 0, read it back, release it. Fixed ports collided with another
+// agent's wrangler dev on this machine and failed a whole run. (A port can be taken in the instant between this
+// and the bind; the harness then fails loudly, it never talks to a foreign server by mistake.)
+export async function freePort() {
+  const s = createServer();
+  await new Promise((r) => s.listen(0, "127.0.0.1", r));
+  const { port } = s.address();
+  await new Promise((r) => s.close(r));
+  return port;
+}
+
 export async function startRulesStub(port, files) {
   const calls = {}, broken = new Set();
   const server = createServer((req, res) => {

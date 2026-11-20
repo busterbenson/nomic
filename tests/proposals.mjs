@@ -8,7 +8,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join as pjoin } from "node:path";
-import { ROOT, client, createGame, d1, join, migrate, newState, startPlaying, startRulesStub, startServer } from "./lib.mjs";
+import { ROOT, client, createGame, d1, join, migrate, newState, startPlaying, freePort, startRulesStub, startServer } from "./lib.mjs";
 import { dayOpenBinds } from "../src/lib/day-gate.js";
 import {
   DRAFT_INSERT_SQL, WITHDRAW_SQL, answerSchema, citedIn, conflictCandidates, draftOf, fixedParts, fixedRefusal, markFor, modelPrompt, needsModel, parseBook, readModelAnswer, readRequest, referencesTo, settingsText, textOf,
@@ -362,19 +362,20 @@ const stubModel = createServer((req, res) => {
     res.end(n.status === 200 ? J({ content: [{ type: "text", text: n.text }] }) : '{"error":"boom"}');
   });
 });
-await new Promise((r) => stubModel.listen(8813, "127.0.0.1", r));
+const MODEL_PORT = await freePort(), SRV_PORT = await freePort(), SRV2_PORT = await freePort();
+await new Promise((r) => stubModel.listen(MODEL_PORT, "127.0.0.1", r));
 
-const SITE = "http://localhost:8797";
+const SITE = `http://localhost:${SRV_PORT}`;
 let srv = null, srv2 = null, stub = null;
 const state = newState(), state2 = newState();
 try {
   migrate(state);
-  stub = await startRulesStub(8814, { "/busterbenson/prop/main/RULES.md": "# Rules\n", "/busterbenson/nokey/main/RULES.md": "# Rules\n" });
+  stub = await startRulesStub(await freePort(), { "/busterbenson/prop/main/RULES.md": "# Rules\n", "/busterbenson/nokey/main/RULES.md": "# Rules\n" });
   const g = await createGame(state, { slug: "prop", name: "Props", max: 4, rulesBase: stub.base, repo: "busterbenson/prop" });
   d1(state, "CREATE TABLE IF NOT EXISTS dev_controls (key TEXT PRIMARY KEY, value TEXT)");
   const setClock = (iso) => d1(state, `INSERT INTO dev_controls (key, value) VALUES ('clock', '${iso}') ON CONFLICT (key) DO UPDATE SET value = excluded.value`);
   setClock("2026-03-08T19:00:00.000Z");
-  srv = await startServer(state, 8797, ["DEV_MODE=1", `SITE_URL=${SITE}`, `RULES_BASE_URL=${stub.base}`, "MODEL_API_KEY=stub-key-not-real", "MODEL_BASE_URL=http://127.0.0.1:8813"]);
+  srv = await startServer(state, SRV_PORT, ["DEV_MODE=1", `SITE_URL=${SITE}`, `RULES_BASE_URL=${stub.base}`, "MODEL_API_KEY=stub-key-not-real", `MODEL_BASE_URL=http://127.0.0.1:${MODEL_PORT}`]);
   const A = srv.base;
   const gid = d1(state, "SELECT id FROM games WHERE slug = 'prop'")[0].id;
   const ana = await join(A, "prop", g.code, { email: "ana@example.com", name: "Ana", color: "teal" });
@@ -550,7 +551,7 @@ try {
   console.log("no key: rewording is unavailable, the rest still works");
   migrate(state2);
   const g2 = await createGame(state2, { slug: "nokey", name: "No key", max: 4, rulesBase: stub.base, repo: "busterbenson/nokey" });
-  srv2 = await startServer(state2, 8798, ["DEV_MODE=1", "SITE_URL=http://localhost:8798", `RULES_BASE_URL=${stub.base}`]);
+  srv2 = await startServer(state2, SRV2_PORT, ["DEV_MODE=1", `SITE_URL=http://localhost:${SRV2_PORT}`, `RULES_BASE_URL=${stub.base}`]);
   const dee = await join(srv2.base, "nokey", g2.code, { email: "dee@example.com", name: "Dee", color: "teal" });
   startPlaying(state2, "nokey");
   const calls = model.calls.length;

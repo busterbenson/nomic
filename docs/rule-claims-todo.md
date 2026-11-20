@@ -7,15 +7,15 @@ Every function that carries out the game should say which rule it implements, wi
 `src/` is only reported for now: these functions have no claim yet. Site plumbing such as sign-in and email goes
 under rule 101 or 102; a follow-up change claims them and moves `src/` into the strict set.
 
-137 of 247 functions outside `src/engine/` are unclaimed.
+134 of 253 functions outside `src/engine/` are unclaimed.
 
 ## src/index.ts (5)
 
-- line 56: `secure`
-- line 66: `notFound`
-- line 72: `run`
-- line 77: `route`
-- line 168: `fetch`
+- line 57: `secure`
+- line 67: `notFound`
+- line 73: `run`
+- line 78: `route`
+- line 169: `fetch`
 
 ## src/lib/auth.ts (6)
 
@@ -66,13 +66,13 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/lib/mcp-tools.ts (3)
 
-- line 44: `reply`
-- line 45: `asJson`
-- line 47: `registerTools`
+- line 45: `reply`
+- line 46: `asJson`
+- line 48: `registerTools`
 
 ## src/lib/notify.ts (1)
 
-- line 17: `notify`
+- line 18: `notify`
 
 ## src/lib/oauth.ts (14)
 
@@ -159,10 +159,6 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 - line 37: `can`
 
-## src/routes/api-join.ts (1)
-
-- line 5: `post`
-
 ## src/routes/api-login.ts (1)
 
 - line 6: `post`
@@ -195,10 +191,6 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 - line 11: `text`
 - line 14: `get`
-
-## src/routes/join-page.ts (1)
-
-- line 7: `get`
 
 ## src/routes/landing.ts (2)
 
@@ -239,8 +231,7 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 - line 10: `post`
 - line 15: `f`
 
-## src/routes/verify.ts (3)
+## src/routes/verify.ts (2)
 
-- line 18: `back`
-- line 25: `get`
-- line 45: `post`
+- line 20: `back`
+- line 27: `get`
