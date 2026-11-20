@@ -292,7 +292,13 @@ must("a tag that names a rule the game's RULES.md does not have fails the build"
 must("a game whose rules/ holds a stray file (a helper, a script) fails the build", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/helper.ts", "export const x = 1;\n")) }, /rules\/ may hold only rule modules/);
 must("a TEST that imports node:fs fails the build (tests run on the build machine and may not read files or the network)", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/202.test.ts", `import { test } from "node:test";\nimport { readFileSync } from "node:fs";\ntest("x", () => { readFileSync("/etc/hosts"); });\n`)) }, /imports "node:fs"; a test may import only/);
 must("a symlink anywhere in a game fails the build (RULES.md -> a file outside the game would be published)", { GAMES_SOURCE: tree("bad", (d) => { execFileSync("mv", [pjoin(d, "RULES.md"), pjoin(work, "moved-" + seq++)]); execFileSync("ln", ["-s", "/etc/hosts", pjoin(d, "RULES.md")]); }) }, /is a symlink/);
+must("a rule test file that runs no tests fails the build (a rule ships with tests that prove it)", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/505.test.ts", `import { test } from "node:test";\n`)) }, /505\.test\.ts ran no tests/);
 must("WORKERS_CI refuses the local-run knobs (GAMES_SOURCE would swap in other code)", { WORKERS_CI: "1", GAMES_SOURCE: "tests/fixtures/games" }, /GAMES_SOURCE is set in a Workers Builds build/);
+check("a game may carry AGENTS.md and CLAUDE.md at its top level (agent docs; never bundled)", (() => {
+  const out = pjoin(work, "out-agents");
+  const err = quiet(() => bundle({ BUNDLE_OUT: out, GAMES_SOURCE: tree("agents", (d) => { put(d, "AGENTS.md", "# notes\n"); put(d, "CLAUDE.md", "@AGENTS.md\n"); }) }));
+  return err === null && !/AGENTS\.md|@AGENTS/.test(readFileSync(pjoin(out, "games.ts"), "utf8"));
+})());
 check("the game's claims also say what each rule works with: 202 shares actionAllowed with 504", (() => {
   const out = pjoin(work, "out-ww");
   quiet(() => bundle({ BUNDLE_OUT: out, GAMES_SOURCE: "tests/fixtures/games" }));

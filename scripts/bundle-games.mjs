@@ -38,7 +38,7 @@ import { checkRulebook } from "../src/engine/rulesmd.js";
 import { validateSettings } from "../src/lib/settings.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const TOP_LEVEL = new Set(["RULES.md", "game.json", "settings.json", "package.json", "package-lock.json", "README.md", "LICENSE", "LICENSE.md", ".gitignore", "rules", "rulings", "docs", ".github"]);
+const TOP_LEVEL = new Set(["RULES.md", "game.json", "settings.json", "package.json", "package-lock.json", "README.md", "AGENTS.md", "CLAUDE.md", "LICENSE", "LICENSE.md", ".gitignore", "rules", "rulings", "docs", ".github"]);
 const MAX_RULES_BYTES = 200_000;
 const MAX_FILES = 1000, MAX_BYTES = 10_000_000;
 const SLUG = /^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/;
@@ -94,10 +94,13 @@ export function stageEngine(dir) {
 export function runTestFiles(files, dir, label, opts = {}) {
   let passed = 0, out = "";
   for (const f of files) {
-    const r = runSandboxed([f], dir, label, opts);
+    // Pin the TAP reporter: Node 23+ defaults to "spec" ("ℹ pass 3"), which the count below can't read.
+    const r = runSandboxed(["--test-reporter=tap", f], dir, label, opts);
     out += `\n== ${f}\n${r.out}`;
-    passed += Number((/# pass (\d+)/.exec(r.out) ?? [])[1] ?? 0);
+    const n = Number((/^# pass (\d+)$/m.exec(r.out) ?? [])[1] ?? 0);
+    passed += n;
     if (!r.ok) return { ok: false, passed, out };
+    if (n === 0) return { ok: false, passed, out: out + `\n${f} ran no tests (a rule ships with tests that prove it)` };
   }
   return { ok: true, passed, out };
 }
