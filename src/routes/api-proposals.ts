@@ -1,0 +1,227 @@
+// Proposals (rule 103): the player writes plain words, the moderator drafts the exact change, the player confirms,
+// changes their words or cancels.
+//   POST /<slug>/api/proposals {kind, target, words?, to?, title?, prefilled?}   draft (free, repeatable; not a proposal yet)
+//   POST /<slug>/api/proposals/<id>/confirm   the day's one proposal (rule 103.2): numbered P1, P2... in confirm order,
+//                                             on the next day's ballot, its mark fixed now (rule 105.4)
+//   POST /<slug>/api/proposals/<id>/withdraw  until midnight or End turn (rule 103.3)
+//   GET  /<slug>/api/proposals[?rule=402]     the proposals anyone may see: every one that has reached a ballot, and your
+//                                             own confirmed one ("mine"). Another player's proposal is hidden until it
+//                                             is on the ballot. Votes are never in it.
+// Every write goes through the day's gate (rule 107.1 the lock, rule 202.4 End turn), in the handler and again in the
+// SQL of the write itself. Mechanical kinds are drafted by code (src/lib/proposals.js); rewording in the player's own
+// words by a small model (src/lib/drafter.ts).
+import { bundleFor } from "../engine/host";
+import { getPlayer } from "../lib/auth";
+import { clockNow, dayOpenBinds, loadToday } from "../lib/day";
+import { DrafterError, draftRewording } from "../lib/drafter";
+import { notify } from "../lib/notify";
+import { CONFIRM_SQL, DRAFT_INSERT_SQL, WITHDRAW_SQL, conflictSentence, draftOf, fixedRefusal, markFor, needsModel, neededOf, parseBook, readRequest } from "../lib/proposals.js";
+import { refusalBody, turnBlock } from "../lib/turn";
+import { Ctx, colorOf, json, nowIso, readJson, sha256Hex, siteUrl, who } from "../lib/util";
+
+type Out = { status: number; body: any };
+const out = (body: any, status = 200): Out => ({ status, body });
+// Drafting is free, but each one may call a model: at most this many drafts a player a day.
+export const DRAFTS_PER_DAY = 30;
+
+const books = new WeakMap<object, { md: string; book: any; sha: string }>();
+// The rules a game runs on (the bundled text, so a draft is made against the text whose code is live), parsed once.
+/** @rule 103.1 */
+async function bookFor(game: { slug: string }) {
+  const { bundle } = bundleFor(game);
+  let b = books.get(bundle);
+  if (!b) { b = { md: bundle.rulesMd, book: parseBook(bundle.rulesMd), sha: await sha256Hex(bundle.rulesMd) }; books.set(bundle, b); }
+  return b;
+}
+
+/** @rule 102 */
+const playerCount = async (env: any, gameId: string) => ((await env.DB.prepare("SELECT COUNT(*) AS n FROM players WHERE game_id = ?").bind(gameId).first()) as any)?.n ?? 0;
+/** @rule 103.2 */
+const isUnique = (e: any) => /UNIQUE constraint failed/i.test(String(e?.message || e) + String(e?.cause?.message || ""));
+/** @rule 103.2 */
+const ALREADY = "You already proposed today. One proposal a day.";
+
+// What a proposal shows. A whitelist: the count's columns (yes, no, absent, needed, electorate, why) are never in it.
+/** @rule 103.1, 103.2, 105.4 */
+export function view(r: any, viewerId?: string | null, electorate?: number) {
+  const mark = r.mark ?? r.draft_mark;
+  return {
+    id: r.player_id === viewerId ? r.id : undefined,
+    n: r.number ? `P${r.number}` : null,
+    number: r.number ?? null,
+    status: r.status,
+    kind: r.kind, scope: r.scope, target: r.target, new_num: r.new_num ?? null, to_block: r.to_block ?? null, title: r.title ?? null,
+    head: r.draft_head, before_text: r.before_text, after_text: r.after_text,
+    words: r.player_id === viewerId ? r.words : undefined,
+    conflicts: JSON.parse(r.conflicts || "[]"),
+    conflict_note: conflictSentence(JSON.parse(r.conflicts || "[]")),
+    settings: JSON.parse(r.settings || "{}"),
+    drafted_by: r.drafted_by,
+    mark: mark ?? null,
+    needs: mark && electorate ? { mark, needed: neededOf(mark, electorate), of: electorate } : undefined,
+    day_proposed: r.day_proposed, day_ballot: r.day_ballot ?? null,
+    by: r.name ? { name: r.name, color: colorOf(r.color) } : undefined,
+    mine: !!viewerId && r.player_id === viewerId,
+  };
+}
+
+// Draft (rule 103.1). Returns the draft, or the refusal.
+/** @rule 103.1, 108.3, 110.1 */
+export async function draft(ctx: Ctx, player: any, body: any, nowMs: number): Promise<Out> {
+  const { env } = ctx;
+  const { game, day, turn } = await loadToday(env, ctx.data.game!, nowMs, player.id);
+  const blocked = turnBlock(game, day, turn, player, "propose", nowMs);
+  if (blocked) return out(refusalBody(blocked), blocked.status);
+  const counts = (await env.DB.prepare(
+    `SELECT SUM(status = 'draft') AS drafts, SUM(status NOT IN ('draft', 'withdrawn')) AS confirmed
+     FROM proposals WHERE game_id = ? AND player_id = ? AND day_proposed = ?`,
+  ).bind(game.id, player.id, game.day).first()) as any;
+  if (counts?.confirmed > 0) return out({ error: ALREADY }, 409);
+  if (counts?.drafts >= DRAFTS_PER_DAY) return out({ error: `That's ${DRAFTS_PER_DAY} drafts today. Confirm one, or try again tomorrow.` }, 429);
+
+  const { md, book, sha } = await bookFor(game);
+  const req = readRequest(book, body);
+  if ("error" in req) return out({ error: req.error }, 400);
+  let after: string | null = null, settings: Record<string, unknown> = {}, modelConflicts: string[] = [];
+  if (needsModel(req)) {
+    try {
+      const a = await draftRewording(env, book, md, req);
+      after = a.after_text; settings = a.settings; modelConflicts = a.conflicts;
+    } catch (e: any) {
+      if (!(e instanceof DrafterError)) throw e;
+      return out({ error: e.message, drafting: e.code }, e.code === "unavailable" ? 503 : 502);
+    }
+  }
+  const d = draftOf(book, req, after);
+  if ("error" in d) return out({ error: d.error }, 400);
+  const refused = fixedRefusal(book, { ...req, ...d, settings });
+  if (refused) return out({ error: refused, rule: "110.1" }, 422);
+  const conflicts = [...new Set([...d.conflicts, ...modelConflicts])];
+
+  const id = crypto.randomUUID(), now = nowIso(nowMs);
+  const res = await env.DB.prepare(
+    DRAFT_INSERT_SQL,
+  ).bind(
+    id, player.id, req.kind, req.scope, req.target, d.new_num, req.to_block, req.words, req.title, d.head,
+    d.before_text, d.after_text, JSON.stringify(conflicts), JSON.stringify(settings), after === null ? "code" : "model", sha, now,
+    game.id, ...dayOpenBinds(game.day, nowMs, player.id),
+  ).run();
+  if (!(res?.meta?.changes > 0)) return out({ error: "The day changed under you. Reload and try again." }, 409);
+  const row = await env.DB.prepare("SELECT * FROM proposals WHERE id = ?").bind(id).first();
+  return out({ ok: true, proposal: view({ ...row, draft_mark: markFor(book, row) }, player.id, await playerCount(env, game.id)) });
+}
+
+// Confirm (rule 103.2): the day's one proposal. The P-number is the game's next, taken in the same statement that
+// confirms, and the one-a-day index refuses a second confirm however close the two arrive. The mark is fixed now
+// (rule 105.4).
+/** @rule 103.2, 105.4 */
+export async function confirm(ctx: Ctx, player: any, id: string, nowMs: number): Promise<Out> {
+  const { env } = ctx;
+  const { game, day, turn } = await loadToday(env, ctx.data.game!, nowMs, player.id);
+  const blocked = turnBlock(game, day, turn, player, "propose", nowMs);
+  if (blocked) return out(refusalBody(blocked), blocked.status);
+  const row: any = await env.DB.prepare("SELECT * FROM proposals WHERE id = ? AND game_id = ? AND player_id = ?").bind(id, game.id, player.id).first();
+  if (!row) return out({ error: "There is no such draft of yours." }, 404);
+  if (row.status !== "draft") return out({ error: row.status === "withdrawn" ? "That proposal was withdrawn. Draft it again." : `That is already P${row.number}.` }, 409);
+  if (row.day_proposed !== game.day) return out({ error: `That draft is from day ${row.day_proposed}. Draft it again today.` }, 409);
+  const { book, sha } = await bookFor(game);
+  if (row.base_sha !== sha) return out({ error: "The rules have changed since this was drafted. Draft it again." }, 409);
+  const mark = markFor(book, row);
+  const now = nowIso(nowMs);
+  try {
+    const res = await env.DB.batch([
+      env.DB.prepare(
+        CONFIRM_SQL,
+      ).bind(mark, now, id, game.day, ...dayOpenBinds(game.day, nowMs, player.id)),
+      env.DB.prepare(
+        `INSERT INTO events (game_id, kind, text, created_at, day, phase, player_id)
+         SELECT ?, 'proposal_confirmed', ?, ?, ?, 'day', ? WHERE EXISTS (SELECT 1 FROM proposals WHERE id = ? AND status = 'confirmed' AND confirmed_at = ?)`,
+      ).bind(game.id, `${who(player.display_name, player.color)} proposed a change.`, now, game.day, player.id, id, now),
+    ]);
+    if (!(res[0]?.meta?.changes > 0)) return out({ error: "The day changed under you. Reload and try again." }, 409);
+  } catch (e: any) {
+    if (isUnique(e)) return out({ error: ALREADY }, 409);
+    throw e;
+  }
+  const done = await env.DB.prepare("SELECT * FROM proposals WHERE id = ?").bind(id).first();
+  try {
+    await notify(env, ctx, game, {
+      kind: "turn_submitted", body: `${who(player.display_name, player.color)} proposed a change.`,
+      email: true, exceptPlayerId: player.id, baseUrl: siteUrl(env, ctx.request),
+    });
+  } catch (e: any) {
+    console.error("notify failed after confirm:", e?.message || e);
+  }
+  return out({ ok: true, proposal: view(done, player.id, await playerCount(env, game.id)), message: `P${(done as any).number} is on tomorrow's ballot.` });
+}
+
+// Withdraw (rule 103.3): until midnight or End turn, and only today's confirmed proposal. It keeps its number; the
+// day's proposal is free again.
+/** @rule 103.3 */
+export async function withdraw(ctx: Ctx, player: any, id: string, nowMs: number): Promise<Out> {
+  const { env } = ctx;
+  const { game, day, turn } = await loadToday(env, ctx.data.game!, nowMs, player.id);
+  const blocked = turnBlock(game, day, turn, player, "end_turn", nowMs); // the day's gates only: withdrawing is not a new proposal
+  if (blocked) return out(refusalBody(blocked), blocked.status);
+  const row: any = await env.DB.prepare("SELECT * FROM proposals WHERE id = ? AND game_id = ? AND player_id = ?").bind(id, game.id, player.id).first();
+  if (!row || row.status === "draft") return out({ error: "There is no such proposal of yours." }, 404);
+  if (row.status !== "confirmed" || row.day_proposed !== game.day) return out({ error: `P${row.number} is ${row.status === "withdrawn" ? "already withdrawn" : "on the ballot now"}, so it can't be withdrawn.` }, 409);
+  const now = nowIso(nowMs);
+  const res = await env.DB.batch([
+    env.DB.prepare(
+      WITHDRAW_SQL,
+    ).bind(now, id, game.day, ...dayOpenBinds(game.day, nowMs, player.id)),
+    env.DB.prepare(
+      `INSERT INTO events (game_id, kind, text, created_at, day, phase, player_id)
+       SELECT ?, 'proposal_withdrawn', ?, ?, ?, 'day', ? WHERE EXISTS (SELECT 1 FROM proposals WHERE id = ? AND status = 'withdrawn' AND withdrawn_at = ?)`,
+    ).bind(game.id, `${who(player.display_name, player.color)} withdrew their proposal.`, now, game.day, player.id, id, now),
+  ]);
+  if (!(res[0]?.meta?.changes > 0)) return out({ error: "The day changed under you. Reload and try again." }, 409);
+  return out({ ok: true, withdrawn: `P${row.number}` });
+}
+
+/** @rule 103.1 */
+const send = (o: Out) => json(o.body, o.status);
+
+// POST /api/proposals: draft.
+/** @rule 103.1 */
+export const post = async (ctx: Ctx) => {
+  const player = await getPlayer(ctx.env, ctx.request, ctx.data.game!);
+  if (!player) return json({ error: "Log in to propose." }, 401);
+  const body = await readJson(ctx.request);
+  // Timed after the body has arrived (a body still streaming at midnight meets the lock).
+  return send(await draft(ctx, player, body, await clockNow(ctx.env)));
+};
+
+// POST /api/proposals/<id>/confirm | withdraw
+/** @rule 103.2, 103.3 */
+export const action = (what: "confirm" | "withdraw") => async (ctx: Ctx) => {
+  const player = await getPlayer(ctx.env, ctx.request, ctx.data.game!);
+  if (!player) return json({ error: "Log in to propose." }, 401);
+  await readJson(ctx.request);
+  const nowMs = await clockNow(ctx.env);
+  return send(await (what === "confirm" ? confirm : withdraw)(ctx, player, ctx.params.id, nowMs));
+};
+
+// GET /api/proposals: every proposal that has reached a ballot, and your own confirmed one. ?rule=N narrows it to one
+// rule (and its clauses).
+/** @rule 103.2 */
+export const get = async (ctx: Ctx) => {
+  const { env, request } = ctx;
+  const game = ctx.data.game!;
+  const player = await getPlayer(env, request, game);
+  const rule = new URL(request.url).searchParams.get("rule");
+  const rows = (await env.DB.prepare(
+    `SELECT q.*, p.display_name AS name, p.color FROM proposals q JOIN players p ON p.game_id = q.game_id AND p.id = q.player_id
+     WHERE q.game_id = ? AND (q.status IN ('on_ballot', 'passed', 'failed', 'enacted', 'not_applied') OR (q.status = 'confirmed' AND q.player_id = ?))
+       AND (? IS NULL OR q.target = ? OR q.target LIKE ? || '.%')
+     ORDER BY q.number`,
+  ).bind(game.id, player?.id ?? "", rule, rule, rule).all()).results as any[];
+  const n = await playerCount(env, game.id);
+  const today = game.day;
+  return json({
+    day: today,
+    proposals: rows.map((r) => view(r, player?.id, n)),
+    ballot: rows.filter((r) => r.status === "on_ballot" && r.day_ballot === today).map((r) => `P${r.number}`),
+  });
+};

@@ -14,17 +14,8 @@ export const get = async ({ env, data }: Ctx) => {
       .bind(g.id)
       .all()
   ).results;
-  // Today's prompts are public to the table (turns.round holds the day). No emails or ids.
-  const turns = (
-    await env.DB.prepare(
-      `SELECT p.display_name AS name, t.turn_index, t.prompt, t.status, t.created_at
-       FROM turns t JOIN players p ON p.game_id = t.game_id AND p.id = t.player_id
-       WHERE t.game_id = ? AND t.round = ? AND t.status != 'withdrawn' ORDER BY t.created_at`,
-    ).bind(g.id, g.day).all()
-  ).results;
   // The day and the lock (and what each player has done today) are in /api/day.
   return json({
-    turns,
     game: {
       slug: g.slug,
       name: g.name,

@@ -55,6 +55,7 @@
   // (the game's own repo, fetched by the server). /api/me and /api/notifications say who is looking.
   import { ensureDefs, pieceSVG } from "/js/pieces.js";
   import { mountRulebook } from "/js/rulebook.js";
+  import { createProposer } from "/js/propose.js";
   const SLUG = location.pathname.split("/")[1] || "";
   const BASE = "/" + SLUG;
 
@@ -77,6 +78,7 @@
   };
   let ME = null, DATA = null;   // who is looking, and the last /api/game
   let DAY = null, END_ASK = false, DAY_AT = 0, DAY_TIMER = 0, DAY_TICK = 0;   // the last /api/day, the End turn confirm, when it was fetched
+  let PROP = null;   // the proposal controller (propose.js), made once the page's state is known
   let BOARD = null, SEL = null, VIEW = null;   // the last /api/board, the selected tile {x,y}, the drawn board
   const hex = c => (c && /^#[0-9a-f]{6}$/i.test(c.hex) ? c.hex : "#888");
   const who = (name, c) => `${name} (${c ? c.name : "?"})`;
@@ -95,6 +97,7 @@
     const who_ = $("who");
     ME = me.ok ? me.data : null;
     drawDock();
+    if (PROP) PROP.redraw();
     if (VIEW && ME && ME.player) VIEW.setMe(ME.player.color.key);
     if (!me.ok) {
       who_.innerHTML = '<button class="btn ghost small" id="login-btn" type="button">Log in</button>';
@@ -141,6 +144,7 @@
 
   async function load() {
     showNotice();
+    PROP = createProposer({ api, me: () => ME, day: () => DAY, refresh: async () => { await refresh(); loadNotes(false); } });
     loadMe();
     const [g] = await Promise.all([api("/api/game"), loadDay()]);
     if (!g.ok) $("dock").innerHTML = '<span class="err">No game has been set up yet.</span>';
@@ -148,48 +152,21 @@
     // the rulebook shows each rule's settings, so it waits for the board's reply (which carries them)
     const [rules] = await Promise.all([fetch(BASE + "/api/rules").then(async r => { if (!r.ok) throw new Error("rules " + r.status); return r.text(); }).catch(() => null), boardLoaded]);
     if (rules === null) { $("rules").innerHTML = '<p class="err" style="padding:20px 28px">Rules unavailable right now.</p>'; return; }
-    mountRulebook($("rules"), rules, { settings: (BOARD && BOARD.settings) || {} });
+    await PROP.load();
+    mountRulebook($("rules"), rules, { settings: (BOARD && BOARD.settings) || {}, proposer: PROP });
   }
 
-  // The dock under the board: where the game stands, today's proposals, and the proposal form.
-  // What you may do comes from /api/day (you.can): the same answers the write routes give.
+  // The dock under the board: where the game stands. Proposing is in the rulebook (propose.js); what you may do
+  // comes from /api/day (you.can): the same answers the write routes give.
   const LOCKED = () => !!(DAY && DAY.locked);
-  const can = kind => (DAY && DAY.you && DAY.you.can[kind]) || { allowed: false, reason: ME && ME.player ? "" : "Log in to play." };
   function drawDock() {
     const box = $("dock");
     if (!DATA) return;
-    const { game, players, turns } = DATA;
+    const { game, players } = DATA;
     document.title = game.name || "Promptocracy";
     $("title").textContent = game.name || "Promptocracy";
-    let html = game.status === "setup" ? `<p><strong>Setting up.</strong> ${players.length} of ${game.max_players} players joined.</p>` : "";
-    const mineName = ME && ME.user ? ME.user.name : null;
-    // Whether you proposed today comes from /api/day (by player), not from matching display names.
-    if (game.status === "playing" && ME && ME.player && !(DAY && DAY.you && DAY.you.proposed)) {
-      const pc = can("propose"), why = pc.allowed || LOCKED() ? "" : pc.reason || "";
-      const off = pc.allowed ? "" : " disabled";
-      html += `<form id="turn-form"><textarea name="prompt" rows="4" maxlength="2000" required aria-label="Your proposal"${off}></textarea>
-        <div><button class="btn" type="submit"${off}${LOCKED() && DAY.message ? ` title="${esc(DAY.message)}"` : ""}>Propose</button></div>
-        ${why ? `<p class="muted" id="turn-why">${esc(why)}</p>` : ""}<div id="turn-msg" role="status"></div></form>`;
-    }
-    for (const t of (turns || [])) html += `<p><strong>${t.name === mineName ? "You" : esc(t.name)}</strong> proposed:</p><blockquote>${esc(t.prompt)}</blockquote>`;
-    // an unsent prompt survives a redraw (a move refreshes the page's state while the player is still writing)
-    const old = box.querySelector("textarea[name=prompt]"), draft = old ? old.value : "";
-    box.innerHTML = html + '<div id="tile-panel"></div>';
-    const ta = box.querySelector("textarea[name=prompt]");
-    if (ta && draft) ta.value = draft;
+    box.innerHTML = (game.status === "setup" ? `<p><strong>Setting up.</strong> ${players.length} of ${game.max_players} players joined.</p>` : "") + '<div id="tile-panel"></div>';
     drawPanel();
-    const form = $("turn-form");
-    if (form) form.addEventListener("submit", async e => {
-      e.preventDefault();
-      const msg = $("turn-msg");
-      msg.textContent = "Sending…";
-      const r = await api("/api/turn", { prompt: new FormData(form).get("prompt") });
-      if (r.ok) { await refresh(); loadNotes(false); return; }
-      const text = (r.data && r.data.error) || "Something went wrong.";
-      if (r.status === 409 || r.status === 403 || r.status === 423) { await refresh(); const m = $("turn-msg"); if (m) { m.className = "notice err"; m.textContent = text; } return; }
-      msg.className = "notice err";
-      msg.textContent = text;
-    });
   }
 
   // ---- the day: status row at the top of the play area ------------------------------------------------------
@@ -242,10 +219,8 @@
     const j = e.target.closest("[data-jump]");
     if (j) {
       const quiet = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
-      const el = j.dataset.jump === "board" ? $("board-wrap") : ($("turn-form") || $("dock"));
+      const el = j.dataset.jump === "board" ? $("board-wrap") : ($("rb-banner") || $("rules"));
       el.scrollIntoView({ behavior: quiet ? "auto" : "smooth", block: j.dataset.jump === "board" ? "center" : "start" });
-      const ta = j.dataset.jump === "propose" && $("turn-form") && $("turn-form").querySelector("textarea:not(:disabled)");
-      if (ta) ta.focus({ preventScroll: true });
       return;
     }
     const b = e.target.closest("[data-endturn]");
@@ -362,6 +337,7 @@
     if (d.ok) { DAY = d.data; DAY_AT = Date.now(); drawDay(); }
     if (g.ok) drawGame(g.data);
     if (b.ok) drawBoard(b.data);
+    if (PROP) { await PROP.load(); PROP.redraw(); }
   }
 
   async function initBoard() {

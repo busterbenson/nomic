@@ -13,6 +13,10 @@ export type Env = {
   ASSETS: { fetch(req: Request | string): Promise<Response> };
   // Where /<slug>/api/rules reads rules from. Unset = GitHub. Tests point it at a local stub.
   RULES_BASE_URL?: string;
+  // The small model that drafts rewording (src/lib/drafter.ts). MODEL_API_KEY is a secret; unset = rewording unavailable.
+  MODEL_API_KEY?: string;
+  MODEL_BASE_URL?: string;
+  MODEL_NAME?: string;
 };
 export type Ctx = {
   request: Request;

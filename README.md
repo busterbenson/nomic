@@ -119,7 +119,16 @@ two games is two unrelated players.
 To start a game by hand (no moderator yet):
 `npx wrangler d1 execute DB --local --command "UPDATE games SET status='playing', round=1, turn=0 WHERE slug='demo'"`
 (add `--remote` against the deployed database).
-Once playing, the player whose turn it is (`games.turn` = their seat number, from 0) sees a "Your turn" box on the board and submits one prompt per round, and may also move their piece once (in either order). Proposing only records the turn; nothing advances `turn` or `round` yet (a move is remembered in `games.last_move` as `round:turn`, so whatever advances the turn must make `round` grow when `turn` wraps).
+Once playing, the game runs one day at a time (rule 203.1). Each player may move once, end their turn, and make one
+proposal a day (rule 103): `POST /<slug>/api/proposals` drafts it (free and repeatable; code drafts the mechanical
+kinds, a small model drafts rewording in plain words), `.../proposals/<id>/confirm` makes it the day's one proposal
+(P1, P2, ... on the next day's ballot) and `.../withdraw` takes it back until midnight or End turn. `POST /api/turn` is
+draft + confirm in one call.
+
+**The drafting model.** Rewording in a player's own words calls a small model from the Worker (`src/lib/drafter.ts`,
+the Messages API). It needs the secret `MODEL_API_KEY` (`npx wrangler secret put MODEL_API_KEY`); `MODEL_NAME`
+defaults to `claude-haiku-5-5` and `MODEL_BASE_URL` to `https://api.anthropic.com` (the tests point it at a local stub
+with recorded answers). Without the key, rewording answers "drafting is unavailable" and every other kind still works.
 
 ## The MCP server
 
@@ -129,8 +138,9 @@ Inspector...) and take their turn through it. It is **switched by the rules**: t
 it is false every MCP and OAuth address answers 403 with a plain message that the rules disable MCP. Players change
 it the way they change any rule.
 
-- **Tools**: `read_rules`, `read_board`, `my_state` (who I am, whose turn it is, where my piece stands, what I may
-  do now), `propose` (submit this turn's prompt) and `move`. Each one calls the matching web route's own handler
+- **Tools**: `read_rules`, `read_board`, `read_day`, `my_state` (who I am, where my piece stands, what I may do now),
+  `draft_proposal`, `confirm_proposal`, `withdraw_proposal`, `propose` (draft + confirm), `read_proposals`, `move` and
+  `end_turn`. Each one calls the matching web route's own handler
   (`api-rules`, `api-board`, `api-me` + `api-game`, `api-turn`, `api-action`) with an internal request made as the
   player, so validation, guards, log lines and notifications are the web's, and a later change to the turn model
   reaches MCP with no change in `src/lib/mcp-tools.ts`. The "may I?" guards that `my_state` reports come from the

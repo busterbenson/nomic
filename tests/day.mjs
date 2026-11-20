@@ -8,7 +8,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join as pjoin } from "node:path";
 import { ROOT, client, connect, createGame, d1, join, migrate, newState, startRulesStub, startServer, tool } from "./lib.mjs";
-import { PROPOSAL_INSERT_SQL } from "../src/lib/proposal.js";
+import { CONFIRM_SQL } from "../src/lib/proposals.js";
 import { dayOpenBinds } from "../src/lib/day-gate.js";
 
 let pass = 0, fail = 0;
@@ -126,18 +126,19 @@ try {
   check("there is no order of play: Bo (the second to join) moves the same day (no 'not your turn')", mb.status === 200, mb.text);
   const dt = d1(state, `SELECT player_id, moved_at, ended_at FROM day_turns WHERE game_id = '${gid}' AND day = 1`);
   check("each move is recorded in day_turns for day 1 (moved_at = the clock), and the move's log line belongs to day 1", dt.length === 2 && dt.every((r) => r.moved_at === "2026-03-08T19:00:00.000Z" && r.ended_at === null) && d1(state, `SELECT day, phase FROM events WHERE game_id = '${gid}' AND kind = 'piece_moved'`).every((e) => e.day === 1 && e.phase === "day"), J(dt));
-  const p1 = await ana.post("/day/api/turn", { prompt: "Make the island bigger." });
-  const p2 = await ana.post("/day/api/turn", { prompt: "And again." });
-  check("a prompt a day: Ana proposes once (moving did not stop it); a second one the same day is refused (409)", p1.status === 200 && p2.status === 409 && p2.data.error === "You already proposed today. One proposal a day.", p1.text + " " + p2.text);
+  const REPEAL = (words) => ({ kind: "repeal", target: "403", words });
+  const p1 = await ana.post("/day/api/turn", REPEAL("Make the island bigger."));
+  const p2 = await ana.post("/day/api/turn", REPEAL("And again."));
+  check("one proposal a day: Ana proposes once (moving did not stop it); a second one the same day is refused (409)", p1.status === 200 && p2.status === 409 && p2.data.error === "You already proposed today. One proposal a day.", p1.text + " " + p2.text);
 
   console.log("End turn is final");
   const cyAt = J(pos().find((p) => p.n === "Cy"));
   const e1 = await cy.post("/day/api/end-turn", {});
   check("Cy ends their turn: 200, day 1, the time; the log says so", e1.status === 200 && e1.data.ok === true && e1.data.day === 1 && e1.data.ended_at === "2026-03-08T19:00:00.000Z" && eventsOf("turn_ended").length === 1 && eventsOf("turn_ended")[0].text === "Cy (Jade) ended their turn.", e1.text);
-  const e2 = await cy.post("/day/api/end-turn", {}), cm = await cy.post("/day/api/action", stepFor("Cy")), cp = await cy.post("/day/api/turn", { prompt: "Too late." });
+  const e2 = await cy.post("/day/api/end-turn", {}), cm = await cy.post("/day/api/action", stepFor("Cy")), cp = await cy.post("/day/api/turn", REPEAL("Too late."));
   check("after End turn there is no undo and nothing more today: End turn again, a move and a proposal all answer 409 'Your turn has ended for today.'",
     [e2, cm, cp].every((r) => r.status === 409 && r.data.error === "Your turn has ended for today."), [e2, cm, cp].map((r) => r.text).join(" "));
-  check("and nothing was written: Cy did not move and has no prompt", J(pos().find((p) => p.n === "Cy")) === cyAt && d1(state, `SELECT COUNT(*) AS n FROM turns t JOIN players p ON p.id = t.player_id WHERE p.display_name = 'Cy'`)[0].n === 0);
+  check("and nothing was written: Cy did not move and has no proposal, not even a draft", J(pos().find((p) => p.n === "Cy")) === cyAt && d1(state, `SELECT COUNT(*) AS n FROM proposals t JOIN players p ON p.id = t.player_id WHERE p.display_name = 'Cy'`)[0].n === 0);
   const cyDay = (await cy.get("/day/api/day")).data;
   check("/api/day tells Cy their turn has ended (with the same reasons the routes give), and tells everyone else", cyDay.you.ended === true && cyDay.you.can.move.allowed === false && cyDay.you.can.move.reason === "Your turn has ended for today." && cyDay.you.can.end_turn.allowed === false && cyDay.players.find((p) => p.name === "Cy").ended === true, J(cyDay.you));
   const boDay = (await bo.get("/day/api/day")).data;
@@ -153,36 +154,37 @@ try {
     let push;
     const body = new ReadableStream({ start(c) { push = c; } });
     const pending = fetch(`${A}/day/api/turn`, { method: "POST", body, duplex: "half", signal: AbortSignal.timeout(20000), headers: { "content-type": "application/json", cookie: bo.cookieFor("/day/api/turn") } });
-    push.enqueue(enc.encode('{"prompt": '));
+    push.enqueue(enc.encode('{"kind": "repeal", "target": "403", "words": '));
     await new Promise((r) => setTimeout(r, 1500));
     setClock("2026-03-09T07:00:01.000Z");
     push.enqueue(enc.encode('"A body that arrives after midnight."}'));
     push.close();
     const slow = await pending, slowText = await slow.text();
     check("a proposal whose body finishes arriving after midnight is refused with the lock (423), though the request began before it",
-      slow.status === 423 && JSON.parse(slowText).error === LOCK1 && d1(state, `SELECT COUNT(*) AS n FROM turns WHERE prompt LIKE 'A body that arrives%'`)[0].n === 0, slow.status + " " + slowText);
+      slow.status === 423 && JSON.parse(slowText).error === LOCK1 && d1(state, `SELECT COUNT(*) AS n FROM proposals WHERE words LIKE 'A body that arrives%'`)[0].n === 0, slow.status + " " + slowText);
   }
   setClock("2026-03-09T07:00:01.000Z"); // 1 s after midnight; the cron has NOT run
-  const lp = await bo.post("/day/api/turn", { prompt: "Just after midnight." });
+  const lp = await bo.post("/day/api/turn", REPEAL("Just after midnight."));
   const le = await ana.post("/day/api/end-turn", {});
   const lm = await bo.post("/day/api/action", stepFor("Bo"));
   check("1 s after midnight, with the cron not yet run: a proposal, End turn and a move all answer 423 with 'Chalant is processing day 1' and processing_day 1",
     [lp, le, lm].every((r) => r.status === 423 && r.data.error === LOCK1 && r.data.processing_day === 1), [lp, le, lm].map((r) => r.status + " " + r.text).join(" | "));
   check("...and the database still says day 1 is open (the routes checked the clock, not the cron's flag), and nothing was written", dayRow(1).status === "open" && gameRow().phase === "open" &&
-    d1(state, `SELECT COUNT(*) AS n FROM turns WHERE game_id = '${gid}' AND player_id = (SELECT id FROM players WHERE display_name = 'Bo')`)[0].n === 0 && d1(state, `SELECT COUNT(*) AS n FROM day_turns WHERE game_id = '${gid}' AND ended_at IS NOT NULL`)[0].n === 1);
+    d1(state, `SELECT COUNT(*) AS n FROM proposals WHERE game_id = '${gid}' AND player_id = (SELECT id FROM players WHERE display_name = 'Bo')`)[0].n === 0 && d1(state, `SELECT COUNT(*) AS n FROM day_turns WHERE game_id = '${gid}' AND ended_at IS NOT NULL`)[0].n === 1);
   const ld = (await bo.get("/day/api/day")).data;
   check("read-only routes keep working during the lock, and /api/day says the game is locked, with the message", ld.locked === true && ld.processing_day === 1 && ld.message === LOCK1 && ld.failed === false && ld.you.can.propose.reason === LOCK1 &&
     (await bo.get("/day/api/game")).status === 200 && (await bo.get("/day/api/board")).status === 200, J(ld));
-  // The write's own SQL repeats the clock check: the proposal INSERT, run with a time past midnight, lands nothing.
+  // The write's own SQL repeats the clock check: confirming a draft, run with a time past midnight, changes nothing.
   const boId = d1(state, `SELECT id FROM players WHERE display_name = 'Bo'`)[0].id;
   const lit = (v) => (typeof v === "number" ? String(v) : `'${String(v).replace(/'/g, "''")}'`);
-  const runInsert = (iso) => { const b = ["race1", boId, 1, "race", iso, iso, gid, ...dayOpenBinds(1, Date.parse(iso), boId)]; let i = 0; d1(state, PROPOSAL_INSERT_SQL.replace(/\?/g, () => lit(b[i++]))); return d1(state, "SELECT COUNT(*) AS n FROM turns WHERE id = 'race1'")[0].n; };
-  check("the write's own guard repeats the clock in SQL: the proposal INSERT with a time 1 s past midnight inserts nothing; 1 s before, it lands", runInsert("2026-03-09T07:00:01.000Z") === 0 && runInsert("2026-03-09T06:59:59.000Z") === 1);
-  d1(state, "DELETE FROM turns WHERE id = 'race1'");
+  d1(state, `INSERT INTO proposals (id, game_id, player_id, day_proposed, kind, scope, target, draft_head, drafted_by, base_sha, created_at) VALUES ('race1', '${gid}', '${boId}', 1, 'repeal', 'rule', '403', 'Repeal rule 403 (Paradox):', 'code', 'x', '2026-03-09T06:00:00.000Z')`);
+  const runConfirm = (iso) => { const b = ["majority", iso, "race1", 1, ...dayOpenBinds(1, Date.parse(iso), boId)]; let i = 0; d1(state, CONFIRM_SQL.replace(/\?/g, () => lit(b[i++]))); return d1(state, "SELECT status FROM proposals WHERE id = 'race1'")[0].status; };
+  check("the write's own guard repeats the clock in SQL: confirming with a time 1 s past midnight changes nothing; 1 s before, it confirms", runConfirm("2026-03-09T07:00:01.000Z") === "draft" && runConfirm("2026-03-09T06:59:59.000Z") === "confirmed");
+  d1(state, "DELETE FROM proposals WHERE id = 'race1'");
   // Over MCP: the same routes, the same answer.
   const tok = await connect(A, "day", bo, SITE);
   const tm = await tool(A, "day", tok.access_token, "move", { label: "1N 1E" });
-  const tp = await tool(A, "day", tok.access_token, "propose", { prompt: "From my AI." });
+  const tp = await tool(A, "day", tok.access_token, "propose", { kind: "repeal", target: "403", words: "From my AI." });
   check("over MCP, during the lock (cron not run), move and propose return the lock message as an error", tm.isError && tm.text === LOCK1 && tp.isError && tp.text === LOCK1, tm.text + " | " + tp.text);
 
   console.log("the midnight run");

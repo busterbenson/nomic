@@ -153,7 +153,7 @@ export async function processDay(env: Env, game: any, day: DayRow, nowMs: number
 
 // Day N done and day N+1 open, in one batch. Day N+1 starts where day N ended and ends at the next midnight after
 // that, or after now when the night ran past a whole day, so a day never ends before it starts.
-/** @rule 107.1, 203.1 */
+/** @rule 103.2, 107.1, 203.1 */
 export async function finalizeDay(env: Env, game: any, day: DayRow, nowMs: number) {
   const tz = timeZoneOf(game);
   const ended = Date.parse(day.ends_at);
@@ -161,6 +161,11 @@ export async function finalizeDay(env: Env, game: any, day: DayRow, nowMs: numbe
   const ends = nowIso(nextMidnight(tz, Math.max(ended, nowMs)));
   await env.DB.batch([
     env.DB.prepare("UPDATE days SET status = 'done', processed_at = ?, last_error = NULL WHERE game_id = ? AND n = ? AND status IN ('locked', 'processing')").bind(now, game.id, day.n),
+    // The day's confirmed proposals go on the next day's ballot (rule 103.2); withdrawing ends with the day (rule 103.3).
+    env.DB.prepare(
+      `UPDATE proposals SET status = 'on_ballot' WHERE game_id = ? AND day_proposed = ? AND status = 'confirmed'
+         AND EXISTS (SELECT 1 FROM days WHERE game_id = ? AND n = ? AND status = 'done')`,
+    ).bind(game.id, day.n, game.id, day.n),
     env.DB.prepare(
       `INSERT OR IGNORE INTO days (game_id, n, starts_at, ends_at, status, electorate)
        SELECT ?, ?, ?, ?, 'open', (SELECT COUNT(*) FROM players p WHERE p.game_id = ?)
