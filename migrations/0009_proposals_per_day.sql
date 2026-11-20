@@ -8,5 +8,5 @@
 -- for that count. Safe on a database where a player already has one confirmed proposal a day: that is within any limit.
 -- To undo (only while no player has two confirmed proposals on one day): DROP INDEX proposals_day_count; then recreate
 -- proposals_one_a_day as in 0006.
-DROP INDEX proposals_one_a_day;
+DROP INDEX IF EXISTS proposals_one_a_day;
 CREATE INDEX proposals_day_count ON proposals(game_id, player_id, day_proposed) WHERE status NOT IN ('draft', 'withdrawn');

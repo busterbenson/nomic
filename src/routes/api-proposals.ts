@@ -162,21 +162,19 @@ export async function confirm(ctx: Ctx, player: any, id: string, nowMs: number):
   if (row.base_sha !== sha) return out({ error: "The rules have changed since this was drafted. Draft it again." }, 409);
   const mark = markFor(book, row);
   const now = nowIso(nowMs), limit = limitOf(game);
-  {
-    const res = await env.DB.batch([
-      env.DB.prepare(
-        CONFIRM_SQL,
-      ).bind(mark, now, id, game.day, ...dayOpenBinds(game.day, nowMs, player.id), limit),
-      env.DB.prepare(
-        `INSERT INTO events (game_id, kind, text, created_at, day, phase, player_id)
-         SELECT ?, 'proposal_confirmed', ?, ?, ?, 'day', ? WHERE EXISTS (SELECT 1 FROM proposals WHERE id = ? AND status = 'confirmed' AND confirmed_at = ?)`,
-      ).bind(game.id, `${who(player.display_name, player.color)} proposed a change.`, now, game.day, player.id, id, now),
-    ]);
-    if (!(res[0]?.meta?.changes > 0)) {
-      // Nothing was confirmed: the limit (another confirm of yours landed first) or the day itself moved.
-      const made = await confirmedToday(env, game.id, player.id, game.day);
-      return out(made >= limit ? { error: proposalLimitMessage(made) } : { error: "The day changed under you. Reload and try again." }, 409);
-    }
+  const res = await env.DB.batch([
+    env.DB.prepare(
+      CONFIRM_SQL,
+    ).bind(mark, now, id, game.day, ...dayOpenBinds(game.day, nowMs, player.id), limit),
+    env.DB.prepare(
+      `INSERT INTO events (game_id, kind, text, created_at, day, phase, player_id)
+       SELECT ?, 'proposal_confirmed', ?, ?, ?, 'day', ? WHERE EXISTS (SELECT 1 FROM proposals WHERE id = ? AND status = 'confirmed' AND confirmed_at = ?)`,
+    ).bind(game.id, `${who(player.display_name, player.color)} proposed a change.`, now, game.day, player.id, id, now),
+  ]);
+  if (!(res[0]?.meta?.changes > 0)) {
+    // Nothing was confirmed: the limit (another confirm of yours landed first) or the day itself moved.
+    const made = await confirmedToday(env, game.id, player.id, game.day);
+    return out(made >= limit ? { error: proposalLimitMessage(made) } : { error: "The day changed under you. Reload and try again." }, 409);
   }
   const done = await env.DB.prepare("SELECT * FROM proposals WHERE id = ?").bind(id).first();
   try {
