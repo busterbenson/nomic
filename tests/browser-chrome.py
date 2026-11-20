@@ -95,6 +95,8 @@ with sync_playwright() as pw:
     pos = lambda sel: box(page, sel)["y"]
     check("phone S1-SUM-05: order is ballot, Propose, then the Catalog block last", pos("#sballot") < pos("#spropose") < pos(".sw.cat"), f"{pos('#sballot')} {pos('#spropose')} {pos('.sw.cat')}")
     check("phone S1-BRD-01: the board is a 290 px band", round(box(page, "#board-wrap")["h"]) == 290, str(box(page, "#board-wrap")))
+    tv = page.evaluate("(() => { const t = document.getElementById('btabs'); return { sh: t.scrollHeight, ch: t.clientHeight, oy: getComputedStyle(t).overflowY }; })()")
+    check("phone: the tab row can't be dragged up and down (no vertical overflow; Buster's phone, 2026-11-20)", tv["oy"] == "hidden" and tv["sh"] <= tv["ch"] + 1, str(tv))
     check("phone: the SVG board is drawn and nothing shows coordinates by default", page.get_attribute("#board-wrap", "data-renderer") == "svg" and tag_text(page) == [])
     pt = tile(page, 3, 0)
     page.touchscreen.tap(pt["x"], pt["y"]); page.wait_for_timeout(300)
