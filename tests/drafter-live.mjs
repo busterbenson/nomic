@@ -304,6 +304,8 @@ async function worker() {
 await Promise.all(Array.from({ length: CONCURRENCY }, worker));
 
 // ---------------------------------------------------------------- report
+// A case the cap stopped before all its runs were made is not a pass: the missing runs count as failures.
+for (const x of results.values()) while (x.runs.length < RUNS) x.runs.push({ got: "not run", pass: false, failures: ["not run: API call cap reached"], calls: 0 });
 const rows = [...results.values()].map((x) => ({ ...x, pass_runs: x.runs.filter((r) => r.pass).length }));
 const w = Math.max(...rows.map((x) => x.id.length));
 console.log(`\nrules: ${rulesPath}`);
