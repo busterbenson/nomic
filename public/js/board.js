@@ -7,6 +7,7 @@
 //   const b = await createBoard(container, { onSelect(x, y) })   // onSelect(null, null) = tapped the sea
 //   b.setData(board, meKey)   redraw from an /api/board reply (meKey: the color key of the person looking)
 //   b.select(x, y)            highlight a tile (null clears)
+//   b.setReach(tiles)         dashed highlight on the tiles you may move to ([{x, y}]); none clears
 //   b.screenPos(x, y)         page coordinates of a tile's centre (tests use this to click it)
 //   b.recenter(meKey)         back to the whole island, or onto the viewer's piece
 import { HW, HH, DEPTH, ensureDefs, pieceSVG } from "/js/pieces.js";
@@ -34,7 +35,7 @@ const bbox = (keys) => {
 };
 
 // The whole scene as markup. `sel` is the selected tile; `me` the color key of the viewer. Used by the board and the landing page.
-export function sceneSVG(board, { sel = null, me = null, id = "b", showFog = true } = {}) {
+export function sceneSVG(board, { sel = null, me = null, id = "b", showFog = true, reach = [] } = {}) {
   const tiles = board.tiles.filter((t) => t.z === 0);
   const charted = new Set(tiles.map((t) => K(t.x, t.y)));
   const fog = showFog ? ring(charted, 2) : new Set(), fog1 = showFog ? ring(charted, 1) : new Set();
@@ -71,6 +72,7 @@ export function sceneSVG(board, { sel = null, me = null, id = "b", showFog = tru
   const inset = (x, y, k) => { const c = P(x + .5, y + .5); return pts(top(x, y).map((v) => [c[0] + (v[0] - c[0]) * k, c[1] + (v[1] - c[1]) * k])); };
   const pieces = board.pieces.filter((p) => p.at.z === 0).sort((a, b) => (b.at.x + b.at.y) - (a.at.x + a.at.y));
   for (const p of pieces) s += `<polygon class="rim" points="${inset(p.at.x, p.at.y, .86)}" style="stroke:${esc(p.color.hex)}"/>`;
+  for (const t of reach) s += `<polygon class="reach" points="${inset(t.x, t.y, .86)}"/>`;
   if (sel) s += `<polygon class="selected" points="${inset(sel.x, sel.y, .94)}"/>`;
   s += `<polygon class="hover" id="${id}-hov" points=""/>`;
   for (const p of pieces) {
@@ -95,10 +97,10 @@ export async function createBoard(container, { onSelect } = {}) {
   const tip = Object.assign(document.createElement("div"), { className: "tip", hidden: true });
   const ctl = document.createElement("div");
   ctl.className = "board-ctl";
-  ctl.innerHTML = '<button type="button" class="wide" data-ctl="me">My piece</button><button type="button" data-ctl="out" aria-label="Zoom out">−</button><button type="button" data-ctl="in" aria-label="Zoom in">+</button>';
+  ctl.innerHTML = '<button type="button" class="wide" data-ctl="me" aria-label="Center the board on your piece">You</button><button type="button" data-ctl="out" aria-label="Zoom out">−</button><button type="button" data-ctl="in" aria-label="Zoom in">+</button>';
   container.append(tip, ctl);
 
-  let board = null, sel = null, me = null, labels = new Map();
+  let board = null, sel = null, me = null, labels = new Map(), reach = [];
   const view = { cx: 0, cy: 0, w: 600 };
   let fitted = false, touched = false;   // touched: the person panned or zoomed, so the view is theirs
   const apply = () => {
@@ -123,7 +125,7 @@ export async function createBoard(container, { onSelect } = {}) {
   }
   function draw() {
     if (!board) return;
-    const r = sceneSVG(board, { sel, me, id: "mb" });
+    const r = sceneSVG(board, { sel, me, id: "mb", reach });
     svg.innerHTML = r.markup;
     box = r.box;
     labels = new Map(r.tiles.map((t) => [K(t.x, t.y), t.label]));
@@ -200,6 +202,7 @@ export async function createBoard(container, { onSelect } = {}) {
     setData(b, meKey) { board = b; me = meKey || me; draw(); },
     setMe(key) { me = key; draw(); },
     select(x, y) { sel = x == null ? null : { x, y }; draw(); },
+    setReach(tiles) { const k = (a) => a.map((t) => t.x + "," + t.y).join(";"); if (k(tiles) === k(reach)) return; reach = tiles; draw(); },
     screenPos(x, y) { const n = svg.querySelector(`polygon.top[data-x="${x}"][data-y="${y}"]`), b = n && n.getBoundingClientRect(); return b ? { x: b.left + b.width / 2, y: b.top + b.height / 2 } : null; },
     recenter(key) { centerOnMe(key || me); },
     destroy() { ro && ro.disconnect(); svg.remove(); tip.remove(); ctl.remove(); },

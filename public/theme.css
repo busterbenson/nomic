@@ -15,6 +15,8 @@
   --land: #F4EEDF;                /* a charted tile: they are all the same, blank */
   --tile-seam: rgba(24, 32, 43, .16); --shade-1: rgba(24, 32, 43, .13); --shade-2: rgba(24, 32, 43, .30);
   --fog: rgba(24, 32, 43, .07);
+  /* a rule that changed lately: warm sand (<= 2 days), pale sand (<= 6 days); the page's other surfaces stay cool */
+  --warm1: #F2DFB4; --warm2: #F6EBD2; --warm-line: #C9B383;
 
   /* monster-only colors (never offered to players) */
   --bog: #6E9A3C; --bog-shade: #3F5E27; --wraith: #471C47; --hex-pink: #AD1A6C;
@@ -29,6 +31,7 @@
     --outline: #0B1018; --land: #55637A;
     --tile-seam: rgba(0, 0, 0, .28); --shade-1: rgba(5, 10, 20, .22); --shade-2: rgba(5, 10, 20, .42);
     --fog: rgba(255, 255, 255, .05);
+    --warm1: #4C4023; --warm2: #38342B; --warm-line: #7A683A;
     --hex-pink: #FF7BC5;
     color-scheme: dark;
   }

@@ -5,6 +5,7 @@ import { join as pjoin } from "node:path";
 import { ROOT } from "./lib.mjs";
 import { parseRules, markOf, renderMarkdown, hl } from "../public/js/rulebook.js";
 import { TRACED, ROLES, FOOT, HEIGHT } from "../public/js/pieces-data.js";
+import { createProposer } from "../public/js/propose.js";
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = "") => {
@@ -85,6 +86,48 @@ check("104 Voting is 104.1-104.5 and 107 has 107.6 (the 2 am deadline) and 107.7
   !/48 hours/.test(rules) && !/budget/.test(rules) && ["104.4", "104.5", "107.6"].every((n) => T.byNum["110.1"].paras[0].s.includes(`(rule ${n})`)));
 check("505 says what the spawn code does (the chart shape of rule 504.2), not a fixed '2.5 tiles'", !/2\.5 tiles/.test(rules) && rules.includes("every tile that a move onto it would chart (rule 504.2) is already charted"));
 
+console.log("the propose flow follows the viewer's day (what you were writing is yours only on the day and turn it began)");
+{
+  globalThis.document = { getElementById: () => null };
+  const st = { day: 2, ended: false };
+  const api = async () => ({ ok: true, status: 200, data: { day: st.day, proposals: [] } });
+  const day = () => ({ status: "playing", day: st.day, locked: false, you: { ended: st.ended, can: { propose: { allowed: !st.ended, reason: st.ended ? "Your turn has ended." : "" } } } });
+  const P = createProposer({ api, me: () => ({ player: {} }), day, refresh: async () => {} });
+  const book = parseRules(read("templates/RULES.md"));
+  P.attach({ RB: book, redraw() {}, openAdd() {}, openPick() {}, closeAdd() {} });
+  await P.load();
+  const r401 = book.byNum["401"], b400 = book.byNum["400"];
+  await P.click({ dataset: { p: "open", n: "401" } });
+  check("a menu opened on a rule shows", /class="pmenu"/.test(P.proposeHTML(r401)));
+  st.ended = true; await P.load();
+  check("after End turn (or the lock, or a proposal made elsewhere) the open menu is gone and Propose is off, with its reason", !/class="pmenu"/.test(P.proposeHTML(r401)) && /disabled title="Your turn has ended\."/.test(P.proposeHTML(r401)));
+  st.ended = false; await P.load();
+  await P.click({ dataset: { p: "open", n: "401" } }); st.day = 3; await P.load();
+  check("a menu or slip begun on day 2 is not there on day 3 (its draft would be refused)", !/class="pmenu"/.test(P.proposeHTML(r401)));
+  await P.click({ dataset: { p: "add", n: "400" } });
+  P.input({ id: "pfWords", value: "Draws are replayed." });
+  await P.click({ dataset: { p: "add", n: "400" } });
+  check("opening the add-a-rule card again keeps the words being written", P.addFlowHTML(b400).includes("Draws are replayed."));
+  await P.click({ dataset: { p: "add", n: "100" } });
+  check("a flow on another block starts fresh (one flow at a time, as before)", !P.addFlowHTML(book.byNum["100"]).includes("Draws are replayed.") && P.addFlowHTML(book.byNum["100"]).includes("pfWords"));
+  check("a new rule is keyed by its P number, never its number (two can be given the same one)", P.cardKey({ kind: "add", n: "P3", new_num: "404" }) === "P3" && P.cardKey({ kind: "amend", target: "401.2", n: "P4" }) === "401");
+  // drawing is pure: an add-a-rule card on the Back stack is drawn while another flow is open, and must not replace it
+  await P.click({ dataset: { p: "open", n: "401" } });   // day 3 now: a menu on 401
+  const before = P.proposeHTML(r401);
+  P.addFlowHTML(b400); P.addFlowHTML(b400);
+  check("drawing the add-a-rule card (it can sit on the Back stack) does not touch the flow on another rule", P.proposeHTML(r401) === before && /class="pmenu"/.test(before));
+  check("with no flow yet the add-a-rule card offers a button to start one, not a blank", /data-p="add" data-n="400">Write a new rule/.test(P.addFlowHTML(b400)));
+  // a day that could not be read says nothing: the flow is kept; a day that changed, or a turn that ended, ends it
+  const gone = { v: false };
+  const P2 = createProposer({ api, me: () => ({ player: {} }), day: () => (gone.v ? null : day()), refresh: async () => {} });
+  P2.attach({ RB: book, redraw() {}, openAdd() {}, openPick() {}, closeAdd() {} });
+  await P2.load(); await P2.click({ dataset: { p: "open", n: "401" } });
+  gone.v = true; await P2.load();
+  gone.v = false;
+  check("when /api/day could not be read the flow is kept (a network blip does not wipe what you were writing)", /class="pmenu"/.test(P2.proposeHTML(r401)));
+  delete globalThis.document;
+}
+
 console.log("one palette file, one set of pieces");
 const hexOk = (h) => /^#[0-9A-Fa-f]{6}$/.test(h);
 check("the colors are one list: 16 players, each with a unique lowercase key, a name, and main, shade, tint and deep hex values", PIECES.colors.length === 16 && new Set(PIECES.colors.map((c) => c.key)).size === 16 && PIECES.colors.every((c) => c.key === c.name.toLowerCase() && /^[a-z]+$/.test(c.key) && ["main", "shade", "tint", "deep"].every((k) => hexOk(c[k]))));
@@ -104,7 +147,9 @@ check("the display face is Kyrios first, then Grenze Gotisch", /--font-display: 
 check("every color token has a dark value (the page is never half dark)", ["--sea", "--surface", "--line", "--ink", "--ink-muted", "--accent", "--on-accent", "--land", "--outline"].every((t) => new RegExp(t + ":").test(dark)));
 check("the board's size rule applies to the board svg only, not to the svg each piece is drawn in (a piece keeps its own width and height)", /\.board-wrap>svg\s*\{[^}]*width:100%/.test(read("public/site.css")) && !/\.board-wrap\s+svg\s*\{/.test(read("public/site.css")));
 const sizing = read("public/site.css");
-check("no size rule reaches an svg through a descendant selector (each piece is an svg nested in the board, the preview, a thumbnail or a scoreboard icon, and keeps its own width and height)", !/\.(pv|players li|opt \.face|board-wrap) svg\s*\{/.test(sizing) && /\.pv>svg\s*\{/.test(sizing) && /\.opt \.thumb>svg\s*\{/.test(sizing) && /\.players li>svg\s*\{/.test(sizing));
+check("no size rule reaches an svg through a descendant selector (each piece is an svg nested in the board, the preview, a thumbnail or a players-list icon, and keeps its own width and height)", !/\.(pv|prow|opt \.face|board-wrap) svg\s*\{/.test(sizing) && /\.pv>svg\s*\{/.test(sizing) && /\.opt \.thumb>svg\s*\{/.test(sizing) && /\.prow>svg\s*\{/.test(sizing));
+check("a recently changed rule's warm sand is a token with a dark value too (no color lives outside theme.css)", /--warm1:/.test(css.slice(0, css.indexOf("@media"))) && /--warm1:/.test(dark) && !/#F2DFB4|#4C4023/i.test(read("public/site.css")));
+check("the page has no sticky or fixed elements except the card layer (S1-SUM-07)", !/position:\s*sticky/.test(read("public/site.css")) && (read("public/site.css").match(/position:\s*fixed/g) || []).length === 2);
 check("the pages no longer ship the WebGL board: no three.js in public/ or the Worker's routes", !readdirSync(pjoin(ROOT, "public")).includes("vendor") && !/three/i.test(read("src/index.ts")));
 
 console.log(`\n${pass} passed, ${fail} failed`);
