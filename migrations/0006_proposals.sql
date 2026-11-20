@@ -1,6 +1,6 @@
 -- Proposals (rules 103.1-103.4, 105.4): a player's plain words, the moderator's exact draft, the confirm that makes it
 -- the player's one proposal of the day, its P-number, and the ballot it goes on.
--- Additive: one new table and its indexes. No existing row changes.
+-- Additive: two new tables (proposals, draft_attempts) and their indexes. No existing row changes.
 --
 -- What it does to existing rows: nothing. games, players, days, day_turns and events are untouched. `turns` (the legacy
 -- prompt log) keeps every row, and from this change on nothing writes to it: a prompt written before proposals existed
@@ -61,3 +61,14 @@ CREATE UNIQUE INDEX proposals_number ON proposals(game_id, number);
 CREATE UNIQUE INDEX proposals_one_a_day ON proposals(game_id, player_id, day_proposed) WHERE status NOT IN ('draft', 'withdrawn');
 CREATE INDEX proposals_ballot ON proposals(game_id, day_ballot, status);
 CREATE INDEX proposals_target ON proposals(game_id, target);
+
+-- Drafting is free but may call a model: how many drafts each player has asked for on a day (every attempt, kept or
+-- not), so a cap holds even when drafts are refused or fail. New and empty.
+CREATE TABLE draft_attempts (
+  game_id TEXT NOT NULL,
+  player_id TEXT NOT NULL,
+  day INTEGER NOT NULL,
+  n INTEGER NOT NULL CHECK (n >= 1),
+  PRIMARY KEY (game_id, player_id, day),
+  FOREIGN KEY (game_id, player_id) REFERENCES players(game_id, id)
+);

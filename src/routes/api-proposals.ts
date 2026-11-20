@@ -21,7 +21,7 @@ import { Ctx, colorOf, json, nowIso, readJson, sha256Hex, siteUrl, who } from ".
 
 type Out = { status: number; body: any };
 const out = (body: any, status = 200): Out => ({ status, body });
-// Drafting is free, but each one may call a model: at most this many drafts a player a day.
+// Drafting is free, but each one may call a model: at most this many draft attempts a player a day (kept or not).
 export const DRAFTS_PER_DAY = 30;
 
 const books = new WeakMap<object, { md: string; book: any; sha: string }>();
@@ -72,16 +72,20 @@ export async function draft(ctx: Ctx, player: any, body: any, nowMs: number): Pr
   const { game, day, turn } = await loadToday(env, ctx.data.game!, nowMs, player.id);
   const blocked = turnBlock(game, day, turn, player, "propose", nowMs);
   if (blocked) return out(refusalBody(blocked), blocked.status);
-  const counts = (await env.DB.prepare(
-    `SELECT SUM(status = 'draft') AS drafts, SUM(status NOT IN ('draft', 'withdrawn')) AS confirmed
-     FROM proposals WHERE game_id = ? AND player_id = ? AND day_proposed = ?`,
+  const confirmed = (await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM proposals WHERE game_id = ? AND player_id = ? AND day_proposed = ? AND status NOT IN ('draft', 'withdrawn')",
   ).bind(game.id, player.id, game.day).first()) as any;
-  if (counts?.confirmed > 0) return out({ error: ALREADY }, 409);
-  if (counts?.drafts >= DRAFTS_PER_DAY) return out({ error: `That's ${DRAFTS_PER_DAY} drafts today. Confirm one, or try again tomorrow.` }, 429);
+  if (confirmed?.n > 0) return out({ error: ALREADY }, 409);
 
   const { md, book, sha } = await bookFor(game);
   const req = readRequest(book, body);
   if ("error" in req) return out({ error: req.error }, 400);
+  // Count the attempt BEFORE any model call, in one statement, so refused, failed and parallel drafts all count.
+  const slot = await env.DB.prepare(
+    `INSERT INTO draft_attempts (game_id, player_id, day, n) VALUES (?, ?, ?, 1)
+     ON CONFLICT (game_id, player_id, day) DO UPDATE SET n = n + 1 WHERE n < ?`,
+  ).bind(game.id, player.id, game.day, DRAFTS_PER_DAY).run();
+  if (!(slot?.meta?.changes > 0)) return out({ error: `That's ${DRAFTS_PER_DAY} drafts today. Confirm one, or try again tomorrow.` }, 429);
   let after: string | null = null, settings: Record<string, unknown> = {}, modelConflicts: string[] = [];
   if (needsModel(req)) {
     try {
@@ -214,9 +218,9 @@ export const get = async (ctx: Ctx) => {
   const rows = (await env.DB.prepare(
     `SELECT q.*, p.display_name AS name, p.color FROM proposals q JOIN players p ON p.game_id = q.game_id AND p.id = q.player_id
      WHERE q.game_id = ? AND (q.status IN ('on_ballot', 'passed', 'failed', 'enacted', 'not_applied') OR (q.status = 'confirmed' AND q.player_id = ?))
-       AND (? IS NULL OR q.target = ? OR q.target LIKE ? || '.%')
+       AND (? IS NULL OR q.target = ? OR substr(q.target, 1, length(?) + 1) = ? || '.')
      ORDER BY q.number`,
-  ).bind(game.id, player?.id ?? "", rule, rule, rule).all()).results as any[];
+  ).bind(game.id, player?.id ?? "", rule, rule, rule, rule).all()).results as any[];
   const n = await playerCount(env, game.id);
   const today = game.day;
   return json({

@@ -9,6 +9,13 @@ import { dayOpenSql } from "./day-gate.js";
 
 /** @rule 103.1 */
 export const parseBook = (md) => parseRules(md);
+// A number the book really has (never an inherited key such as "constructor" or "__proto__").
+/** @rule 103.1 */
+export const has = (book, num) => typeof num === "string" && Object.hasOwn(book.byNum, num);
+// Every rule or clause number a text cites: "rule 504.2", "Rule 504", "rules 202.4 and 203.1", "rules 101, 102 or 103".
+const CITE = /\b[Rr]ules? (\d{3}(?:\.\d+)?(?:(?:, | and | or |, and |, or )\d{3}(?:\.\d+)?)*)/g;
+/** @rule 108.3, 110.1 */
+export const citedIn = (text) => [...String(text).matchAll(CITE)].flatMap((m) => m[1].match(/\d{3}(?:\.\d+)?/g));
 
 export const KINDS = ["amend", "addclause", "add", "repeal", "move", "mark"];
 // The words the API also accepts for a kind ("reword" is what the menu calls "amend").
@@ -89,7 +96,7 @@ const SITE_FIXED = ["103.2", "107.1", "110.1", "202.4", "203.1"];
 export function fixedParts(book) {
   const out = new Set(SITE_FIXED);
   const c = book.byNum["110.1"];
-  if (c) for (const m of clauseText(c).matchAll(/\brules? (\d{3}(?:\.\d+)?)/g)) out.add(m[1]);
+  if (c) for (const n of citedIn(clauseText(c))) out.add(n);
   return [...out].sort();
 }
 // The fixed parts a change to `num` would touch: the number itself, a fixed clause inside a rule, or a fixed rule or
@@ -127,8 +134,7 @@ export function fixedRefusal(book, d) {
 export function referencesTo(book, num) {
   const out = [];
   const own = (k) => k === num || k.startsWith(num + ".") || num.startsWith(k + ".");
-  const re = /\brules? (\d{3}(?:\.\d+)?)/g;
-  const cites = (t) => [...t.matchAll(re)].some((m) => m[1] === num || m[1].startsWith(num + "."));
+  const cites = (t) => citedIn(t).some((n) => n === num || n.startsWith(num + "."));
   for (const sec of book.sections) for (const r of sec.rules) {
     if (!own(r.num) && r.paras.length && cites(r.paras.map(paraTxt).join(" "))) out.push(r.num);
     for (const c of r.clauses) if (!own(c.num) && cites(clauseText(c))) out.push(c.num);
@@ -148,8 +154,8 @@ export function readRequest(book, body) {
   const words = typeof body?.words === "string" ? body.words.trim() : typeof body?.prompt === "string" ? body.prompt.trim() : "";
   if ([...words].length > 2000) return { error: "Your words need at most 2000 characters." };
   const target = String(body?.target ?? body?.rule ?? (kind === "add" ? body?.block ?? body?.sec ?? "" : "")).trim();
-  const node = book.byNum[target];
-  if (!node) return { error: target ? `There is no rule ${target}.` : "Say which rule the change is to." };
+  const node = has(book, target) ? book.byNum[target] : null;
+  if (!node) return { error: target ? `There is no rule ${target.slice(0, 20)}.` : "Say which rule the change is to." };
   const scope = node.kind;
   if (kind === "add" && scope !== "block") return { error: "A new rule goes in a block: name the block, like 400." };
   if (kind !== "add" && kind !== "mark" && scope === "block") return { error: "Pick a rule or a clause in the block." };
@@ -164,7 +170,7 @@ export function readRequest(book, body) {
   if (kind === "add") to_block = target;
   if (kind === "move") {
     to_block = String(body?.to ?? body?.to_block ?? "").trim();
-    const b = book.byNum[to_block];
+    const b = has(book, to_block) ? book.byNum[to_block] : null;
     if (!b || b.kind !== "block") return { error: "Say which block the rule moves to, like 300." };
     if (b.num === node.sec.num) return { error: `Rule ${target} is already in block ${b.num}.` };
   }
@@ -240,7 +246,7 @@ export function readModelAnswer(book, req, raw) {
   if (a.conflicts !== undefined && !Array.isArray(a.conflicts)) return { error: "malformed" };
   if (a.settings !== undefined && (typeof a.settings !== "object" || a.settings === null || Array.isArray(a.settings))) return { error: "malformed" };
   const own = (k) => k === req.target || k.startsWith(req.target + ".") || req.target.startsWith(k + ".");
-  const conflicts = [...new Set((a.conflicts || []).map(String).filter((n) => /^\d{3}(\.\d+)?$/.test(n) && book.byNum[n] && !own(n)))];
+  const conflicts = [...new Set((a.conflicts || []).map(String).filter((n) => /^\d{3}(\.\d+)?$/.test(n) && has(book, n) && !own(n)))];
   const node = book.byNum[req.target];
   const src = node.kind === "clause" ? node.paras.map(paraTxt).join(" ") : [...node.paras.map(paraTxt), ...node.clauses.flatMap((c) => c.paras.map(paraTxt))].join(" ");
   const tags = new Set([...src.matchAll(/\[setting:\s*([\w.]+)\s*\]/g)].map((m) => m[1]));

@@ -9,8 +9,9 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join as pjoin } from "node:path";
 import { ROOT, client, createGame, d1, join, migrate, newState, startPlaying, startRulesStub, startServer } from "./lib.mjs";
+import { dayOpenBinds } from "../src/lib/day-gate.js";
 import {
-  draftOf, fixedParts, fixedRefusal, markFor, needsModel, parseBook, readModelAnswer, readRequest, referencesTo,
+  CONFIRM_SQL, DRAFT_INSERT_SQL, WITHDRAW_SQL, citedIn, draftOf, fixedParts, fixedRefusal, markFor, needsModel, parseBook, readModelAnswer, readRequest, referencesTo,
 } from "../src/lib/proposals.js";
 
 let pass = 0, fail = 0;
@@ -46,6 +47,11 @@ console.log("the moderator's code drafts (rule 103.1), after the mockup's makeDr
   ({ r, d } = drafted({ kind: "reword", target: "401", words: "A player whose proposal passes gets 15 points.", prefilled: true }));
   check("reword with the current text edited in place (prefilled) is exact already: drafted by code, the words are the new text", !needsModel(r) && r.kind === "amend" && d.head === "Amend rule 401 (Points) to read:" && d.after_text === "A player whose proposal passes gets 15 points." && d.before_text === "A player whose proposal passes gets 10 points.", J(d));
   check("reword in plain words needs the small model; a clause reword is headed 'Edit clause 504.2 (...) to read:'", needsModel(req({ kind: "reword", target: "401", words: "15 points" })) && draftOf(B, req({ kind: "amend", target: "504.2", words: "x" }), "new").head.startsWith("Edit clause 504.2 ("));
+  check("a target that is an inherited object key (constructor, __proto__, toString, hasOwnProperty) is no rule, for every kind (no junk draft, no crash)",
+    ["constructor", "__proto__", "toString", "hasOwnProperty"].every((t) => ["amend", "addclause", "add", "repeal", "move", "mark"].every((k) => /There is no rule/.test(req({ kind: k, target: t, words: "x", to: "300", prefilled: true }).error || ""))) &&
+    /Say which block/.test(req({ kind: "move", target: "403", to: "constructor" }).error));
+  check("citations are read in every form the text uses: 'rule 504.2', 'Rule 504', 'rules 202.4 and 203.1', 'rules 101, 102 or 103'",
+    J(citedIn("See rule 504.2. Rule 504 too, and rules 202.4 and 203.1, and rules 101, 102 or 103.")) === J(["504.2", "504", "202.4", "203.1", "101", "102", "103"]));
   check("no merge, split or 'change the setting' kind: they are refused as unknown kinds", ["merge", "split", "setting"].every((k) => "error" in req({ kind: k, target: "401" })));
   check("requests that can't be drafted say why: no such rule, a mark on a clause, moving a clause, a move to its own block, reword with no words",
     /no rule 999/.test(req({ kind: "repeal", target: "999" }).error) && /not a clause/.test(req({ kind: "mark", target: "202.2" }).error) && /whole rule/.test(req({ kind: "move", target: "202.2", to: "300" }).error) &&
@@ -261,6 +267,38 @@ try {
   const t2 = await bo.post("/prop/api/turn", { kind: "addclause", target: "401", words: "Points are whole numbers." });
   check("/api/turn is draft + confirm in one call: Bo's day-2 proposal is P5 on day 3's ballot; a bare {prompt} is refused with what to send",
     t2.status === 200 && t2.data.proposal.n === "P5" && t2.data.proposal.day_ballot === 3 && (await cy.post("/prop/api/turn", { prompt: "Make it rain." })).status === 400, t2.text);
+
+  console.log("guards: stale drafts, the draft cap, filters, and each write's own SQL");
+  const cyd2 = await cy.post(P, { kind: "repeal", target: "402" });
+  d1(state, `UPDATE proposals SET base_sha = 'stale' WHERE id = '${cyd2.data.proposal.id}'`);
+  const stale = await cy.post(`${P}/${cyd2.data.proposal.id}/confirm`, {});
+  check("a draft made against rules that have since changed (another bundle) can't be confirmed: 409, draft it again", stale.status === 409 && /rules have changed/.test(stale.data.error), stale.text);
+  const cyId = d1(state, `SELECT id FROM players WHERE display_name = 'Cy'`)[0].id;
+  d1(state, `UPDATE draft_attempts SET n = 29 WHERE game_id = '${gid}' AND player_id = '${cyId}' AND day = 2`);
+  model.next = { status: 200, text: "garbled" };
+  const g29 = await cy.post(P, { kind: "reword", target: "401", words: "15" });
+  model.next = null;
+  const before30 = model.calls.length;
+  const g30 = await cy.post(P, { kind: "reword", target: "401", words: "15" });
+  check("every draft attempt counts toward the 30 a day, a garbled one too, and the cap is checked before the model is called (429, no model call)",
+    g29.status === 502 && g30.status === 429 && model.calls.length === before30 && d1(state, `SELECT n FROM draft_attempts WHERE game_id = '${gid}' AND player_id = '${cyId}' AND day = 2`)[0].n === 30, g29.text + g30.text);
+  check("?rule= is matched exactly, not as a pattern: ?rule=% and ?rule=_ match nothing", (await client(A).get(`${P}?rule=%25`)).data.proposals.length === 0 && (await client(A).get(`${P}?rule=_`)).data.proposals.length === 0);
+  const lit = (x) => (x === null ? "NULL" : typeof x === "number" ? String(x) : `'${String(x).replace(/'/g, "''")}'`);
+  const sqlRun = (q, binds) => { let i = 0; d1(state, q.replace(/\?/g, () => lit(binds[i++]))); };
+  const ends2 = d1(state, `SELECT ends_at FROM days WHERE game_id = '${gid}' AND n = 2`)[0].ends_at;
+  const past = new Date(Date.parse(ends2) + 1000).toISOString(), justBefore = new Date(Date.parse(ends2) - 1000).toISOString();
+  const boId = d1(state, `SELECT id FROM players WHERE display_name = 'Bo'`)[0].id;
+  const draftRow = (id, iso) => sqlRun(DRAFT_INSERT_SQL, [id, boId, "repeal", "rule", "402", null, null, "", null, "h", "", "", "[]", "{}", "code", "s", iso, gid, ...dayOpenBinds(2, Date.parse(iso), boId)]);
+  draftRow("qa-fixture-d1", past); draftRow("qa-fixture-d2", justBefore);
+  check("the draft INSERT's own guard: with a time past day 2's midnight it lands nothing; 1 s before, it lands", J(d1(state, "SELECT id FROM proposals WHERE id LIKE 'qa-fixture-%'").map((r) => r.id)) === J(["qa-fixture-d2"]));
+  const p5 = t2.data.proposal.number;
+  const p5id = d1(state, `SELECT id FROM proposals WHERE game_id = '${gid}' AND number = ${p5}`)[0].id;
+  sqlRun(WITHDRAW_SQL, [past, p5id, 2, ...dayOpenBinds(2, Date.parse(past), boId)]);
+  const w5a = d1(state, `SELECT status FROM proposals WHERE id = '${p5id}'`)[0].status;
+  sqlRun(WITHDRAW_SQL, [justBefore, p5id, 2, ...dayOpenBinds(2, Date.parse(justBefore), boId)]);
+  check("the withdraw UPDATE's own guard: past midnight it changes nothing; 1 s before, it withdraws", w5a === "confirmed" && d1(state, `SELECT status FROM proposals WHERE id = '${p5id}'`)[0].status === "withdrawn");
+  d1(state, "DELETE FROM proposals WHERE id LIKE 'qa-fixture-%'");
+  check("CONFIRM_SQL is the statement the route runs (one guard for both)", /status = 'confirmed'/.test(CONFIRM_SQL) && /d\.ends_at > \?/.test(CONFIRM_SQL));
 
   console.log("no key: rewording is unavailable, the rest still works");
   migrate(state2);
