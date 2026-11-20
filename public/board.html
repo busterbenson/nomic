@@ -371,6 +371,7 @@
       return `<li class="${me ? "mine" : ""}"><button type="button" class="prow" data-pl="${esc(p.color.key)}" id="pr-${esc(p.color.key)}" aria-label="${esc(p.name)}${me ? " (you)" : ""}: open player card">${mini(p, "pz")}<span>${esc(p.name)}${me ? ' <span class="muted you">(you)</span>' : ""}<span class="st" data-slot="player-today">${endedBy.has(p.name) ? "turn ended" : ""}</span></span><b>${esc(p.score)}</b></button></li>`;
     }).join("");
     drawAcct();
+    drawMoveBar();   // what the bar says depends on the game (setting up, playing)
     if (TAB === "history") drawBook();
     if (CARDS && CARDS.isOpen()) CARDS.redraw();
   }

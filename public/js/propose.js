@@ -79,7 +79,9 @@ export function createProposer({ api, me, day, refresh, pill }) {
     S.list = r.ok && r.data ? r.data.proposals || [] : [];
     S.today = r.ok && r.data ? r.data.day : null;
     // What you were writing belongs to the day and the turn it began on: after End turn, the midnight lock, a new day or a proposal made elsewhere it is no longer yours to send.
-    if (S.ui && !S.ui.wId && !S.ui.busy && (S.ui.day !== (day() && day().day) || !can().allowed)) S.ui = null;
+    // (A day that could not be read says nothing: the flow is kept until it can be.)
+    const d = day();
+    if (S.ui && !S.ui.wId && !S.ui.busy && d && d.day && (S.ui.day !== d.day || !can().allowed)) S.ui = null;
   }
 
   /** @rule 103.1 */
@@ -222,7 +224,8 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
     if (m && m.kind === "add" && m.target === sec.num) return chgHTML(m);
     if (m) return `<p class="mnote">You have already proposed today (${esc(m.n)}). One proposal a day.</p>`;
     if (!c.allowed) return `<p class="mnote">${esc(c.reason || "You can't propose right now.")}</p>`;
-    if (!(u && u.kind === "add" && u.rule === sec.num)) startAdd(sec.num);   // the card is never an empty shell: it opens on the form
+    // Drawing never changes what you are writing (a card on the Back stack is drawn too): no flow yet is a button that starts one.
+    if (!(u && u.kind === "add" && u.rule === sec.num)) return `<button type="button" class="btn ghost small" data-p="add" data-n="${esc(sec.num)}">Write a new rule</button>`;
     return flowHTML();
   }
   // Which block a new rule goes in: the choice the banner's button opens.

@@ -103,6 +103,20 @@ console.log("the propose flow follows the viewer's day (what you were writing is
   await P.click({ dataset: { p: "add", n: "100" } });
   check("a flow on another block starts fresh (one flow at a time, as before)", !P.addFlowHTML(book.byNum["100"]).includes("Draws are replayed.") && P.addFlowHTML(book.byNum["100"]).includes("pfWords"));
   check("a new rule is keyed by its P number, never its number (two can be given the same one)", P.cardKey({ kind: "add", n: "P3", new_num: "404" }) === "P3" && P.cardKey({ kind: "amend", target: "401.2", n: "P4" }) === "401");
+  // drawing is pure: an add-a-rule card on the Back stack is drawn while another flow is open, and must not replace it
+  await P.click({ dataset: { p: "open", n: "401" } });   // day 3 now: a menu on 401
+  const before = P.proposeHTML(r401);
+  P.addFlowHTML(b400); P.addFlowHTML(b400);
+  check("drawing the add-a-rule card (it can sit on the Back stack) does not touch the flow on another rule", P.proposeHTML(r401) === before && /class="pmenu"/.test(before));
+  check("with no flow yet the add-a-rule card offers a button to start one, not a blank", /data-p="add" data-n="400">Write a new rule/.test(P.addFlowHTML(b400)));
+  // a day that could not be read says nothing: the flow is kept; a day that changed, or a turn that ended, ends it
+  const gone = { v: false };
+  const P2 = createProposer({ api, me: () => ({ player: {} }), day: () => (gone.v ? null : day()), refresh: async () => {} });
+  P2.attach({ RB: book, redraw() {}, openAdd() {}, openPick() {}, closeAdd() {} });
+  await P2.load(); await P2.click({ dataset: { p: "open", n: "401" } });
+  gone.v = true; await P2.load();
+  gone.v = false;
+  check("when /api/day could not be read the flow is kept (a network blip does not wipe what you were writing)", /class="pmenu"/.test(P2.proposeHTML(r401)));
   delete globalThis.document;
 }
 
