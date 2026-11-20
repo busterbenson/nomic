@@ -27,8 +27,12 @@ export function ticketView(r: any, viewerId?: string | null) {
 export async function commissionsFor(env: Ctx["env"], gameId: string, ids: string[]) {
   const map = new Map<string, ReturnType<typeof ticketView>>();
   if (!ids.length) return map;
-  const rows = (await env.DB.prepare(`SELECT ${COLS} ${FROM} WHERE t.game_id = ? AND t.proposal_id IN (${ids.map(() => "?").join(",")})`).bind(gameId, ...ids).all()).results as any[];
-  for (const r of rows) map.set(r.proposal_id, ticketView(r));
+  // D1 refuses more than 100 bound values in one query (the game id takes one), so look them up 99 at a time.
+  for (let i = 0; i < ids.length; i += 99) {
+    const part = ids.slice(i, i + 99);
+    const rows = (await env.DB.prepare(`SELECT ${COLS} ${FROM} WHERE t.game_id = ? AND t.proposal_id IN (${part.map(() => "?").join(",")})`).bind(gameId, ...part).all()).results as any[];
+    for (const r of rows) map.set(r.proposal_id, ticketView(r));
+  }
   return map;
 }
 

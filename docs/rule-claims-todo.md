@@ -123,7 +123,7 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/lib/tickets.js (1)
 
-- line 155: `pts`
+- line 156: `pts`
 
 ## src/lib/util.ts (27)
 

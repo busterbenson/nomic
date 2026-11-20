@@ -424,6 +424,12 @@ try {
     const f = (await visitor.get(`${T}?all=1&state=Shelved`)).data;
     check("a state filter lists only that state", f.tickets.length > 0 && f.tickets.every((t) => t.state === "Shelved") && f.counts.Shelved >= 60, J([f.tickets.length, f.counts]));
     check("a bad state or cursor is a 400; other players' drafts never appear", (await visitor.get(`${T}?all=1&state=Nope`)).status === 400 && (await visitor.get(`${T}?all=1&cursor=zzz`)).status === 400 && !(await visitor.get(`${T}?all=1&state=Draft`)).data.tickets.length);
+    // D1 refuses a query with more than 100 bound parameters, so the ballot's ticket lookup must not bind every commission at once.
+    d1(state, `WITH RECURSIVE c(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM c WHERE i < 120) INSERT INTO proposals (id, game_id, player_id, number, day_proposed, day_ballot, kind, scope, target, draft_head, drafted_by, base_sha, mark, status, confirmed_at, created_at) SELECT 'bulkp' || i, '${gid}', '${id.Ana}', 2000 + i, 1, 2, 'commission', 'block', '800', 'h', 'code', 's', 'majority', 'approved', '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z' FROM c; UPDATE tickets SET proposal_id = 'bulkp' || substr(id, 5) WHERE id LIKE 'bulk%'`);
+    const many = await Ana.get("/wk/api/proposals");
+    const withTicket = (many.data?.proposals ?? []).filter((q) => String(q.id ?? "").startsWith("bulkp") && q.ticket);
+    check("with 120 commissions the proposals list still loads and every one carries its ticket (no query binds more than 100 values)", many.status === 200 && withTicket.length === 120, J([many.status, withTicket.length, many.data?.error]));
+    d1(state, `UPDATE tickets SET proposal_id = NULL WHERE id LIKE 'bulk%'; DELETE FROM proposals WHERE id LIKE 'bulkp%'`);
     d1(state, `DELETE FROM tickets WHERE id LIKE 'bulk%'`);
   }
 } catch (e) {
