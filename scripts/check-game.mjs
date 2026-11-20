@@ -11,11 +11,11 @@ import { assembleRules, checkRulebook } from "../src/engine/testing.js";
 const dir = process.argv[2];
 const rulesDir = join(dir, "rules");
 const problems = [];
+const mods = [];
 try {
   const rulesMd = readFileSync(join(dir, "RULES.md"), "utf8");
   const settings = JSON.parse(readFileSync(join(dir, "settings.json"), "utf8"));
   const files = readdirSync(rulesDir).filter((f) => /^\d+\.ts$/.test(f)).sort();
-  const mods = [];
   for (const f of files) {
     const mod = (await import(pathToFileURL(join(rulesDir, f)).href)).default;
     if (!mod || mod.rule !== Number(f.slice(0, -3))) problems.push(`rules/${f} must default-export defineRule({ rule: ${Number(f.slice(0, -3))}, ... })`);
@@ -26,4 +26,5 @@ try {
 } catch (e) {
   problems.push(`could not load the game: ${e.message}`);
 }
-console.log(JSON.stringify({ problems }));
+const hooks = Object.fromEntries(mods.map((m) => [m.rule, Object.keys(m).filter((k) => k !== "rule")]));
+console.log(JSON.stringify({ problems, hooks }));

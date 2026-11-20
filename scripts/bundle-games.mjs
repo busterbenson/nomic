@@ -9,6 +9,9 @@
 //   * game.json says engine 1 and lists exactly the modules in rules/
 //   * every module passes the lint (src/engine/lint.js): it imports only "promptocracy/engine" and uses no
 //     network, global or process names
+//   * every function in a module has a `@rule <n>` tag, and each tag names a rule or clause in the game's RULES.md
+//     (src/engine/claims.js, docs/rule-claims.md). The claims become a map rule -> file#function, and
+//     `worksWith` records which other rules share each rule's hooks, both written into the bundle for rule cards
 //   * the modules load and assemble (exactly one spawn rule), and RULES.md, settings.json and the modules agree
 //     (the same check as the game's own rulebook test)
 //   * the game's own tests (node --test rules/*.test.ts) pass against THIS engine
@@ -22,11 +25,12 @@
 //   BUNDLE_OUT=dir        where to write (default src/generated)
 //   BUNDLE_SKIP_TESTS=1   skip running the tests (the wrangler dev of the test suite; the tests run them once, directly)
 import { execFileSync, spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { ENGINE_VERSION } from "../src/engine/api.js";
+import { checkFileClaims, claimMap, knownNumbers, worksWith } from "../src/engine/claims.js";
 import { lintModule } from "../src/engine/lint.js";
 import { checkRulebook } from "../src/engine/rulesmd.js";
 import { validateSettings } from "../src/lib/settings.js";
@@ -34,7 +38,7 @@ import { validateSettings } from "../src/lib/settings.js";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const MAX_RULES_BYTES = 200_000;
 const SLUG = /^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/;
-const REPO = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+const REPO = /^[A-Za-z0-9_-][A-Za-z0-9._-]*\/[A-Za-z0-9_-][A-Za-z0-9._-]*$/;
 
 export class BundleError extends Error {}
 const fail = (m) => { throw new BundleError(m); };
@@ -43,7 +47,7 @@ const fail = (m) => { throw new BundleError(m); };
 const scrubbedEnv = (home) => ({ PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: home, NODE_ENV: "test", LANG: "C.UTF-8", NO_COLOR: "1" });
 const stripFlags = () => (process.features?.typescript ? [] : ["--experimental-strip-types", "--no-warnings"]);
 
-function runNode(args, cwd, label, { timeout = 120_000 } = {}) {
+export function runNode(args, cwd, label, { timeout = 120_000 } = {}) {
   const home = mkdtempSync(join(tmpdir(), "bundle-home-"));
   try {
     const r = spawnSync(process.execPath, [...stripFlags(), ...args], { cwd, env: scrubbedEnv(home), encoding: "utf8", timeout, maxBuffer: 20 * 1024 * 1024 });
@@ -60,7 +64,8 @@ export function latestDayTag(url) {
   let out;
   try { out = git(["ls-remote", "--tags", "--refs", url, "refs/tags/day-*"]); }
   catch (e) { fail(`could not list the tags of ${url} (is the repo public and reachable?): ${String(e.stderr || e.message).trim().split("\n").pop()}`); }
-  const days = out.split("\n").map((l) => /refs\/tags\/day-(\d+)$/.exec(l.trim())).filter(Boolean).map((m) => Number(m[1]));
+  // day-N with at most 6 digits: a longer tag is not a day (and day-99999999999999999999999 must not turn into 1e+23).
+  const days = out.split("\n").map((l) => /refs\/tags\/day-(\d{1,6})$/.exec(l.trim())).filter(Boolean).map((m) => Number(m[1]));
   if (!days.length) fail(`${url} has no day-N tag yet. Tag the game's main (for example day-0) before this build.`);
   const day = Math.max(...days);
   return { tag: `day-${day}`, day };
@@ -77,10 +82,22 @@ function fetchGame(slug, repo, base, into) {
   return { dir, tag, day, sha };
 }
 
+// A fetched game must be plain files and folders: a symlink could point the build at a file outside the game
+// (RULES.md -> a file with secrets would be published at /api/rules).
+export function assertNoLinks(dir, label) {
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name);
+    const st = lstatSync(p);
+    if (st.isSymbolicLink()) fail(`${label}: ${p.slice(dir.length)} is a symlink; a game may hold only plain files and folders`);
+    if (st.isDirectory()) assertNoLinks(p, label);
+  }
+}
+
 // ---- checking one game tree ---------------------------------------------------------------------
 const readJson = (p, what) => { try { return JSON.parse(readFileSync(p, "utf8")); } catch (e) { fail(`${what} is missing or is not valid JSON (${e.message})`); } };
 
 export function checkTree(dir, label, { starter = false, skipTests = false } = {}) {
+  assertNoLinks(dir, label);
   const rulesPath = join(dir, "RULES.md");
   if (!existsSync(rulesPath)) fail(`${label}: RULES.md is missing`);
   if (statSync(rulesPath).size > MAX_RULES_BYTES) fail(`${label}: RULES.md is too large`);
@@ -98,9 +115,20 @@ export function checkTree(dir, label, { starter = false, skipTests = false } = {
     const present = files.map((f) => parseInt(f)).join(",");
     if (listed !== present) fail(`${label}: game.json lists modules [${listed}] but rules/ holds [${present}]`);
   }
+  // rules/ holds rule modules (<n>.ts) and their tests (<name>.test.ts), nothing else.
+  const tests = readdirSync(rulesDir).filter((f) => /^[A-Za-z0-9_-]+\.test\.ts$/.test(f)).sort();
+  const stray = readdirSync(rulesDir).filter((f) => !files.includes(f) && !tests.includes(f));
+  if (stray.length) fail(`${label}: rules/ may hold only rule modules (<n>.ts) and tests (<name>.test.ts), not ${stray.join(", ")}`);
   const problems = [];
-  for (const f of files) problems.push(...lintModule(readFileSync(join(rulesDir, f), "utf8"), `${label} rules/${f}`));
+  for (const f of files) problems.push(...lintModule(readFileSync(join(rulesDir, f), "utf8"), `${label} rules/${f}`, "module"));
+  for (const f of tests) problems.push(...lintModule(readFileSync(join(rulesDir, f), "utf8"), `${label} rules/${f}`, "test"));
   if (problems.length) fail(`lint failed:\n  ${problems.join("\n  ")}`);
+  // Every function claims a rule of this game's text, and the claims become the map the rule cards read.
+  const known = knownNumbers(rulesMd);
+  const sources = Object.fromEntries(files.map((f) => [`rules/${f}`, readFileSync(join(rulesDir, f), "utf8")]));
+  const unclaimed = Object.entries(sources).flatMap(([f, src]) => checkFileClaims(f, src, known));
+  if (unclaimed.length) fail(`${label}: rule claims failed:\n  ${unclaimed.join("\n  ")}`);
+  const claims = claimMap(sources);
 
   // Game code runs only from here on, and only in a child with a scrubbed environment.
   if (!starter) {
@@ -113,15 +141,15 @@ export function checkTree(dir, label, { starter = false, skipTests = false } = {
   try { verdict = JSON.parse(chk.stdout.trim().split("\n").pop()); } catch { fail(`${label}: the module check did not run:\n${chk.out.slice(-1500)}`); }
   if (verdict.problems.length) fail(`${label}: ${verdict.problems.join("\n  ")}`);
 
-  let tests = "skipped";
+  let testSummary = "skipped";
   if (!skipTests) {
-    const tf = readdirSync(rulesDir).filter((f) => /\.test\.ts$/.test(f)).map((f) => `rules/${f}`);
+    const tf = tests.map((f) => `rules/${f}`);
     if (!tf.length) fail(`${label}: no tests (rules/*.test.ts). A game's rules need tests.`);
     const t = runNode(["--test", ...tf], dir, "tests");
     if (!t.ok) fail(`${label}: the game's tests fail against this engine:\n${t.out.slice(-4000)}`);
-    tests = `${(/# pass (\d+)/.exec(t.out) ?? [])[1] ?? "?"} passed`;
+    testSummary = `${(/# pass (\d+)/.exec(t.out) ?? [])[1] ?? "?"} passed`;
   }
-  return { rulesMd, settings, files, tests };
+  return { rulesMd, settings, files, tests: testSummary, claims, worksWith: worksWith(verdict.hooks ?? {}) };
 }
 
 // ---- writing the bundle ------------------------------------------------------------------------------
@@ -141,9 +169,13 @@ export function writeBundle(out, entries, starter) {
   const games = entries.map((e) => ({ e, names: place(`games/${e.slug}`, e.dir, e.files) }));
   const st = { names: place("starter", starter.dir, starter.files), ...starter };
   const obj = ({ names, ...meta }) => `{ ${Object.entries(meta).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(", ")}, modules: [${names.join(", ")}] }`;
+  // The platform's own claims (src/engine), so a rule card can show the engine code too.
+  const eng = join(ROOT, "src", "engine");
+  const engineSources = Object.fromEntries(readdirSync(eng).filter((f) => /\.(js|ts)$/.test(f) && !/\.d\.ts$/.test(f)).sort().map((f) => [`src/engine/${f}`, readFileSync(join(eng, f), "utf8")]));
+  lines.push("", `// Rule number -> the functions that carry it out ("the code that does this"), for rule cards.`, `export const ENGINE_CLAIMS: Record<string, string[]> = ${JSON.stringify(claimMap(engineSources))};`);
   lines.push("", "export const GAMES: Record<string, any> = {");
-  for (const g of games) lines.push(`  ${JSON.stringify(g.e.slug)}: ${obj({ names: g.names, slug: g.e.slug, repo: g.e.repo, tag: g.e.tag, day: g.e.day, sha: g.e.sha, rulesMd: g.e.rulesMd, settings: g.e.settings })},`);
-  lines.push("};", "", `export const STARTER: any = ${obj({ names: st.names, rulesMd: st.rulesMd, settings: st.settings })};`, "");
+  for (const g of games) lines.push(`  ${JSON.stringify(g.e.slug)}: ${obj({ names: g.names, slug: g.e.slug, repo: g.e.repo, tag: g.e.tag, day: g.e.day, sha: g.e.sha, rulesMd: g.e.rulesMd, settings: g.e.settings, claims: g.e.claims, worksWith: g.e.worksWith })},`);
+  lines.push("};", "", `export const STARTER: any = ${obj({ names: st.names, rulesMd: st.rulesMd, settings: st.settings, claims: st.claims, worksWith: st.worksWith })};`, "");
   writeFileSync(join(out, "games.ts"), lines.join("\n"));
 }
 
@@ -151,6 +183,8 @@ export function writeBundle(out, entries, starter) {
 export function bundleGames(env = process.env) {
   const out = resolve(ROOT, env.BUNDLE_OUT || "src/generated");
   const skipTests = env.BUNDLE_SKIP_TESTS === "1";
+  // These knobs redirect where production code comes from. Workers Builds sets WORKERS_CI; refuse them there.
+  if (env.WORKERS_CI) for (const k of ["GAMES_SOURCE", "GAMES_GIT_BASE", "GAMES_MANIFEST", "BUNDLE_SKIP_TESTS", "BUNDLE_OUT"]) if (env[k]) fail(`${k} is set in a Workers Builds build; it is for local runs and tests only`);
   const work = mkdtempSync(join(tmpdir(), "bundle-games-"));
   const log = (m) => console.log(`bundle-games: ${m}`);
   try {

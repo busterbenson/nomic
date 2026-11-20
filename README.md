@@ -21,7 +21,7 @@ board and by email.
 - `migrations/`: the D1 schema (`0001_init.sql`, `0002_island_board.sql`, `0003_mcp_oauth.sql`, `0004_piece_shape.sql`)
 - `templates/RULES.md`: the starter ruleset a new game repo begins with; `templates/settings.json` and `templates/rules/` are its settings and rule modules, the starter pack that games with no bundle run on
 - `src/engine/`: the rule-module engine (hooks, effects, the module lint); `src/generated/` is written at build time and not committed
-- `games.manifest.json`, `scripts/bundle-games.mjs`: which games the build bundles, and the script that bundles them
+- `games.manifest.json`, `scripts/bundle-games.mjs`: which games the build bundles, and the script that bundles them; `scripts/check-rule-claims.mjs` checks that every function claims a rule (`docs/rule-claims.md`)
 - `scripts/create-game.sh`: creates a game and prints its join link
 - `tests/`: end-to-end tests and the screenshot script
 - `DESIGN.md`: how the game works and what is still undecided
@@ -162,11 +162,15 @@ that exports `defineRule({ rule: n, <hook>(ctx, ...) { ... } })` from `promptocr
 data and return plain data (a refusal, a list of effects, a tile); they never see the database, the environment
 or the request. The engine runs them and applies what they say in the same D1 batch as the action. Today's hooks:
 
-| Hook | Called | Combined |
+| Hook | Called | Combine mode |
 |---|---|---|
-| `actionAllowed(ctx, actor, action)` | before a move or a proposal, after the engine's own gates (game playing, your turn) | every module, in rule order; the first refusal `{error, status?}` wins |
-| `afterAction(ctx, actor, action)` | in the move's own batch | effects of every module, joined; today only `chart` is applied |
-| `spawnTile(ctx, candidates)` | at join | exactly one module; zero or two fails the build |
+| `actionAllowed(ctx, actor, action)` | before a move or a proposal, after the engine's own gates (game playing, your turn) | `veto`: every module in rule order, any may refuse `{error, status?}` (the engine records which rule); the first refusal wins |
+| `afterAction(ctx, actor, action)` | in the move's own batch | `sequence`: every module in rule order, effects joined; today only `chart` is applied |
+| `spawnTile(ctx, candidates)` | at join | `decide`: exactly one module; zero or two fails the build (no precedence between competing handlers until Buster approves one) |
+
+Rules never edit each other's code: each rule module registers its own handlers and the engine calls them all.
+Every function claims the rule it carries out with a `@rule <n>` tag, checked by `npm test` and by the build, and the
+bundle carries a rule -> code map for rule cards: see `docs/rule-claims.md`.
 
 `voteMark`, `electorate`, `tally`, `applyOrder`, `onEnacted` and `dayEnd` have their types settled in
 `src/engine/api.d.ts` but are not called yet. The engine only ever grows by adding. The starter pack

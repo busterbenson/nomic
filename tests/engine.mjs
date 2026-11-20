@@ -11,8 +11,10 @@ import { ACTION_KINDS, HOOKS, RuleError, RuleSetError, assembleRules, deepFreeze
 import { lintModule } from "../src/engine/lint.js";
 import { checkRulebook, parseRulesMd } from "../src/engine/rulesmd.js";
 import { DEFAULT_SETTINGS, validateSettings } from "../src/lib/settings.js";
-import { BundleError, bundleGames, latestDayTag } from "../scripts/bundle-games.mjs";
+import { BundleError, bundleGames, latestDayTag, runNode } from "../scripts/bundle-games.mjs";
 import * as api from "../src/engine/api.js";
+import { checkFileClaims, claimMap, findFunctions, knownNumbers, overClaimed, worksWith } from "../src/engine/claims.js";
+import { runClaimsCheck, todoDoc } from "../scripts/check-rule-claims.mjs";
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = "") => {
@@ -132,11 +134,22 @@ for (const bad of ["globalThis", "self", "window", "eval", "Function", "process"
   check(`${bad} is refused`, L(`const x = ${bad};`).some((p) => p.includes(`"${bad}"`)), J(L(`const x = ${bad};`)));
 }
 check("an import of anything else is refused: node:fs, a relative file, a package, a url", ["node:fs", "./helper.ts", "zod", "https://evil.example/x.js", "promptocracy/engine/testing", "promptocracy"].every((s) => L(`import x from "${s}";`).length > 0));
-check("a type-only import, a re-export and export * from another module are refused too", L(`import type { T } from "zod";`).length > 0 && L(`export { a } from "./a.ts";`).length > 0 && L(`export * from "./a.ts";`).length > 0);
+check("a re-export of another module and export * are refused; a type-only import is erased (not an import at all)", L(`export { a } from "./a.ts";`).length > 0 && L(`export * from "./a.ts";`).length > 0 && L(`import type { T } from "zod"; export const a = 1;`).length === 0);
 check("dynamic import(), import.meta and a bare import are refused", L(`await import("node:fs");`).length > 0 && L(`const u = import.meta.url;`).length > 0 && L(`import "node:fs";`).length > 0 && L(`await import ('x')`).length > 0);
-check("the scan reads raw text: a banned word hidden in a comment or after a regex literal with a quote is still caught", L(`// fetch\nconst a = 1;`).length > 0 && L(`const r = /'/; fetch(u); const s = '';`).length > 0);
+check("an UNUSED import of another module is still refused (TypeScript would drop it; node would run it)", L(`import fs from "node:fs";\nexport const a = 1;`).length > 0);
+check("no trick hides a banned import or name: a comment between import and (, between from and the quote, a unicode escape of fetch or env, a regex literal holding a quote", [
+  `export const f = () => import/**/("cloudflare:workers");`,
+  `import {x} from /* c */ "cloudflare:workers";\nexport const a = x;`,
+  `export const a = \\u0066etch;`,
+  `const r = /'/; fetch(u); const s = '';`,
+  `export const a = \\u0065nv;`,
+].every((src) => L(src).length > 0));
+check("a banned word in a COMMENT is fine now (the lint reads the parsed code), in a string it is not", L(`// fetch(url) is not allowed\nexport const a = 1;`).length === 0 && L(`/* env */ export const a = 1;`).length === 0 && L(`export const a = "fetch";`).length > 0);
+check("a file that does not parse is reported, not crashed on", L(`export const = ;`)[0].includes("does not parse"));
+check("a TEST may import node:test, node:assert, the engine, its testing helpers and its own files, and may use import.meta", lintModule(`import { test } from "node:test";\nimport assert from "node:assert/strict";\nimport { makeCtx, loadGame } from "promptocracy/engine/testing";\nimport rule from "./202.ts";\nimport other from "./rulebook.test.ts";\nconst g = await loadGame(import.meta.url); test("x", () => assert.ok(rule && other && g && makeCtx));`, "t", "test").length === 0);
+check("a TEST may not import node:fs, node:child_process, node:net, a package, a parent folder or a url, nor name fetch/process/env", ["node:fs", "node:child_process", "node:net", "node:os", "zod", "../x.ts", "https://x.example/a.js", "./a.js"].every((s) => lintModule(`import x from "${s}";\nexport const a = x;`, "t", "test").length > 0) && lintModule(`export const a = process.cwd();`, "t", "test").length > 0 && lintModule(`export const a = fetch;`, "t", "test").length > 0);
 check("a word that merely contains a banned one (environment, fetched, selfie, processing, newFunction) is fine", L(`const environment = 1, fetched = 2, selfie = 3, processing = 4, newFunction = 5; const s = "Chalant is processing";`).length === 0);
-check("a lint problem names the line", L(`\n\nfetch(1)`)[0].includes("line 3"));
+check("a lint problem names the line of the printed code", /line \d+/.test(L(`export const a = 1;\nexport const b = fetch;`)[0]));
 
 console.log("RULES.md, settings and modules agree");
 const R = "# Rules\n\n## 100. A [majority]\n\n### 101 One\nText [setting: max_players]\n\n### 102 Two\nMore.\n<!-- ### 999 Hidden [setting: nope] -->\n";
@@ -160,6 +173,70 @@ console.log("the starter pack's own tests");
   check("node --test templates/rules: every test passes", n("fail") === 0 && n("pass") >= 22, `pass ${n("pass")} fail ${n("fail")}`);
 }
 
+console.log("rule claims");
+const SRC = `/** Doc. @rule 504 */
+export function a() {}
+// a plain comment above is not a tag
+export function b() {}
+/**
+ * Two claims. @rule 504.2, 505
+ */
+export const c = async (x) => {
+  if (x) { return 1; }
+  for (const y of [1]) { y; }
+  return [1].map((z) => z);
+};
+const d = (x) => x * 2;
+const notAFunction = (1 + 2) * 3;
+export default { /** @rule 202 */
+};
+const obj = {
+  /** @rule 202 */
+  hook(ctx, a) {
+    if (a) { return 1; }
+    return null;
+  },
+  other(ctx) {
+    return \`
+  fake(x) {
+\`;
+  },
+};
+// function inComment() {}
+/* function inBlock() {} */
+`;
+const fns = findFunctions(SRC);
+check("findFunctions finds declarations, const arrows and methods, with their tags, and nothing else (no if/for, no callbacks, no comments, no template text)", J(fns.map((f) => [f.name, f.tags])) === J([["a", ["504"]], ["b", []], ["c", ["504.2", "505"]], ["d", []], ["hook", ["202"]], ["other", []]]), J(fns));
+const KNOWN = knownNumbers("# R\n\n## 500. B [majority]\n\n### 504 Moving\n**504.2** a clause\n\n### 505 New\n<!-- ### 999 hidden -->\n");
+check("knownNumbers reads blocks, rules and clauses, not comments", J([...KNOWN].sort()) === J(["500", "504", "504.2", "505"]));
+check("a function with no @rule tag fails, naming file, line and function", checkFileClaims("f.ts", SRC, KNOWN).some((p) => p === "f.ts:4 b has no @rule tag") && checkFileClaims("f.ts", SRC, KNOWN).some((p) => /d has no @rule tag/.test(p)));
+check("a tag that names a rule or clause the RULES.md does not have fails (202 is not in this text), a clause that is there passes", checkFileClaims("f.ts", SRC, KNOWN).some((p) => /hook: @rule 202 is not in RULES\.md/.test(p)) && !checkFileClaims("f.ts", SRC, KNOWN).some((p) => /@rule 504\.2 is not/.test(p)));
+check("a claimed file passes, and the claim map lists rule -> file#function, sorted by number", checkFileClaims("f.ts", "/** @rule 504 */\nfunction x() {}\n/** @rule 505, 504 */\nfunction y() {}\n", KNOWN).length === 0 && J(claimMap({ "f.ts": "/** @rule 505, 504 */\nfunction y() {}\n/** @rule 504 */\nfunction x() {}\n" })) === '{"504":["f.ts#x","f.ts#y"],"505":["f.ts#y"]}');
+check("a malformed tag (@rule 5, @rule 12345) is refused", checkFileClaims("f.ts", "/** @rule 5 */\nfunction x() {}\n", KNOWN).some((p) => /not a rule number/.test(p)) && checkFileClaims("f.ts", "/** @rule 12345 */\nfunction x() {}\n", KNOWN).some((p) => /not a rule number/.test(p)));
+{
+  const r = runClaimsCheck();
+  check("src/engine/ and the starter modules: every function claims a rule that templates/RULES.md has (the strict set)", r.problems.length === 0 && r.strictCount > 40, J(r.problems.slice(0, 5)));
+  check("the rest of src/ is only reported: unclaimed functions are listed, not failed", r.unclaimed.length > 0 && r.unclaimed.every((u) => !u.file.startsWith("src/engine/")));
+  check("docs/rule-claims-todo.md is up to date (run node scripts/check-rule-claims.mjs to regenerate)", readFileSync(pjoin(ROOT, "docs/rule-claims-todo.md"), "utf8") === todoDoc(r));
+}
+
+console.log("how rules share a hook");
+check("every wired hook declares one combine mode: veto (can-I), sequence (effects), decide (one handler)", J(Object.fromEntries(Object.entries(HOOKS).filter(([, h]) => h.wired).map(([k, h]) => [k, h.mode]))) === '{"actionAllowed":"veto","afterAction":"sequence","spawnTile":"decide"}' && Object.values(HOOKS).every((h) => ["veto", "sequence", "decide"].includes(h.mode)));
+check("veto: a refusal names the rule that made it", (() => {
+  const r = assembleRules([m(202, { actionAllowed: () => null }), m(504, { actionAllowed: () => refuse("no", 409) }), one]).actionAllowed(ctx, A, { kind: "move" });
+  return r.rule === 504 && r.status === 409;
+})());
+check("decide: two handlers for a single-value hook FAIL the assembly (the plan's rule); no precedence is invented until Buster approves one", (() => {
+  const e = throws(() => assembleRules([one, m(506, { spawnTile: () => null })]));
+  return e instanceof RuleSetError && /found 2 \(505, 506\)/.test(e.message);
+})());
+check("rules never edit each other: a module's hooks are its own functions, and each module is its own rule number", (() => {
+  const rs = assembleRules([m(504, { actionAllowed: () => null }), m(202, { actionAllowed: () => null }), one]);
+  return J(rs.implementers("actionAllowed")) === "[202,504]" && J(rs.modules) === "[202,504,505]";
+})());
+check("worksWith lists, per rule and hook, the other rules that share the hook", J(worksWith({ 202: ["actionAllowed"], 504: ["actionAllowed", "afterAction"], 505: ["spawnTile"] })) === '{"202":{"actionAllowed":[504]},"504":{"actionAllowed":[202]}}');
+check("a function claimed by more than 3 rules is reported as a warning (never a failure)", overClaimed("f.ts", "/** @rule 101, 102, 103, 104 */\nfunction big() {}\n/** @rule 101, 102 */\nfunction ok() {}\n").length === 1 && /claimed by 4 rules/.test(overClaimed("f.ts", "/** @rule 101, 102, 103, 104 */\nfunction big() {}\n")[0]) && runClaimsCheck().warnings.length === 0);
+
 console.log("the bundler");
 const work = mkdtempSync(pjoin(tmpdir(), "engine-test-"));
 const FIX = pjoin(ROOT, "tests/fixtures/games/bundled");
@@ -174,27 +251,42 @@ const put = (dir, rel, text) => { mkdirSync(pjoin(dir, rel, ".."), { recursive: 
   const e = quiet(() => bundle({ BUNDLE_OUT: out, GAMES_SOURCE: "tests/fixtures/games" }));
   const gen = existsSync(pjoin(out, "games.ts")) ? readFileSync(pjoin(out, "games.ts"), "utf8") : "";
   check("the fixture game bundles: its tests run and pass, and games.ts holds its text, settings and modules plus the starter pack", e === null && /"bundled": \{ slug: "bundled"/.test(gen) && /export const STARTER/.test(gen) && /modules: \[m0, m1, m2\]/.test(gen) && /fixture game/.test(gen), String(e));
+  check("games.ts carries the claim map of the game (rule -> file#function) and of the engine, for rule cards", /claims: \{"202":\["rules\/202\.ts#actionAllowed","rules\/504\.ts#actionAllowed"\],"504":\["rules\/504\.ts#actionAllowed","rules\/504\.ts#afterAction"\],"505":\["rules\/505\.ts#spawnTile"\]\}/.test(gen) && /ENGINE_CLAIMS: Record<string, string\[\]> = \{.*"505":\["src\/engine\/hooks\.js#spawnTile","src\/engine\/host\.ts#chooseSpawn"\]/.test(gen), gen.slice(gen.indexOf("ENGINE_CLAIMS"), gen.indexOf("ENGINE_CLAIMS") + 300));
   check("the game's modules are copied next to games.ts, where the Worker bundler follows the imports", ["games/bundled/rules/202.ts", "games/bundled/rules/504.ts", "starter/rules/505.ts"].every((f) => existsSync(pjoin(out, f))));
 }
 const must = (name, env, re) => { const e = quiet(() => bundle(env)); check(name, e instanceof BundleError && re.test(e.message), String(e?.message ?? "no error").slice(0, 300)); };
-must("a module that calls fetch fails the build, with the file and line", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/202.ts", `import { defineRule } from "promptocracy/engine";\nexport default defineRule({ rule: 202, actionAllowed() { return fetch("https://x"); } });`)) }, /lint failed[\s\S]*bad[\s\S]*rules\/202\.ts[\s\S]*line 2 uses "fetch"/);
+must("a module that calls fetch fails the build, with the file and line", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/202.ts", `import { defineRule } from "promptocracy/engine";\nexport default defineRule({ rule: 202, actionAllowed() { return fetch("https://x"); } });`)) }, /lint failed[\s\S]*bad[\s\S]*rules\/202\.ts: line \d+ of the code uses "fetch"/);
 must("a module that imports a foreign package fails the build", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/504.ts", `import fs from "node:fs";\n` + readFileSync(pjoin(FIX, "rules/504.ts"), "utf8"))) }, /imports "node:fs"/);
 must("game.json that lists a module rules/ does not hold (or holds one it does not list) fails the build", { GAMES_SOURCE: tree("bad", (d) => put(d, "game.json", `{ "engine": 1, "modules": [202, 504] }`)) }, /lists modules \[202,504\] but rules\/ holds \[202,504,505\]/);
 must("a game that needs another engine version fails the build", { GAMES_SOURCE: tree("bad", (d) => put(d, "game.json", `{ "engine": 2, "modules": [202, 504, 505] }`)) }, /engine 2, this platform runs engine 1/);
 must("a game with no game.json fails the build", { GAMES_SOURCE: tree("bad", (d) => execFileSync("mv", [pjoin(d, "game.json"), pjoin(work, "moved-" + seq++)])) }, /game\.json is missing/);
-must("two spawn rules (or none) fail the build", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/504.ts", readFileSync(pjoin(FIX, "rules/504.ts"), "utf8").replace("afterAction(", "spawnTile() { return null; },\n  afterAction("))) }, /spawnTile needs exactly one rule to implement it, found 2/);
+must("two spawn rules (or none) fail the build", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/504.ts", readFileSync(pjoin(FIX, "rules/504.ts"), "utf8").replace("/** @rule 504 */\n  afterAction(", "/** @rule 504 */\n  spawnTile() { return null; },\n  /** @rule 504 */\n  afterAction("))) }, /spawnTile needs exactly one rule to implement it, found 2/);
 must("text, settings and modules out of step fail the build (a [setting] the file lacks)", { GAMES_SOURCE: tree("bad", (d) => put(d, "RULES.md", readFileSync(pjoin(FIX, "RULES.md"), "utf8").replace("[setting: max_players]", "[setting: max_players] [setting: board.nope]"))) }, /names \[setting: board\.nope\]/);
 must("a module file named for another rule than it implements fails the build", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/202.ts", readFileSync(pjoin(FIX, "rules/202.ts"), "utf8").replace("rule: 202", "rule: 203"))) }, /rules\/202\.ts must default-export defineRule\(\{ rule: 202/);
 must("a game whose own tests fail does not bundle, and the failing output is in the message", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/202.test.ts", `import { test } from "node:test";\nimport assert from "node:assert/strict";\ntest("fails on purpose", () => assert.equal(1, 2));\n`)) }, /tests fail against this engine[\s\S]*fails on purpose/);
-must("a game with no tests does not bundle", { GAMES_SOURCE: tree("bad", (d) => { for (const f of ["202.test.ts", "rulebook.test.ts"]) execFileSync("mv", [pjoin(d, "rules", f), pjoin(work, "moved-" + seq++)]); }) }, /no tests/);
+must("a game with no tests does not bundle", { GAMES_SOURCE: tree("bad", (d) => { for (const f of ["202.test.ts", "505.test.ts", "rulebook.test.ts"]) execFileSync("mv", [pjoin(d, "rules", f), pjoin(work, "moved-" + seq++)]); }) }, /no tests/);
 must("a settings.json that is not valid fails the build", { GAMES_SOURCE: tree("bad", (d) => put(d, "settings.json", J({ ...DEFAULT_SETTINGS, "board.chart_radius": 99 }))) }, /board\.chart_radius/);
+must("a module function with no @rule tag fails the build, naming file, line and function", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/505.ts", readFileSync(pjoin(FIX, "rules/505.ts"), "utf8").replace("  /** @rule 505 */\n", ""))) }, /rule claims failed[\s\S]*rules\/505\.ts:\d+ spawnTile has no @rule tag/);
+must("a tag that names a rule the game's RULES.md does not have fails the build", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/505.ts", readFileSync(pjoin(FIX, "rules/505.ts"), "utf8").replace("@rule 505", "@rule 599"))) }, /spawnTile: @rule 599 is not in RULES\.md/);
+must("a game whose rules/ holds a stray file (a helper, a script) fails the build", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/helper.ts", "export const x = 1;\n")) }, /rules\/ may hold only rule modules/);
+must("a TEST that imports node:fs fails the build (tests run on the build machine and may not read files or the network)", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/202.test.ts", `import { test } from "node:test";\nimport { readFileSync } from "node:fs";\ntest("x", () => { readFileSync("/etc/hosts"); });\n`)) }, /imports "node:fs"; a test may import only/);
+must("a symlink anywhere in a game fails the build (RULES.md -> a file outside the game would be published)", { GAMES_SOURCE: tree("bad", (d) => { execFileSync("mv", [pjoin(d, "RULES.md"), pjoin(work, "moved-" + seq++)]); execFileSync("ln", ["-s", "/etc/hosts", pjoin(d, "RULES.md")]); }) }, /is a symlink/);
+must("WORKERS_CI refuses the local-run knobs (GAMES_SOURCE would swap in other code)", { WORKERS_CI: "1", GAMES_SOURCE: "tests/fixtures/games" }, /GAMES_SOURCE is set in a Workers Builds build/);
+check("the game's claims also say what each rule works with: 202 shares actionAllowed with 504", (() => {
+  const out = pjoin(work, "out-ww");
+  quiet(() => bundle({ BUNDLE_OUT: out, GAMES_SOURCE: "tests/fixtures/games" }));
+  return /worksWith: \{"202":\{"actionAllowed":\[504\]\},"504":\{"actionAllowed":\[202\]\}\}/.test(readFileSync(pjoin(out, "games.ts"), "utf8"));
+})());
 check("BUNDLE_SKIP_TESTS=1 skips the game's tests (and only the tests: the lint and the checks still run)", quiet(() => bundle({ BUNDLE_SKIP_TESTS: "1", GAMES_SOURCE: tree("bad", (d) => put(d, "rules/202.test.ts", `import { test } from "node:test";\ntest("x", () => { throw new Error("no"); });\n`)) })) === null);
 {
   process.env.PROMPTOCRACY_TEST_SECRET = "hunter2";
-  const src = tree("bad", (d) => put(d, "rules/202.test.ts", `import { test } from "node:test";\nimport assert from "node:assert/strict";\ntest("sees no secrets", () => { assert.equal(process.env.PROMPTOCRACY_TEST_SECRET, undefined); assert.equal(process.env.CLOUDFLARE_API_TOKEN, undefined); });\n`));
-  const e = quiet(() => bundle({ GAMES_SOURCE: src }));
-  delete process.env.PROMPTOCRACY_TEST_SECRET;
-  check("a game's tests run with a scrubbed environment: no secret of the build reaches game code", e === null, String(e?.message).slice(0, 300));
+  process.env.CLOUDFLARE_API_TOKEN = "cf-token";
+  const probe = pjoin(work, "probe.mjs");
+  writeFileSync(probe, "console.log(JSON.stringify([process.env.PROMPTOCRACY_TEST_SECRET, process.env.CLOUDFLARE_API_TOKEN, Object.keys(process.env).sort()]));\n");
+  const r = runNode([probe], work, "probe");
+  delete process.env.PROMPTOCRACY_TEST_SECRET; delete process.env.CLOUDFLARE_API_TOKEN;
+  const [a, b, keys] = JSON.parse(r.stdout);
+  check("game code runs with a scrubbed environment: no token or secret of the build reaches the child (only PATH, HOME, NODE_ENV, LANG, NO_COLOR)", r.ok && a === null && b === null && !r.stdout.includes("hunter2") && !r.stdout.includes("cf-token") && keys.filter((k) => !k.startsWith("__")).every((k) => ["HOME", "LANG", "NODE_ENV", "NO_COLOR", "PATH"].includes(k)), r.stdout);
 }
 
 console.log("fetching a game: the latest day-N tag of a git remote");
@@ -213,6 +305,7 @@ console.log("fetching a game: the latest day-N tag of a git remote");
   put(repo, "RULES.md", readFileSync(pjoin(repo, "RULES.md"), "utf8") + "\nUntagged work on main.\n"); commit("after day 10");
   const manifest = pjoin(work, "manifest.json");
   writeFileSync(manifest, J({ engine: 1, games: { "rickshaw-1": { repo: "owner/game" } } }));
+  check("a tag with more than 6 digits is not a day (day-99999999999999999999999 cannot become 1e+23 and block every deploy)", (() => { g("tag", "day-99999999999999999999999"); return latestDayTag(`file://${repo}`).day === 10; })());
   check("latestDayTag picks the highest NUMBER (day-10 beats day-2), ignores day-x and other tags", latestDayTag(`file://${repo}`).tag === "day-10" && latestDayTag(`file://${repo}`).day === 10);
   const out = pjoin(work, "out-git");
   const e = quiet(() => bundle({ BUNDLE_OUT: out, GAMES_MANIFEST: manifest, GAMES_GIT_BASE: `file://${base}` }));

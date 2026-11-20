@@ -12,21 +12,27 @@
 // platform change. Nothing here may change what an existing module sees.
 import { validCoord } from "../lib/geometry.js";
 
-// mode:  firstRefusal  every module runs in rule order; the first refusal wins
-//        concat        every module runs in rule order; the effect lists are joined
-//        one           exactly ONE module implements it (zero or two is an error when the rules are assembled)
+// HOW SEVERAL RULES SHARE A HOOK. A rule never edits another rule's code. Each rule module registers its own handler
+// for each hook it cares about, and the engine calls every handler. Each hook has exactly one combine mode:
+//   veto      a can-I hook: every handler runs in rule-number order and any of them may refuse, with a reason that names
+//             its rule. The first refusal wins; no refusal means yes.
+//   sequence  an effect hook: every handler runs in rule-number order and their effects are joined in that order.
+//   decide    a single-value hook: ONE handler decides. The plan has the engine require exactly one (zero or two is an
+//             error when the rules are assembled, so a proposal that removes or doubles it fails its tests). A
+//             precedence rule between competing handlers (the lowest rule number wins for now) is NOT built: it waits for
+//             Buster's approval, and until then two handlers fail the assembly rather than silently picking one.
 // wired: the engine calls it today. A hook that is not wired is accepted in a module (so its type is settled
 //        and a later change fills it in), is never called, and its "exactly one" rule is not enforced yet.
 export const HOOKS = Object.freeze({
-  actionAllowed: { mode: "firstRefusal", wired: true },
-  afterAction: { mode: "concat", wired: true },
-  spawnTile: { mode: "one", wired: true },
-  voteMark: { mode: "one", wired: false },
-  electorate: { mode: "one", wired: false },
-  tally: { mode: "one", wired: false },
-  applyOrder: { mode: "one", wired: false },
-  onEnacted: { mode: "concat", wired: false },
-  dayEnd: { mode: "concat", wired: false },
+  actionAllowed: { mode: "veto", wired: true },
+  afterAction: { mode: "sequence", wired: true },
+  spawnTile: { mode: "decide", wired: true },
+  voteMark: { mode: "decide", wired: false },
+  electorate: { mode: "decide", wired: false },
+  tally: { mode: "decide", wired: false },
+  applyOrder: { mode: "decide", wired: false },
+  onEnacted: { mode: "sequence", wired: false },
+  dayEnd: { mode: "sequence", wired: false },
 });
 
 export const ACTION_KINDS = Object.freeze(["move", "propose", "vote", "end_turn"]);
@@ -36,6 +42,7 @@ export const MAX_CHART_TILES = 500;
 
 // A module that threw. The routes answer 500 and log which rule and hook it was.
 export class RuleError extends Error {
+  /** @rule 302 */
   constructor(rule, hook, cause) {
     super(`rule ${rule} (${hook}) failed: ${cause?.message ?? cause}`);
     this.name = "RuleError";
@@ -46,6 +53,7 @@ export class RuleError extends Error {
 }
 // A rule set that cannot be assembled (a bad module, or an "exactly one" hook with zero or two implementations).
 export class RuleSetError extends Error {
+  /** @rule 302 */
   constructor(problems) {
     super(problems.join("; "));
     this.name = "RuleSetError";
@@ -54,6 +62,7 @@ export class RuleSetError extends Error {
 }
 
 // ---- small helpers modules and the engine share ----------------------------------
+/** @rule 302 */
 export function deepFreeze(v) {
   if (v && typeof v === "object" && !Object.isFrozen(v)) {
     Object.freeze(v);
@@ -62,8 +71,10 @@ export function deepFreeze(v) {
   return v;
 }
 
+/** @rule 501 */
 const tileKey = (x, y, z) => `${x},${y},${z}`;
 // A read-only view of the charted tiles: has(x, y, z), get(x, y, z), list().
+/** @rule 501 */
 export function makeTiles(rows) {
   const map = new Map();
   for (const t of rows) map.set(tileKey(t.x, t.y, t.z ?? 0), Object.freeze({ x: t.x, y: t.y, z: t.z ?? 0 }));
@@ -77,6 +88,7 @@ export function makeTiles(rows) {
 
 // A small seeded generator (mulberry32 over an xmur3 hash of the seed text): the same seed gives the same
 // numbers. rng() is a float in [0, 1). The host chooses the seed; a join uses cryptoRng, not a seed.
+/** @rule 302 */
 export function seededRng(seed) {
   let h = 1779033703 ^ String(seed).length;
   for (const c of String(seed)) { h = Math.imul(h ^ c.charCodeAt(0), 3432918353); h = (h << 13) | (h >>> 19); }
@@ -88,6 +100,7 @@ export function seededRng(seed) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+/** @rule 302 */
 export function cryptoRng() {
   const buf = new Uint32Array(1);
   return () => (crypto.getRandomValues(buf)[0]) / 4294967296;
@@ -103,6 +116,7 @@ export function cryptoRng() {
 //   rng        () => float in [0,1)
 //   turn       { round, turn, moved }  the turn model of the games that still run on turns; goes when days arrive
 //   judge      optional, for rules that need a ruling (none yet)
+/** @rule 302 */
 export function makeContext(o) {
   const ctx = {
     day: o.day ?? null,
@@ -125,11 +139,14 @@ export function makeContext(o) {
 //   points {type:"points", player, delta, reason}      (applied once points arrive)
 //   log    {type:"log", template, args}                (applied once the day log arrives)
 //   win    {type:"win", player, reason}                (applied once winning arrives)
+/** @rule 302 */
 const isInt = (n) => Number.isSafeInteger(n);
+/** @rule 302 */
 const isStr = (s, max = 400) => typeof s === "string" && s.length > 0 && s.length <= max;
 export const EFFECT_TYPES = Object.freeze(["chart", "points", "log", "win"]);
 export const APPLIED_EFFECTS = Object.freeze(["chart"]);
 
+/** @rule 302 */
 export function validateEffect(e) {
   if (!e || typeof e !== "object" || Array.isArray(e)) return "an effect must be an object";
   switch (e.type) {
@@ -147,6 +164,7 @@ export function validateEffect(e) {
       return `unknown effect type ${JSON.stringify(e.type)}`;
   }
 }
+/** @rule 302 */
 export function validateEffects(list) {
   if (!Array.isArray(list)) return "a hook that returns effects must return a list";
   for (const e of list) { const p = validateEffect(e); if (p) return p; }
@@ -159,15 +177,18 @@ export const effects = Object.freeze({
   log: (template, args = {}) => ({ type: "log", template, args }),
   win: (player, reason) => ({ type: "win", player, reason }),
 });
+/** @rule 302 */
 export const refuse = (error, status = 400) => ({ error, status });
 
 // ---- modules -------------------------------------------------------------------
+/** @rule 302 */
 export function defineRule(mod) {
   const problems = moduleProblems(mod);
   if (problems.length) throw new RuleSetError(problems);
   return Object.freeze(mod);
 }
 
+/** @rule 302 */
 function moduleProblems(mod) {
   if (!mod || typeof mod !== "object" || Array.isArray(mod)) return ["a rule module must export an object"];
   const out = [];
@@ -183,6 +204,7 @@ function moduleProblems(mod) {
 
 // Assembles the hooks of a game's modules. Throws RuleSetError for a bad module, a rule number used twice, or a
 // wired "exactly one" hook with zero or two implementations. Returns the callable engine for the game.
+/** @rule 302 */
 export function assembleRules(modules, { label = "rules" } = {}) {
   const problems = [];
   const list = Array.isArray(modules) ? modules : [];
@@ -190,15 +212,17 @@ export function assembleRules(modules, { label = "rules" } = {}) {
   const nums = list.filter((m) => m && Number.isInteger(m.rule)).map((m) => m.rule);
   for (const n of new Set(nums.filter((n, i) => nums.indexOf(n) !== i))) problems.push(`rule ${n} has two modules`);
   const sorted = [...list].filter((m) => m && Number.isInteger(m.rule)).sort((a, b) => a.rule - b.rule);
+  /** @rule 302 */
   const implementers = (hook) => sorted.filter((m) => typeof m[hook] === "function");
   for (const [hook, spec] of Object.entries(HOOKS)) {
-    if (spec.mode === "one" && spec.wired) {
+    if (spec.mode === "decide" && spec.wired) {
       const n = implementers(hook).length;
       if (n !== 1) problems.push(`${hook} needs exactly one rule to implement it, found ${n}${n ? ` (${implementers(hook).map((m) => m.rule).join(", ")})` : ""}`);
     }
   }
   if (problems.length) throw new RuleSetError(problems.map((p) => `${label}: ${p}`));
 
+  /** @rule 302 */
   const call = (m, hook, args) => {
     try { return m[hook](...args); } catch (e) { throw new RuleError(m.rule, hook, e); }
   };
@@ -206,6 +230,7 @@ export function assembleRules(modules, { label = "rules" } = {}) {
     modules: Object.freeze(sorted.map((m) => m.rule)),
     implementers: (hook) => implementers(hook).map((m) => m.rule),
     // null, or {error, status}: the first refusal in rule order.
+    /** @rule 202, 504 */
     actionAllowed(ctx, actor, action) {
       for (const m of implementers("actionAllowed")) {
         const r = call(m, "actionAllowed", [ctx, actor, action]);
@@ -218,6 +243,7 @@ export function assembleRules(modules, { label = "rules" } = {}) {
       return null;
     },
     // every module's effects, joined in rule order, each list validated.
+    /** @rule 504 */
     afterAction(ctx, actor, action) {
       const out = [];
       for (const m of implementers("afterAction")) {
@@ -229,6 +255,7 @@ export function assembleRules(modules, { label = "rules" } = {}) {
       return out;
     },
     // the one spawn rule: a tile from `candidates`, or null when there is room nowhere.
+    /** @rule 505 */
     spawnTile(ctx, candidates) {
       const m = implementers("spawnTile")[0];
       const r = call(m, "spawnTile", [ctx, candidates]);

@@ -3,8 +3,10 @@
 // Format: "## 100. Title [unanimous]" is a block, "### 101 Title" a rule, "[setting: board.island]" names a setting.
 import { validateSettings } from "../lib/settings.js";
 
+/** @rule 302 */
 const stripComments = (s) => s.replace(/<!--[\s\S]*?-->/g, "");
 
+/** @rule 101 */
 export function parseRulesMd(text) {
   const t = stripComments(String(text ?? ""));
   const rules = [...t.matchAll(/^###\s+(\d+)\s+(.+?)\s*$/gm)].map((m) => ({ number: Number(m[1]), title: m[2] }));
@@ -16,6 +18,7 @@ export function parseRulesMd(text) {
 //   - RULES.md has at least one rule and no rule number twice
 //   - the [setting: x] tags in the text are exactly the keys of settings.json, and settings.json is a complete valid set
 //   - every rule module's number is a rule that exists in the text
+/** @rule 101 */
 export function checkRulebook({ rulesMd, settings, moduleRules }) {
   const out = [];
   const { rules, settingTags } = parseRulesMd(rulesMd);

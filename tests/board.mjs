@@ -623,6 +623,17 @@ try {
     check("nothing moved", J(playersOf("bundled").map((p) => [p.x, p.y])) === "[[1,1],[1,0]]");
   }
 
+  console.log("a rule that throws is a clean 500, not a crash");
+  {
+    const tg = await createGame(state, { slug: "throwing", name: "Throwing", max: 2, ...R });
+    const tia = await join(A, "throwing", tg.code, { email: "tia@example.com", name: "Tia", color: "teal" });
+    d1(state, `UPDATE games SET status = 'playing', round = 1, turn = 0, last_move = '' WHERE slug = 'throwing'`);
+    const tp = await tia.post("/throwing/api/turn", { prompt: "Anything." });
+    check("a proposal whose rule 202 throws answers 500 with a plain message (not a stack trace), and records no turn", tp.status === 500 && tp.data.error === "A rule could not be checked. Try again later." && !/boom|Error|at /.test(tp.text) && d1(state, `SELECT COUNT(*) AS n FROM turns WHERE game_id = '${gidOf("throwing")}'`)[0].n === 0, tp.text);
+    const tm = await tia.post("/throwing/api/action", { kind: "move", x: 0, y: 1 });
+    check("a move in the same game is not touched by that rule: it is judged by the game's other rules (an uncharted-free island tile, 200)", tm.status === 200, tm.text);
+  }
+
   console.log("static files");
   const js = await client(A).get("/js/board.js");
   check("the board's script is served as JavaScript", js.status === 200 && /javascript/.test(js.headers.get("content-type")), js.status + " " + js.headers.get("content-type"));

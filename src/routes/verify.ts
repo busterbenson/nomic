@@ -118,6 +118,11 @@ export const post = async (ctx: Ctx) => {
            AND (SELECT COUNT(*) FROM players o WHERE o.game_id = g.id AND o.x = ? AND o.y = ? AND o.z = ?) = ?`,
       ).bind(playerId, t.email, t.display_name, color, shape, now, x, y, z, game.id, seatLimit(game), x, y, z, x, y, z, spawn.occupants).run();
       joined = (r.meta?.changes ?? 0) > 0;
+      if (!joined) {
+        // Ask again only if the seat is still there (the game is in setup and not full): a lost race for a tile.
+        const st: any = await env.DB.prepare("SELECT g.status AS status, (SELECT COUNT(*) FROM players WHERE game_id = g.id) AS n FROM games g WHERE g.id = ?").bind(game.id).first();
+        if (!st || st.status !== "setup" || st.n >= seatLimit(game)) break;
+      }
     }
   } catch (e) {
     joined = false; // color taken in the meantime (UNIQUE constraint), or a rule that could not be checked

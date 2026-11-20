@@ -60,7 +60,7 @@ export const effects: {
   log(template: string, args?: Record<string, unknown>): Effect;
   win(player: string, reason: string): Effect;
 };
-export const HOOKS: Readonly<Record<string, { mode: "firstRefusal" | "concat" | "one"; wired: boolean }>>;
+export const HOOKS: Readonly<Record<string, { mode: "veto" | "sequence" | "decide"; wired: boolean }>>;
 export const ACTION_KINDS: readonly string[];
 export function chartOffsets(radius: number): number[][];
 export function chartedAround(x: number, y: number, radius: number): number[][];
