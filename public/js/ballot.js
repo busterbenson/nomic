@@ -1,10 +1,10 @@
 // Today's ballot, the voting half (rule 104): the Yes / No boxes in the ballot rows and in a rule's card, kept in sync from one
 // answer of GET /api/ballot. Votes go through POST /api/votes; every refusal (End turn, the midnight lock, not in the electorate)
 // is the server's own sentence, shown as it comes. Nothing here knows how anyone else voted (rule 104.4): the API doesn't say.
-//   const B = createBallot({ api, pill, redraw, refreshed })
+//   const B = createBallot({ api, pill, refreshed, player })
+//     player()          true when the viewer is a signed-in player of this game; anyone else sees the ballot read-only (turnout, no buttons)
 //     api(path, body?)  the page's fetch helper -> { ok, status, data }
 //     pill(by)          the page's player pill for someone who has voted (piece + name)
-//     redraw()          draw the ballot rows and the open card again (after a vote, or when its message times out)
 //     refreshed()       reload the page's state after a vote (the day strip's "N of M" comes from /api/day); may be async
 //   B.load()            fetch GET /api/ballot (call it wherever the page reloads its state)
 //   B.box(n)            the vote box HTML for item "P3", or "" when the ballot has no such item
@@ -15,7 +15,7 @@
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const LABEL = { yes: "Yes", no: "No" };
 
-export function createBallot({ api, pill, redraw, refreshed }) {
+export function createBallot({ api, pill, refreshed, player = () => true }) {
   let BAL = null, MSG = null, BUSY = false, TIMER = 0;   // the last /api/ballot; the last answer to a vote {n, text, err}; a vote in flight
 
   /** @rule 104.3 */
@@ -42,6 +42,7 @@ export function createBallot({ api, pill, redraw, refreshed }) {
     const t = it.turnout || { voted: 0, of: 0, players: [] };
     const who = (t.players || []).map((p) => pill(p)).join("");
     const m = MSG && MSG.n === n ? `<p class="vmsg${MSG.err ? " err" : ""}" role="status">${esc(MSG.text)}</p>` : '<p class="vmsg" role="status"></p>';
+    if (!player()) return `<div class="vbox" data-vbox="${esc(n)}"><p class="vturn mono">${t.voted} of ${t.of} voted${who ? `: ${who}` : ""}</p></div>`;
     return `<div class="vbox" data-vbox="${esc(n)}"><div class="vbtns" role="group" aria-label="Vote on ${esc(n)}">${btn("yes")}${btn("no")}</div>
 <p class="vturn mono">${t.voted} of ${t.of} voted${who ? `: ${who}` : ""}</p>${can ? "" : `<p class="vwhy">${esc((it.can_vote && it.can_vote.reason) || "")}</p>`}${note ? '<p class="vnote">Results at midnight. Not voting counts as no.</p>' : ""}${m}</div>`;
   }
@@ -51,11 +52,12 @@ export function createBallot({ api, pill, redraw, refreshed }) {
     const n = el.dataset.pn, vote = el.dataset.vote;
     if (BUSY || !find(n)) return;
     BUSY = true; clearTimeout(TIMER);
-    const r = await api("/api/votes", { proposal: n, vote });
-    BUSY = false;
+    let r;
+    try { r = await api("/api/votes", { proposal: n, vote }); } catch (e) { r = { ok: false, data: { error: "Couldn't reach the game. Check your connection and try again." } }; } finally { BUSY = false; }
     MSG = { n, text: (r.data && (r.ok ? r.data.message : r.data.error)) || (r.ok ? `${n}: you voted ${LABEL[vote]}.` : "Something went wrong."), err: !r.ok };
-    await refreshed();
-    TIMER = setTimeout(() => { MSG = null; redraw(); }, 9000);   // the toast fades; the vote itself stays
+    try { await refreshed(); } catch (e) { /* the vote itself is in; the next reload shows it */ }
+    // The toast fades (the vote stays). The message nodes are emptied in place: no redraw, so a card or a form being typed in is left alone.
+    TIMER = setTimeout(() => { MSG = null; if (typeof document !== "undefined") for (const m of document.querySelectorAll(".vmsg")) { m.textContent = ""; m.className = "vmsg"; } }, 9000);
   }
   const hasYou = () => !!(BAL && BAL.you);
   return { load, box, voted, total, firstOpen, click, hasYou };

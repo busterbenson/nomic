@@ -377,7 +377,6 @@ button.me[aria-expanded="true"]{border-color:var(--ink)}
 .swh h2{font-size:1.5rem}
 .swh .m{font-family:var(--font-mono);font-size:.68rem;color:var(--ink-muted)}
 .swh .linkbtn{margin:0 0 0 auto}
-.sw.pro .pwin{margin-left:auto;font-family:var(--font-mono);font-size:.68rem;font-weight:700;color:var(--accent);white-space:nowrap}
 .sl{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:14px}
 .sl>li{display:flex;flex-direction:column;gap:8px;padding-top:12px;border-top:1px solid var(--line)}
 .sl>li:first-child{padding-top:0;border-top:0}

@@ -213,7 +213,7 @@
   async function load() {
     showNotice();
     CARDS = createCards({ root: $("mroot"), describe });   // closing a card keeps what you were writing: it is there when the card opens again
-    BAL = createBallot({ api, pill: by => pill(by, false), redraw: redrawBallot, refreshed: refresh });
+    BAL = createBallot({ api, pill: by => pill(by, false), refreshed: refresh, player: () => !!(ME && ME.player) });
     PROP = createProposer({ api, me: () => ME, day: () => DAY, pill, vote: (n, o) => BAL.box(n, o), refresh: async () => { await refresh(); loadNotes(); } });
     drawTabs(); drawBook();
     loadMe();
@@ -259,22 +259,19 @@
     const need = p.needs ? (p.needs.mark === "unanimous" ? `It needs all ${p.needs.of} votes to pass.` : `It needs ${p.needs.needed} of ${p.needs.of} votes to pass.`) : "";
     return `proposed ${what}. ${need}`;
   }
-  // The ballot rows and the open card, drawn again (a vote came back, or its message timed out).
-  const redrawBallot = () => { drawBook(); if (BOOK) BOOK.redraw(); if (CARDS && CARDS.isOpen()) CARDS.redraw(); };
   const ballotList = () => (PROP ? PROP.onBallot() : []);
   const votedCount = () => (DAY && DAY.you ? Number(DAY.you.voted) || 0 : 0);   // how many of today's ballot items you have voted on (/api/day); the Yes / No boxes go in the ballot-vote slots
-  const pointsFor = () => { const r = BOOK && BOOK.rulebook.byNum["401"]; const m = r && /gets (\d+) points?/.exec(JSON.stringify(r.paras.concat(...r.clauses.map(c => c.paras)))); return m ? Number(m[1]) : null; };
 
   function proposeCard() {
+    if (!(ME && ME.player)) return "";   // not a signed-in player of this game: no Propose card, and nothing in its place
     const mine = PROP && PROP.mine(), c = PROP ? PROP.canPropose() : { allowed: false, reason: "" };
-    const win = pointsFor() ? `<span class="pwin">+${pointsFor()} if it passes</span>` : "";
     const active = !!(ME && ME.player && DAY && DAY.you);
     if (mine) return `<section class="sw pro" id="spropose" aria-label="Your proposal"><div class="swh"><h2>Your proposal, 1 of 1 today</h2></div>${PROP.chgFor(mine)}</section>`;
     const ended = !!(DAY && DAY.you && DAY.you.ended);
     if (ended || (DAY && DAY.locked)) return `<section class="sw pro" id="spropose" aria-label="No proposal today"><div class="swh"><h2>No proposal today</h2><span class="m">0 of 1 today</span></div></section>`;
     const why = active ? c.reason : !ME ? "Log in to propose." : DATA && DATA.game.status === "setup" ? "The game has not started yet." : "You are not a player in this game.";
     const off = active && c.allowed ? "" : ` disabled title="${esc(why)}"`;
-    return `<section class="sw pro" id="spropose" aria-label="Propose a change"><div class="swh"><h2>Propose a change</h2><span class="m">0 of 1 today</span>${win}</div>
+    return `<section class="sw pro" id="spropose" aria-label="Propose a change"><div class="swh"><h2>Propose a change</h2><span class="m">0 of 1 today</span></div>
       <div class="ptiles"><button type="button" class="ptile" data-tab="rules"${off}><span class="pt2">Rulebook</span><span class="pm2">${BOOK && BOOK.count() ? plural(BOOK.count(), "rule") : ""}</span><span class="pa2">+ Change or add a rule</span></button>
       <button type="button" class="ptile" data-tab="catalog" disabled><span class="pt2">Catalog</span><span class="pm2">0 entries</span><span class="pa2">+ Propose a thing</span></button></div>${active && !c.allowed ? `<p class="mnote">${esc(c.reason)}</p>` : ""}</section>`;
   }
@@ -548,7 +545,7 @@
     const vb = t.closest("[data-vote]");
     if (vb) {
       if (vb.disabled || !BAL) return;
-      const where = vb.closest("#mroot") ? "#mroot" : "#p-summary";
+      const where = vb.closest("#mroot, #rules, #p-summary") ? "#" + vb.closest("#mroot, #rules, #p-summary").id : "#p-summary";   // a box lives in the card, the Rulebook tab or the Summary
       await BAL.click(vb);
       const again = document.querySelector(`${where} [data-vote="${vb.dataset.vote}"][data-pn="${vb.dataset.pn}"]`);   // the boxes were drawn again: keep the keyboard where it was
       if (again && !again.disabled) again.focus({ preventScroll: true });

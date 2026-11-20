@@ -19,7 +19,7 @@ How this was checked: every item below was confirmed against mockup-v32 in headl
 - [ ] S1-SUM-05 · Desktop (>= 900 px) Summary is two columns: left = Today's ballot + Catalog block, right = Propose card + recent day slips. Phone order: ballot, Propose, slips, Catalog last · v11 · Play > Summary at 1280 and 390
 - [ ] S1-SUM-06 · Summary order top to bottom: day strip, overnight recap slip, Today's ballot, Catalog block (left) / Propose card + recent results (right), "Full history ->" link · v32 · Play > Summary
 - [ ] S1-SUM-07 · No sticky elements on the page; the board is a band in the page flow (see S1-BRD-01) · v4 notes · Play (scroll)
-- [ ] S1-SUM-08 · The Propose card shows "Propose a change", "N of 1 today", "+10 if it passes", and two tiles: Rulebook (count, "+ Change or add a rule") and Catalog (count, "+ Propose a thing"); both are disabled/replaced once today's proposal is made or the turn has ended · v12 / v28 · Play > Summary > Propose card
+- [ ] S1-SUM-08 · The Propose card shows "Propose a change", "N of 1 today" (the "+10 if it passes" line was removed by Buster 2026-11-20: it restated rule 401), and two tiles: Rulebook (count, "+ Change or add a rule") and Catalog (count, "+ Propose a thing"); both are disabled/replaced once today's proposal is made or the turn has ended · v12 / v28 · Play > Summary > Propose card
 - [ ] S1-SUM-09 · After proposing, the card reads "Your proposal, 1 of 1 today" with the P-pill, your player pill, "On tomorrow's ballot" and the tracked change · v28 · Play > Summary > Propose card, state "After voting + proposing". Mockup differs: it still shows a "See it in the Rulebook ->" line the log says was removed in v28; do not build that line.
 
 ### 1B. Move bar and moving
