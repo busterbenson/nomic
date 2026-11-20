@@ -498,6 +498,30 @@ console.log("main run (watch)");
   check("main run: a deploy trigger that fails twice is retried every 45 s until it works", r.status === "claimed" && deploys.length === 1 && sleeps.filter((ms) => ms === 45_000).length >= 2, J([r, deploys.length, sleeps]));
 }
 {
+  // Codex P2 on #30: the night is claimed, but the deploy trigger never works. The main run must still watch until the
+  // Worker gives up on the night, then run its final pass, which reverts the change the Worker lists as not applied.
+  // Without that, the day-N tag keeps a rule that never took effect, and any later build would ship it.
+  let clock = Date.now();
+  const deadline = clock + 10 * 60_000;
+  const repo = gameRepo();
+  const w = {
+    job: job([P(3, "401")], { deploy_deadline_at: new Date(deadline).toISOString() }), game: { day: 5 },
+    onGet: (n, s) => {
+      // the Worker's */5 cron gives up on the night within one tick of the deploy deadline
+      if (s.job?.status === "deploying" && clock > deadline + 4 * 60_000) {
+        s.job = null; s.not_applied = [{ number: 3, day: 1, reason: "the change was applied but did not go live by 2:30 am" }];
+        s.processed = [{ n: 1, status: "timed_out", commit_sha: null }];
+      }
+    },
+  };
+  const claude = fakeClaude({ apply: { 3: { action: "points", to: 15 } } });
+  const worker = await fakeWorker(w);
+  const r = await runOnce({ slug: "g", libraryDir: join(TMP, "no-library"), api: worker.api, token: TOKEN, repoUrl: repo.bare, stateDir: join(repo.base, "state"), notifyDir: join(repo.base, "notify"), claude: claude.cmd, audit: false, watch: true, now: () => clock, sleep: async (ms) => { clock += ms; }, deploy: async () => { throw new Error("the deploy trigger answered 503"); } });
+  await worker.stop();
+  const log = g(["log", "--format=%B", "main"], repo.bare);
+  check("main run: a claimed night whose deploy never works is still watched, then its final pass reverts the not-applied change", (r.watched ?? 0) > 0 && /Reverts-Proposal: P3/.test(log), J([r, log.slice(0, 300), readFileSync(join(repo.base, "state", "g.night.jsonl"), "utf8").split("\n").map((l) => l.slice(0, 160))]));
+}
+{
   // The backstop must not overlap a main run that is still watching.
   const repo = gameRepo();
   const sd = join(repo.base, "state");

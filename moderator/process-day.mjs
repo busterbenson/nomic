@@ -595,7 +595,10 @@ async function watchNight(opts, lock) {
   while (p && !p.job && p.game?.day === day0 && now() - t0 < COUNT_WAIT_MIN * 60_000) { await sleep(opts.countPollMs ?? COUNT_POLL_MS); touch(); p = await get(); waits++; }
   // 2. The night's work: the same pass the backstop runs.
   const r = await runPass(opts);
-  if (r.status !== "claimed" && r.status !== "deploying") return { ...r, waited: waits };
+  // A pass that failed AFTER the claim (the deploy trigger never worked) still owns a claimed night: keep watching and run
+  // the final pass, or the day-N tag keeps changes the Worker then lists as not applied, and a later build ships them.
+  const claimedButFailed = r.status === "failed" && (await get())?.job?.status === "deploying";
+  if (r.status !== "claimed" && r.status !== "deploying" && !claimedButFailed) return { ...r, waited: waits };
   // 3. Watch the deploy: until the site has unlocked (no night pending), or the deploy grace and one cron tick are past.
   let polls = 0;
   // An answer with no night pending is "unlocked". A failed poll is not: it takes 3 in a row to give up. With no deploy
