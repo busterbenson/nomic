@@ -313,7 +313,7 @@ export function readModelAnswer(book, req, raw) {
     try { a = JSON.parse(m ? m[0] : a); } catch { return { error: "malformed" }; }
   }
   if (!a || typeof a !== "object" || Array.isArray(a)) return { error: "malformed" };
-  const refuse = (reason, message) => ({ error: "refused", reason, message });
+  const refuse = (reason, message) => ({ error: "refused", reason, message: String(message).slice(0, 300) });
   if (a.refuse !== undefined) {
     const why = typeof a.refuse === "string" ? a.refuse.replace(/\s+/g, " ").trim().slice(0, 300) : "";
     return why ? refuse("declined", why) : { error: "malformed" };
@@ -322,6 +322,8 @@ export function readModelAnswer(book, req, raw) {
   if (a.settings !== undefined && (typeof a.settings !== "object" || a.settings === null || Array.isArray(a.settings))) return { error: "malformed" };
   const own = (k) => k === req.target || k.startsWith(req.target + ".") || req.target.startsWith(k + ".");
   const conflicts = [...new Set((a.conflicts || []).map(String).filter((n) => /^\d{3}(\.\d+)?$/.test(n) && has(book, n) && !own(n)))];
+  // An edit in place is the player's exact text: the route reads only the conflicts from this answer, so name them all.
+  if (req.prefilled) return { after_text: String(req.words), conflicts, settings: {} };
   const fixed = conflicts.filter((n) => fixedWhole(book, n));
   if (fixed.length) return refuse("110.1", `This would also change ${fixed.map((n) => `rule ${n}`).join(", ")}, which no proposal can change: the site runs ${fixed.length > 1 ? "them" : "it"} the same in every game (rule 110.1).`);
   const text = typeof a.after_text === "string" ? a.after_text.trim() : "";
@@ -337,7 +339,6 @@ export function readModelAnswer(book, req, raw) {
     if (!settingValueOk(k, v)) return refuse("setting", `The game can't run ${k} as ${JSON.stringify(v)}.`);
     settings[k] = v;
   }
-  if (req.prefilled) return { after_text: text, conflicts, settings };
   const problem = scopeProblem(book, req.target, text);
   if (problem) return refuse("scope", problem);
   const after = tidy(text);
@@ -352,7 +353,8 @@ export function modelPrompt(book, rulesMd, req) {
   const what = node.kind === "clause" ? `clause ${node.num} of rule ${node.rule.num} (${node.rule.title})` : `rule ${node.num} (${node.title})`;
   const protectedText = fixedParts(book).filter((p) => book.byNum[p]?.kind === "clause").map((p) => `${p}: ${clauseText(book.byNum[p])}`).join("\n");
   const shapes = Object.entries(DEFAULT_SETTINGS).map(([k, v]) => `${k} (e.g. ${JSON.stringify(v)})`).join(", ");
-  const words = String(req.words).replace(/<\/?words>/gi, "");
+  let words = String(req.words), prev;
+  do { prev = words; words = words.replace(/<\s*\/?\s*words[^>]*>/gi, ""); } while (words !== prev);
   return {
     system: [
       "You are the moderator of a self-amending game. A player asks, in plain words, to reword one rule or clause: the target.",
@@ -362,9 +364,9 @@ export function modelPrompt(book, rulesMd, req) {
       "Change only what the player asked for, and only in the target; keep everything else word for word. If the words are about another rule or clause, or also need changes there, draft only the part that belongs in the target, and name the other rules in conflicts. Never write another rule's content into the target.",
       "If nothing in the words belongs in the target, or it is not a change to a rule of this game (for example something the game has no way to do), answer {\"refuse\": \"one short sentence for the player saying why\"} instead.",
       "conflicts lists, as strings, the numbers of OTHER rules or clauses that could no longer be followed together with the new text, or that cite the text you changed. Look through the whole rulebook for them, including rules about the same subject that say it in other words and would now say something different. Never list the target itself. Draft the change even when it conflicts: conflicts are for naming.",
-      `These parts of the game are run by the site and no proposal can change them. Copy each one word for word if the target contains it, even where the voice rules below would change it (\"may\" and all):\n${protectedText}\nIf the words ask to change one of them, directly or by changing what it relies on, answer {"refuse": ...} saying that no proposal can change it (rule 110.1).`,
+      `These parts of the game are run by the site and no proposal can change them. Copy each one word for word if the target contains it, even where the voice rules below would change it (\"may\" and all):\n${protectedText}\nName one in conflicts only if the new text would contradict it. If the words ask to change one of them, directly or by changing what it relies on, answer {"refuse": ...} saying that no proposal can change it (rule 110.1).`,
       `settings: if the player only asks for a different value of a [setting: key] the target's text names, put the new value in settings, in the setting's own shape: ${shapes}. Keep after_text the current text, except that a number the text states for that setting is changed to match (a day or a protected part that names no number stays exactly as it is). Otherwise settings is {}. Never set a setting the target doesn't name.`,
-      "Write the sentences you change or add in the rules voice; sentences you keep stay as they are. 1. Talk to the player: \"you\", present tense (\"You can move one tile a day.\"; a sentence that tells players what they can do or get is written to \"you\"). 2. One idea per sentence: what you can do first, then the limit. 3. Everyday words: \"can\", not \"may\" or \"shall\"; no hereby, pursuant to, in the event that, aforementioned, notwithstanding. 4. Keep the game's own terms, the same every time: moderator, proposal, draft, ballot, block, mark, clause, turn, day, tile, piece. 5. Digits for numbers (3, not three); cite rules by number in parentheses (202.4), or as the existing text does. 6. The player's own words stay when they are clear, fit the game's terms and say exactly what they mean: reword only to make it exact, to match a game term or to fix the grammar. 7. Nothing in a rule that isn't a rule: no flavor text, no asides, no \"note that\".",
+      "Write the sentences you change or add in the rules voice; sentences you keep stay as they are. 1. Talk to the player: \"you\", present tense (\"You can move one tile a day.\"; a sentence that tells players what they can do or get is written to \"you\"). 2. One idea per sentence: what you can do first, then the limit. 3. Everyday words: \"can\", not \"may\" or \"shall\"; no hereby, pursuant to, in the event that, aforementioned, notwithstanding. 4. Keep the game's own terms, the same every time: moderator, proposal, draft, ballot, block, mark, clause, turn, day, tile, piece. 5. Digits for numbers (3, not three); cite rules by number in parentheses (202.4) or as \"rule 202.4\", never as a bare number in a sentence. 6. The player's own words stay when they are clear, fit the game's terms and say exactly what they mean: reword only to make it exact, to match a game term or to fix the grammar. 7. Nothing in a rule that isn't a rule: no flavor text, no asides, no \"note that\".",
       "Example. Before: \"The proposer may withdraw a confirmed proposal until it goes on the ballot, unless they have ended their turn (rule 202.4). A withdrawn proposal doesn't use up the day's proposal.\" After: \"You can withdraw your proposal until midnight, unless you've ended your turn (202.4). Withdrawing frees up your proposal for the day.\"",
     ].join("\n\n"),
     user: req.prefilled
