@@ -20,6 +20,11 @@ const CITE = /\b[Rr]ules? (\d{3}(?:\.\d+)?(?![\d.]\d)(?:(?:, | and | or |, and |
 /** @rule 108.3, 110.1 */
 export const citedIn = (text) => [...[...String(text).matchAll(CITE)].flatMap((m) => m[1].match(/\d{3}(?:\.\d+)?/g)), ...[...String(text).matchAll(PAREN_CITE)].map((m) => m[1])];
 
+/** How one setting's value reads: 10x10 for an object of numbers, on / off for a boolean, else as written. @rule 103.1 */
+const settingValue = (v) => (v && typeof v === "object" ? Object.values(v).join("x") : typeof v === "boolean" ? (v ? "on" : "off") : String(v));
+/** The settings a draft sets, as plain text: "board.island = 10x10, mcp_enabled = off". @rule 103.1 */
+export const settingsText = (settings) => Object.entries(settings || {}).map(([k, v]) => `${k} = ${settingValue(v)}`).join(", ");
+
 export const KINDS = ["amend", "addclause", "add", "repeal", "move", "mark"];
 // The words the API also accepts for a kind ("reword" is what the menu calls "amend").
 const KIND_ALIASES = { reword: "amend", edit: "amend", lock: "mark", unlock: "mark", remove: "repeal" };

@@ -29,6 +29,7 @@ import * as apiDay from "./routes/api-day";
 import * as apiEndTurn from "./routes/api-end-turn";
 import * as apiVotes from "./routes/api-votes";
 import * as apiBallot from "./routes/api-ballot";
+import * as apiInvite from "./routes/api-invite";
 import { clockNow, runMidnight } from "./lib/day";
 import * as apiNotifications from "./routes/api-notifications";
 import * as apiNotificationsRead from "./routes/api-notifications-read";
@@ -48,7 +49,7 @@ type Methods = { get?: Handler; post?: Handler };
 const API: Record<string, Methods> = {
   game: apiGame, me: apiMe, join: apiJoin, login: apiLogin, logout: apiLogout,
   turn: apiTurn, rules: apiRules, notifications: apiNotifications, board: apiBoard, action: apiAction,
-  day: apiDay, "end-turn": apiEndTurn, proposals: apiProposals, votes: apiVotes, ballot: apiBallot,
+  day: apiDay, "end-turn": apiEndTurn, proposals: apiProposals, votes: apiVotes, ballot: apiBallot, invite: apiInvite,
 };
 
 const secure = (res: Response) => {

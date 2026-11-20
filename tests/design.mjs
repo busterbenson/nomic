@@ -3,7 +3,8 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join as pjoin } from "node:path";
 import { ROOT } from "./lib.mjs";
-import { parseRules, markOf, renderMarkdown, hl } from "../public/js/rulebook.js";
+import { parseRules, markOf, renderMarkdown, hl, linkCites } from "../public/js/rulebook.js";
+import { createBallot } from "../public/js/ballot.js";
 import { TRACED, ROLES, FOOT, HEIGHT } from "../public/js/pieces-data.js";
 import { createProposer } from "../public/js/propose.js";
 
@@ -151,6 +152,54 @@ check("no size rule reaches an svg through a descendant selector (each piece is 
 check("a recently changed rule's warm sand is a token with a dark value too (no color lives outside theme.css)", /--warm1:/.test(css.slice(0, css.indexOf("@media"))) && /--warm1:/.test(dark) && !/#F2DFB4|#4C4023/i.test(read("public/site.css")));
 check("the page has no sticky or fixed elements except the card layer (S1-SUM-07)", !/position:\s*sticky/.test(read("public/site.css")) && (read("public/site.css").match(/position:\s*fixed/g) || []).length === 2);
 check("the pages no longer ship the WebGL board: no three.js in public/ or the Worker's routes", !readdirSync(pjoin(ROOT, "public")).includes("vendor") && !/three/i.test(read("src/index.ts")));
+
+console.log("citations link to their rule, in both voices");
+{
+  const by = { "202.4": 1, "504": 1, "103": 1 };
+  const out = (t) => linkCites(t, by);
+  const btn = (n) => `<button type="button" class="xref" data-seecard="${n}" data-clause="${n}" aria-haspopup="dialog" aria-label="Preview ${n}">${n}</button>`;
+  check("the old voice 'rule 202.4' links as before", out("see rule 202.4 here") === `see rule ${btn("202.4")} here`);
+  check("the new voice '(202.4)' links its number and keeps the parentheses", out("until midnight (202.4).") === `until midnight (${btn("202.4")}).` && out("(504)") === `(${btn("504")})`);
+  check("a parenthesised number that is not a rule is left alone, and so are numbers already inside a link", out("(999) and (12)") === "(999) and (12)" && out("rule 202.4 (202.4)") === `rule ${btn("202.4")} (${btn("202.4")})`);
+}
+
+console.log("the ballot's vote boxes (public/js/ballot.js)");
+{
+  const item = (n, extra = {}) => ({ n, status: "on_ballot", your_vote: null, can_vote: { allowed: true }, turnout: { voted: 1, of: 3, players: [{ name: "Bo" }] }, ...extra });
+  const mk = (api, items) => createBallot({ api: api || (async (p) => ({ ok: true, data: { items } })), pill: (p) => `[${p.name}]`, refreshed: async () => {} });
+  const items = [item("P1", { your_vote: "no" }), item("P2")];
+  const b = mk(async () => ({ ok: true, data: { items, you: { voted: 1, of: 2 } } }), items);
+  await b.load();
+  const box1 = b.box("P1"), box2 = b.box("P2");
+  check("an item you voted No on: No is pressed with a check, Yes is plain; turnout and who, no tally", /data-vote="no"[^>]*aria-pressed="true"/.test(box1) && /✓ <\/span>No/.test(box1) && /data-vote="yes"[^>]*aria-pressed="false"/.test(box1) && /1 of 3 voted: \[Bo\]/.test(box1) && !/Results at midnight/.test(box1));
+  check("an item that is not on the ballot has no box, and no box carries a restated rule", b.box("P9") === "" && !/Results at midnight/.test(b.box("P2")));
+  check("N of M voted, and the first item you have not voted on (P2, not P1)", b.voted() === 1 && b.total() === 2 && b.hasYou() && b.firstOpen() === "P2");
+  const off = mk(async () => ({ ok: true, data: { items: [item("P1", { can_vote: { allowed: false, reason: "Your turn has ended for today." } })], you: null } }));
+  await off.load();
+  check("when voting is closed both buttons are disabled and the reason is plain text; signed out there is no 'N of M'", (off.box("P1").match(/ disabled>/g) || []).length === 2 && /Your turn has ended for today\./.test(off.box("P1")) && !off.hasYou());
+  const ro = createBallot({ api: async () => ({ ok: true, data: { items, you: null } }), pill: (p) => `[${p.name}]`, refreshed: async () => {}, player: () => false });
+  await ro.load();
+  check("a viewer who is not a player of this game sees the ballot read-only: turnout and who, no buttons, no reason, no note", !/<button/.test(ro.box("P2")) && /1 of 3 voted: \[Bo\]/.test(ro.box("P2")) && !/vwhy|vnote/.test(ro.box("P2")));
+  let posts = 0, release;
+  const slow = createBallot({ api: async (path, body) => { if (body) { posts++; await new Promise((r) => { release = r; }); return { ok: true, data: { message: "P1: you voted Yes. You can change it until midnight." } }; } return { ok: true, data: { items: [item("P1")], you: { voted: 0, of: 1 } } }; }, pill: () => "", refreshed: async () => {} });
+  await slow.load();
+  const el = { dataset: { pn: "P1", vote: "yes" } };
+  const first = slow.click(el); await slow.click(el);   // the second click while the first is in flight does nothing
+  release(); await first;
+  check("a second click while a vote is in flight sends nothing; the server's toast is shown", posts === 1 && /P1: you voted Yes\. You can change it until midnight\./.test(slow.box("P1")));
+  const down = createBallot({ api: async (path, body) => { if (body) throw new Error("offline"); return { ok: true, data: { items: [item("P1")], you: { voted: 0, of: 1 } } }; }, pill: () => "", refreshed: async () => {} });
+  await down.load(); await down.click(el);
+  check("a vote that cannot reach the server shows a plain error and the next click still works (nothing stays locked)", /vmsg err/.test(down.box("P1")) && /Check your connection/.test(down.box("P1")));
+  const nodes = [{ textContent: "", className: "vmsg" }];
+  globalThis.document = { querySelectorAll: (q) => (q.includes('data-vbox="P1"') ? nodes : []) };
+  const flaky = createBallot({ api: async (path, body) => { if (body) throw new Error("offline"); return { ok: true, data: { items: [item("P1")], you: null } }; }, pill: () => "", refreshed: async () => { throw new Error("offline"); } });
+  await flaky.load(); await flaky.click(el);
+  delete globalThis.document;
+  check("when the reload after a vote also fails, the message is still painted into the box on the page", /Check your connection/.test(nodes[0].textContent) && nodes[0].className === "vmsg err");
+  let again = 0; const retry = createBallot({ api: async (path, body) => { if (body) { again++; return { ok: true, data: { message: "ok" } }; } return { ok: true, data: { items: [item("P1")], you: null } }; }, pill: () => "", refreshed: async () => {} });
+  await retry.load(); await retry.click(el); await retry.click(el);
+  check("...and after a finished vote a second one goes through", again === 2);
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

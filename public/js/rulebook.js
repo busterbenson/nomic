@@ -106,6 +106,15 @@ export function renderMarkdown(md) {
 const LOCKSVG = (w = 12) => `<svg class="lk" width="${w}" height="${Math.round(w * 1.125)}" viewBox="0 0 16 18" role="img" aria-label="Everyone must agree"><rect x="2" y="8" width="12" height="9" rx="2" fill="currentColor"/><path d="M5 8V5.5a3 3 0 0 1 6 0V8" fill="none" stroke="currentColor" stroke-width="2"/></svg>`;
 const clip = (t, n) => (t.length > n ? t.slice(0, n - 1).replace(/\s+\S*$/, "") + "…" : t);
 
+// A citation links to its rule's card: "rule 202.4" / "block 100" (the old voice) and "(202.4)" (the rules voice, docs/rules-voice.md).
+// `h` is already escaped HTML; only numbers that name a rule in `byNum` become buttons, and the text around them is kept.
+export function linkCites(h, byNum) {
+  const btn = (n) => `<button type="button" class="xref" data-seecard="${n}" data-clause="${n}" aria-haspopup="dialog" aria-label="Preview ${n}">${n}</button>`;
+  return h
+    .replace(/\b(rules?|block) (\d{3}(?:\.\d+)?)\b/gi, (m, w, n) => (byNum[n] ? `${w} ${btn(n)}` : m))
+    .replace(/\((\d{3}(?:\.\d+)?)\)/g, (m, n) => (byNum[n] ? `(${btn(n)})` : m));
+}
+
 export function mountRulebook(root, md, { settings = {}, revisions = {}, proposer = null, cards = null, action = null } = {}) {
   const P = proposer;   // propose.js: what the rulebook draws for proposals (null: a read-only rulebook)
   const RB = parseRules(md);
@@ -114,7 +123,7 @@ export function mountRulebook(root, md, { settings = {}, revisions = {}, propose
   const inline = (s, q) => {
     let h = esc(s).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>");
     h = h.replace(/\[setting: ([\w.]+)\]/g, (m, k) => `<span class="setting">${k} <b>${esc(settingText(Object.hasOwn(settings, k) ? settings[k] : "?"))}</b></span>`);
-    h = h.replace(/\b(rules?|block) (\d{3}(?:\.\d+)?)\b/gi, (m, w, n) => (RB.byNum[n] ? `${w} <button type="button" class="xref" data-seecard="${n}" data-clause="${n}" aria-haspopup="dialog" aria-label="Preview ${n}">${n}</button>` : m));
+    h = linkCites(h, RB.byNum);
     return hl(h, q);
   };
   const paras = (ps, q) => ps.map((p) => (p.t === "p" ? `<p>${inline(p.s, q)}</p>` : `<ul>${p.items.map((i) => `<li>${inline(i, q)}</li>`).join("")}</ul>`)).join("");
