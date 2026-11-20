@@ -175,7 +175,7 @@ code, not in the moderator's instructions:
 - **Accounts across games.** Per game for now (a deliberate choice). A global
   account may come later; the schema has no global users table to migrate from.
 
-- **Players.** Who. Up to 5 can join with the code (at most 8, rule 201); the seat count is a setting and the
+- **Players.** Who. Up to the game's size can join with the code (at most 8, rule 201); the seat count is a setting and the
   player colors are one data file.
 - **Starting a game.** The host presses Start (`POST /<slug>/api/start`, MCP `start_game`): the game goes
   from `setup` to `playing` and day 1 begins (rules 102.2, 203.1). Seats stay open while there are fewer

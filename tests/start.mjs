@@ -3,7 +3,7 @@
 // can invite while there is room, in setup and in play, each with their own link; someone who joins after a day began
 // votes from the next day. A real `wrangler dev` on a throwaway LOCAL D1. Run: node tests/start.mjs
 import { rmSync } from "node:fs";
-import { client, connect, createGame, d1, join, migrate, newState, startRulesStub, startServer, tool } from "./lib.mjs";
+import { client, connect, createGame, d1, finish, join, migrate, newState, startRulesStub, startServer, tool } from "./lib.mjs";
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = "") => {
@@ -73,10 +73,16 @@ try {
   const pa = await page(ia.data.url), pb = await page(ib.data.url), pn = await page(`${SITE}/start/join/${g.code}`), pf = await page(`${SITE}/start/join/${g.code}?from=000000000000`);
   check("the join page says who invited you: Ana's link says Ana, Bo's says Bo; no link, or one that names nobody, says nobody",
     /Ana invited you/.test(pa) && !/Bo invited you/.test(pa) && /Bo invited you/.test(pb) && !/invited you/.test(pn) && !/invited you/.test(pf));
+  const pu = await page(ia.data.url.replace(/from=([0-9a-f]+)/, (m, h) => `from=${h.toUpperCase()}`)), ps = await page(`${ia.data.url}0`), po = await page(ia.data.url.replace(/\/join\/[^?]+/, "/join/ZZZZZZZZ"));
+  check("a from code that is upper-case, too long or sent with a wrong game code names nobody", !/invited you/.test(pu) && !/invited you/.test(ps) && !/invited you/.test(po));
   setClock("2026-03-08T21:00:00.000Z");
   const cy = await join(A, "start", g.code, { email: "cy@example.com", name: "Cy", color: "jade" });
   const meC = (await cy.get("/start/api/me")).data;
   check("someone can join a game that is in play while it has room (a player, not the host)", meC.player.is_host === false && (await client(A).get("/start/api/game")).data.players.length === 3);
+  const cyMove = (() => { const q = d1(state, `SELECT x, y FROM players WHERE game_id = '${gid("start")}' AND display_name = 'Cy'`)[0]; return q; })();
+  let cyMv = { status: 0, text: "" };
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) { cyMv = await cy.post("/start/api/action", { kind: "move", x: cyMove.x + dx, y: cyMove.y + dy, z: 0 }); if (cyMv.status === 200) break; }
+  check("a mid-day joiner has a turn like everyone: Cy can move today", cyMv.status === 200, cyMv.text);
   check("a player who joins after day 1 began is not in its electorate (rule 102.4): the 2 who were there at the start", J(electors("start", 1)) === J(["Ana", "Bo"]) && days("start")[0].electorate === 2, J(electors("start", 1)));
   const ball = (await cy.get("/start/api/ballot")).data;
   check("the ballot knows it: Cy is not an elector of day 1", ball.you && ball.you.elector === false, J(ball.you));
@@ -96,8 +102,12 @@ try {
   const sana = await join(A, "solo", solo.code, { email: "sana@example.com", name: "Sana", color: "teal" });
   const si = await inv(sana, "solo");
   check("in setup with room, a player gets their own link", si.status === 200 && si.data.url.startsWith(`${SITE}/solo/join/${solo.code}?from=`));
+  const pend = await client(A).post("/solo/api/join", { code: solo.code, email: "late@example.com", name: "Late", color: "cobalt" });   // a link asked for in setup, opened after Start
   const soloStart = await sana.post("/solo/api/start", {});
   check("a game can start with 1 player: it begins day 1 with an electorate of 1", soloStart.status === 200 && gameRow("solo").status === "playing" && days("solo")[0].electorate === 1 && J(electors("solo", 1)) === J(["Sana"]), soloStart.text);
+
+  const lateV = await finish(client(A), pend.data.dev_link);
+  check("a join link asked for in setup and opened after Start still joins (the game has room), and the joiner is not in day 1's electorate", lateV.status === 303 && d1(state, `SELECT COUNT(*) AS n FROM players WHERE game_id = '${gid("solo")}'`)[0].n === 2 && J(electors("solo", 1)) === J(["Sana"]), String(lateV.status));
 
   console.log("over MCP");
   const mh = await join(A, "mcpg", mg.code, { email: "mh@example.com", name: "Hana", color: "teal" });
