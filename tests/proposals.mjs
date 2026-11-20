@@ -40,6 +40,9 @@ console.log("the moderator's code drafts (rule 103.1), after the mockup's makeDr
   check("add a rule: the block's next free number (404), headed 'Add rule 404 to block 400:'", d.head === "Add rule 404 to block 400:" && d.new_num === "404" && d.after_text === "A tie goes to the older player." && r.scope === "block", J(d));
   ({ r, d } = drafted({ kind: "move", target: "403", to: "300" }));
   check("move a rule: 'Move rule 403 (Paradox) to block 300 as rule 303:', and its old number keeps a forwarder", d.head === "Move rule 403 (Paradox) to block 300 as rule 303:" && d.new_num === "303" && d.after_text.endsWith("403 [Moved to 303]"), J(d));
+  ({ r, d } = drafted({ kind: "move", target: "504", to: "300" }));
+  check("a moved rule's clauses move with it: 504 to block 300 as 303 gives 303.2 and 303.3, and only the forwarder keeps 504",
+    d.after_text.includes("303.2 When you move") && d.after_text.includes("303.3 You can only move") && !/504\.\d/.test(d.after_text) && d.after_text.endsWith("504 [Moved to 303]"), d.after_text);
   ({ r, d } = drafted({ kind: "mark", target: "401" }));
   check("lock a rule: 'Mark rule 401 (Points) unanimous:' [majority] -> [unanimous]; it needs the votes of its CURRENT mark (rule 105.3)", d.head === "Mark rule 401 (Points) unanimous:" && d.before_text === "[majority]" && d.after_text === "[unanimous]" && markFor(B, { ...r, ...d }) === "majority", J(d));
   ({ r, d } = drafted({ kind: "mark", target: "400" }));
@@ -77,6 +80,9 @@ console.log("what no proposal can change (rule 110.1), refused at drafting");
   check("rewording all of 202 is allowed while its fixed clause 202.4 stays word for word, and refused once 202.4 changes",
     refuse({ kind: "amend", target: "202", words: r202.replace("Every part of a turn is optional", "Each part of a turn is optional"), prefilled: true }) === null &&
     /rule 202\.4/.test(refuse({ kind: "amend", target: "202", words: r202.replace("Ending is final", "Ending is not final"), prefilled: true }) || ""));
+  const r103 = draftOf(B, req({ kind: "amend", target: "103", words: "x", prefilled: true }), "x").before_text;
+  check("text appended to a fixed clause inside a whole-rule reword changes it: refused (103.2 + 'Except ... ten proposals on Sundays.')",
+    /rule 103\.2/.test(refuse({ kind: "amend", target: "103", words: r103.replace("next day's ballot.", "next day's ballot. Except that a player may confirm ten proposals on Sundays."), prefilled: true }) || ""), r103);
   check("a reword elsewhere (401) is not refused", refuse({ kind: "amend", target: "401", words: "15", prefilled: true }) === null);
 }
 
@@ -135,12 +141,13 @@ console.log("migration 0006");
 
 // ---------------------------------------------------------------- the model stub (recorded answers)
 // POST /v1/messages answers whatever `next` holds: a recorded good answer, a malformed one, or a 500.
-const model = { next: null, calls: [] };
+const model = { next: null, before: null, calls: [] };
 const stubModel = createServer((req, res) => {
   let body = "";
   req.on("data", (c) => (body += c));
   req.on("end", () => {
     model.calls.push({ url: req.url, key: req.headers["x-api-key"] === "stub-key-not-real", version: req.headers["anthropic-version"], body: JSON.parse(body || "{}") });
+    if (model.before) { const f = model.before; model.before = null; f(); }
     const n = model.next ?? { status: 200, text: '{"after_text": "A player whose proposal passes gets 15 points.", "conflicts": ["402"], "settings": {}}' };
     res.statusCode = n.status;
     res.setHeader("content-type", "application/json");
@@ -275,6 +282,16 @@ try {
   const stale = await cy.post(`${P}/${cyd2.data.proposal.id}/confirm`, {});
   check("a draft made against rules that have since changed (another bundle) can't be confirmed: 409, draft it again", stale.status === 409 && /rules have changed/.test(stale.data.error), stale.text);
   const cyId = d1(state, `SELECT id FROM players WHERE display_name = 'Cy'`)[0].id;
+  // The model answers after midnight: the request began before it, so only a clock read after the answer catches it.
+  const end2 = d1(state, `SELECT ends_at FROM days WHERE game_id = '${gid}' AND n = 2`)[0].ends_at;
+  const clockNow2 = d1(state, "SELECT value FROM dev_controls WHERE key = 'clock'")[0].value;
+  const cyRows = () => d1(state, `SELECT COUNT(*) AS n FROM proposals WHERE player_id = '${cyId}' AND day_proposed = 2`)[0].n;
+  const beforeSlow = cyRows();
+  model.before = () => setClock(new Date(Date.parse(end2) + 1000).toISOString());
+  const slowTurn = await cy.post("/prop/api/turn", { kind: "reword", target: "401", words: "16 points" });
+  setClock(clockNow2);
+  check("a draft whose model answer arrives after midnight meets the lock: /api/turn answers 423 and writes nothing (no draft, no proposal)",
+    slowTurn.status === 423 && /processing day 2/.test(slowTurn.data.error) && cyRows() === beforeSlow, slowTurn.text);
   d1(state, `UPDATE draft_attempts SET n = 29 WHERE game_id = '${gid}' AND player_id = '${cyId}' AND day = 2`);
   model.next = { status: 200, text: "garbled" };
   const g29 = await cy.post(P, { kind: "reword", target: "401", words: "15" });

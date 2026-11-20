@@ -119,9 +119,10 @@ export function fixedRefusal(book, d) {
   if (!hit.length) return null;
   if (d.kind === "addclause") return null;
   if (d.kind === "amend" && plainTxt(d.after_text) === plainTxt(d.before_text) && Object.keys(d.settings || {}).length) return null;
-  // Rewording a whole rule that holds a fixed clause is allowed when that clause is still there, word for word.
-  const after = plainTxt(d.after_text);
-  if (d.kind === "amend" && hit.every((p) => p.startsWith(d.target + ".") && book.byNum[p]?.kind === "clause" && after.includes(plainTxt(`${p} ${clauseText(book.byNum[p])}`)))) return null;
+  // Rewording a whole rule that holds a fixed clause is allowed when that clause is still there, word for word, as a
+  // whole paragraph of its own (text appended to it in the same paragraph changes it).
+  const paras = String(d.after_text || "").split(/\n\s*\n/).map(plainTxt);
+  if (d.kind === "amend" && hit.every((p) => p.startsWith(d.target + ".") && book.byNum[p]?.kind === "clause" && paras.includes(plainTxt(`${p} ${clauseText(book.byNum[p])}`)))) return null;
   const what = hit.map((p) => `rule ${p}`).join(", ");
   return `No proposal can change ${what}: the site runs ${hit.length > 1 ? "them" : "it"} the same in every game (rule 110.1). Its settings can still be changed.`;
 }
@@ -221,9 +222,11 @@ export function draftOf(book, req, after = null) {
   if (k === "move") {
     const nn = nextRuleNum(book, req.to_block);
     if (!nn) return { error: `Block ${req.to_block} has no free number left.` };
+    // Its clauses, and its own references to them, move with it: 504.2 becomes 303.2 (rule 109.1's "code names move with it").
+    const moved = t.replace(new RegExp(`\\b${r.num}\\.(\\d+)`, "g"), `${nn}.$1`);
     return {
       head: `Move rule ${r.num} (${r.title}) to block ${req.to_block} as rule ${nn}:`,
-      before_text: t, after_text: `${nn} ${r.title}\n\n${t}\n\n${r.num} [Moved to ${nn}]`, new_num: nn, conflicts: referencesTo(book, r.num),
+      before_text: t, after_text: `${nn} ${r.title}\n\n${moved}\n\n${r.num} [Moved to ${nn}]`, new_num: nn, conflicts: referencesTo(book, r.num),
     };
   }
   return { head: `Amend rule ${r.num} (${r.title}) to read:`, before_text: t, after_text: after ?? req.words, new_num: null, conflicts: [] };

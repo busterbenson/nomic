@@ -96,6 +96,13 @@ export async function draft(ctx: Ctx, player: any, body: any, nowMs: number): Pr
       return out({ error: e.message, drafting: e.code }, e.code === "unavailable" ? 503 : 502);
     }
   }
+  // The model may take a while: the write is timed when its answer is in, so a draft that finishes after midnight
+  // meets the lock (rule 107.1).
+  if (after !== null) {
+    nowMs = await clockNow(env);
+    const late = turnBlock(game, day, turn, player, "propose", nowMs);
+    if (late) return out(refusalBody(late), late.status);
+  }
   const d = draftOf(book, req, after);
   if ("error" in d) return out({ error: d.error }, 400);
   const refused = fixedRefusal(book, { ...req, ...d, settings });

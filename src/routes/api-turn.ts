@@ -17,6 +17,7 @@ export const post = async (ctx: Ctx) => {
   const nowMs = await clockNow(ctx.env);
   const d = await draft(ctx, player, body, nowMs);
   if (d.status !== 200) return json(d.body, d.status);
-  const c = await confirm(ctx, player, d.body.proposal.id, nowMs);
+  // Drafting may have called the model: the confirm is timed again, so it can't land after midnight (rule 107.1).
+  const c = await confirm(ctx, player, d.body.proposal.id, await clockNow(ctx.env));
   return json(c.body, c.status);
 };
