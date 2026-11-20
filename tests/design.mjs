@@ -69,8 +69,8 @@ check("the day model replaces the turn model: 103 is proposals (no join order), 
 console.log("the proposal rules (step 1, PR 3)");
 check("103 Proposals is 103.1-103.4 and 105 Votes needed is 105.1-105.5, worded as approved; the moderator moved to 106",
   T.byNum["103"].clauses.map((c) => c.num).join() === "103.1,103.2,103.3,103.4" && T.byNum["105"].title === "Votes needed" && T.byNum["105"].clauses.map((c) => c.num).join() === "105.1,105.2,105.3,105.4,105.5" &&
-  T.byNum["106"].title === "The moderator" && rules.includes("Drafting costs nothing: only a confirmed proposal is the player's one proposal for the day.") &&
-  rules.includes("Each confirmed proposal gets the next number (P1, P2, ...) and goes on the next day's ballot.") && rules.includes("A withdrawn proposal doesn't use up the day's proposal.") &&
+  T.byNum["106"].title === "The moderator" && rules.includes("Drafting costs nothing: only a confirmed proposal counts toward the day's limit.") &&
+  rules.includes("Each confirmed proposal gets the next number (P1, P2, ...) and goes on the next day's ballot.") && rules.includes("You can confirm up to 3 proposals a day. [setting: proposals.per_day]") && rules.includes("A withdrawn proposal doesn't count toward the limit (103.2).") &&
   rules.includes("The mark sets the votes needed to change, add or repeal any rule in the block.") && rules.includes("The votes a proposal needs are set when it is confirmed, from the marks in effect then.") &&
   rules.includes("Rules marked unanimous, by their block or by their own mark, are the core rules."));
 check("108.3 (the moderator names conflicts when drafting) and 110.1 (what no proposal can change, refused at drafting) are in",

@@ -92,7 +92,7 @@ export function createProposer({ api, me, day, refresh, pill, vote }) {
   /** @rule 103.3 */
   const canWithdraw = () => active() && !day().locked && !day().you.ended;
   /** @rule 103.2 */
-  const mine = () => S.list.find((p) => p.mine && p.status === "confirmed") || null;
+  const mineList = () => S.list.filter((p) => p.mine && p.status === "confirmed");
   /** @rule 104 */
   const onBallot = () => S.list.filter((p) => p.status === "on_ballot" && p.day_ballot === S.today);
   /** @rule 103.1 */
@@ -221,13 +221,11 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
   // The card for adding a rule to a block: your words, the moderator's slip, or what is true if you can't.
   /** @rule 103.1, 103.2 */
   function addFlowHTML(sec) {
-    const m = mine(), c = can(), u = S.ui;
-    if (m && m.kind === "add" && m.target === sec.num) return chgHTML(m);
-    if (m) return `<p class="mnote">You have already proposed today (${esc(m.n)}).</p>`;
-    if (!c.allowed) return `<p class="mnote">${esc(c.reason || "You can't propose right now.")}</p>`;
+    const own = mineList().filter((p) => p.kind === "add" && p.target === sec.num).map(chgHTML).join(""), c = can(), u = S.ui;
+    if (!c.allowed) return own || `<p class="mnote">${esc(c.reason || "You can't propose right now.")}</p>`;
     // Drawing never changes what you are writing (a card on the Back stack is drawn too): no flow yet is a button that starts one.
-    if (!(u && u.kind === "add" && u.rule === sec.num)) return `<button type="button" class="btn ghost small" data-p="add" data-n="${esc(sec.num)}">Write a new rule</button>`;
-    return flowHTML();
+    if (!(u && u.kind === "add" && u.rule === sec.num)) return `${own}<button type="button" class="btn ghost small" data-p="add" data-n="${esc(sec.num)}">Write a new rule</button>`;
+    return own + flowHTML();
   }
   // Which block a new rule goes in: the choice the banner's button opens.
   /** @rule 103.1 */
@@ -235,16 +233,16 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
     return `<div class="pmenu" role="menu">${S.RB.sections.map((s) => `<button type="button" role="menuitem" class="pmi" data-p="add" data-n="${esc(s.num)}"><span class="l"><b>${esc(s.num)} · ${esc(s.title)}</b><small>${s.rules.length} rule${s.rules.length === 1 ? "" : "s"} · ${s.change === "unanimous" ? "needs everyone to agree" : "majority"}</small></span><span aria-hidden="true" class="mnote">→</span></button>`).join("")}</div>`;
   }
 
-  // The banner at the top of the rulebook: one proposal a day, said once.
+  // The banner at the top of the rulebook: what you have proposed today, of the day's limit (rule 103.2).
   /** @rule 103.2 */
   function bannerHTML() {
     if (!active()) return "";
-    const m = mine(), c = can();
-    let html;
-    if (m) html = `<p>You proposed ${pPill(m)} today. It is on tomorrow's ballot (rule ${rpill("103.2")}).</p>`;
-    else if (!c.allowed) html = `<p>${esc(c.reason || "You can't propose right now.")}</p>`;
-    else html = `<p><b>You haven't proposed a change today.</b></p><button type="button" class="btn ghost small" data-p="pickblock">Propose a new rule</button>`;
-    return `<div class="rbanner${m || !c.allowed ? " done" : ""}" id="rb-banner">${html}</div>`;
+    const ms = mineList(), c = can(), pr = day().you.proposals;
+    const said = ms.length ? `<p>You proposed ${ms.map(pPill).join(" ")} today${pr ? ` (${esc(pr.made)} of ${esc(pr.limit)})` : ""}. On tomorrow's ballot (rule ${rpill("103.2")}).</p>` : "";
+    let html = said;
+    if (!c.allowed) html += ms.length && pr && pr.made >= pr.limit ? "" : `<p>${esc(c.reason || "You can't propose right now.")}</p>`;
+    else html += `${ms.length ? "" : `<p><b>You haven't proposed a change today.</b></p>`}<button type="button" class="btn ghost small" data-p="pickblock">Propose a new rule</button>`;
+    return `<div class="rbanner${!c.allowed ? " done" : ""}" id="rb-banner">${html}</div>`;
   }
 
   // ---- the clicks -----------------------------------------------------------------------------------------------
@@ -341,7 +339,7 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
 
   return {
     load, click, input, mineTouches, bannerHTML, proposeHTML, blockMarksHTML, addCardHTML, addFlowHTML, pickHTML, boxHTML, ageChip, onBallotRule,
-    chgFor: chgHTML, cardKey, rpill, pPill, mine, onBallot: () => onBallot(), canPropose: () => can(),
+    chgFor: chgHTML, cardKey, rpill, pPill, mineList, onBallot: () => onBallot(), canPropose: () => can(),
     ghostsOf: (sec) => ghosts(sec),
     ghostCount: () => (S.RB ? S.RB.sections.reduce((n, s) => n + ghosts(s).length, 0) : 0),
     attach({ RB, redraw, openAdd, openPick, closeAdd }) { S.RB = RB; S.redraw = redraw; S.openAdd = openAdd || S.openAdd; S.openPick = openPick || S.openPick; S.closeAdd = closeAdd || S.closeAdd; },

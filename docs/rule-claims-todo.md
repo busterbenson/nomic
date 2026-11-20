@@ -7,7 +7,7 @@ Every function that carries out the game should say which rule it implements, wi
 `src/` is only reported for now: these functions have no claim yet. Site plumbing such as sign-in and email goes
 under rule 101 or 102; a follow-up change claims them and moves `src/` into the strict set.
 
-134 of 253 functions outside `src/engine/` are unclaimed.
+135 of 256 functions outside `src/engine/` are unclaimed.
 
 ## src/index.ts (5)
 
@@ -95,7 +95,7 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 - line 13: `page`
 
-## src/lib/proposals.js (8)
+## src/lib/proposals.js (9)
 
 - line 146: `own`
 - line 147: `cites`
@@ -105,21 +105,22 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 - line 383: `refuse`
 - line 385: `own`
 - line 465: `typeOf`
+- line 504: `proposalLimitMessage`
 
 ## src/lib/settings.js (12)
 
-- line 41: `validTimeZone`
-- line 46: `isInt`
-- line 47: `isObj`
-- line 48: `evenInt`
-- line 52: `max_players`
-- line 56: `mcp_enabled`
-- line 61: `exactly`
-- line 70: `spawnSpots`
-- line 71: `inside`
-- line 79: `validateSettings`
-- line 99: `getSettings`
-- line 113: `settingsForSize`
+- line 44: `validTimeZone`
+- line 49: `isInt`
+- line 50: `isObj`
+- line 51: `evenInt`
+- line 55: `max_players`
+- line 59: `mcp_enabled`
+- line 65: `exactly`
+- line 74: `spawnSpots`
+- line 75: `inside`
+- line 83: `validateSettings`
+- line 103: `getSettings`
+- line 117: `settingsForSize`
 
 ## src/lib/util.ts (27)
 
@@ -157,7 +158,7 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/routes/api-day.ts (1)
 
-- line 37: `can`
+- line 39: `can`
 
 ## src/routes/api-login.ts (1)
 
