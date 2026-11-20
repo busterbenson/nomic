@@ -137,8 +137,9 @@
     const unread = NOTES.unread;
     w.innerHTML = `<button class="iconbtn" id="bell" type="button" aria-label="${unread ? `Notifications, ${unread} new` : "Notifications"}" aria-expanded="${shown}" aria-controls="notes-panel">${BELL}<span class="badge" id="badge"${unread && !shown ? "" : " hidden"}>${unread}</span></button>
       <button class="me" id="me-chip" type="button" aria-haspopup="true" aria-expanded="${open}" aria-controls="acct" aria-label="Your account">${p ? `<span class="dot" style="background:${hexOf(p.color)};width:20px;height:20px"></span>` : ""}<span class="nm">${esc(ME.user.name)}</span><span class="cv" aria-hidden="true">▾</span></button>`;
-    $("bell").onclick = () => toggle("notes");
-    $("me-chip").onclick = () => toggle("acct");
+    // toggling redraws this header, so the button you used is found again and keeps focus
+    $("bell").onclick = () => { toggle("notes"); $("bell").focus(); };
+    $("me-chip").onclick = () => { toggle("acct"); $("me-chip").focus(); };
     drawAcct();
   }
   function drawAcct() {

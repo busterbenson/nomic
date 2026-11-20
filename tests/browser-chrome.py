@@ -132,6 +132,7 @@ with sync_playwright() as pw:
     check("S1-ACC-01: the menu has the name, color and points, Your player card and Log out", "Ada" in am and "Teal · 0 points" in am and "Your player card" in am and "Log out" in am, am)
     check("S1-ACC-02: no Invite or Connect your AI in the menu, the header or the Players aside; no Settings (invite links per player have no backend yet)", not re.search(r"Invite|Connect your AI|Settings", text(page, "header") + text(page, "aside")), text(page, "header"))
     page.click("#bell"); page.wait_for_timeout(200)
+    check("opening the bell leaves focus on the bell (the header is redrawn under it)", page.evaluate("document.activeElement && document.activeElement.id") == "bell")
     check("S1-ACC-03: opening the bell closes the account menu", page.locator("#acct").is_hidden() and page.locator("#notes-panel").is_visible())
     page.keyboard.press("Escape"); page.wait_for_timeout(200)
     check("S1-ACC-03: Esc closes the bell", page.locator("#notes-panel").is_hidden())
