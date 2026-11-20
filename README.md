@@ -112,13 +112,12 @@ two games is two unrelated players.
   Secure, SameSite=Lax). Only a hash is stored, with the game it belongs to, and
   the server checks that game too: a session for one game is ignored on another's
   routes even if the cookie is sent there.
-- Seats can be taken only while the game's status is `setup` (rule 102: adding a
-  player takes a proposal once play begins).
+- Seats can be taken while the game's status is `setup` or `playing` and it has room (rule 102.3: any player can
+  invite, no proposal). Someone who joins after a day began votes from the next day (rule 102.4).
 - `/<slug>/api/game` is public and never contains emails, player ids or the join code.
 
-To start a game by hand (no moderator yet):
-`npx wrangler d1 execute DB --local --command "UPDATE games SET status='playing', round=1, turn=0 WHERE slug='demo'"`
-(add `--remote` against the deployed database).
+The host (the first player to join) starts a game with the Start button, `POST /<slug>/api/start` or the MCP tool
+`start_game` (rules 102.2, 203.1): the game goes to `playing` and day 1 begins.
 Once playing, the game runs one day at a time (rule 203.1). Each player may move once, end their turn, and make one
 proposal a day (rule 103): `POST /<slug>/api/proposals` drafts it (free and repeatable; code drafts the mechanical
 kinds, a small model drafts rewording in plain words), `.../proposals/<id>/confirm` makes it the day's one proposal

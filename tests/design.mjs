@@ -44,7 +44,7 @@ console.log("the starter rules renumbered");
 const rules = read("templates/RULES.md").replace(/\s+/g, " ");
 const keep = [
   ["101", "Every player, and the moderator, must follow the rules in this file as they stand on `main`."],
-  ["102", "Adding or removing a player takes a passed proposal."],
+  ["102", "The players are the people who have joined the game, as shown on the board."],
   ["104", "Votes are counted by code, not by the moderator."],
   ["201", "A game has at most 8 players. [setting: max_players]"],
   ["202", "you move at most once a day."],

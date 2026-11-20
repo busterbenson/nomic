@@ -1,6 +1,6 @@
 // The MCP tools. A THIN ADAPTER: each tool builds a Request for the matching web route and calls that route's
 // own handler (api-rules, api-board, api-me, api-game, api-day, api-turn, api-proposals, api-action, api-end-turn, api-votes,
-// api-ballot), so validation, guards, log lines
+// api-ballot, api-start), so validation, guards, log lines
 // and notifications are the web's, and a change to the turn model reaches MCP with no change here.
 // The player is attached to the internal Request (actAs); no cookie or token is forged.
 // NOT here yet: a catch-all "take an action". It arrives with the moderator.
@@ -16,6 +16,7 @@ import * as apiEndTurn from "../routes/api-end-turn";
 import * as apiGame from "../routes/api-game";
 import * as apiMe from "../routes/api-me";
 import * as apiProposals from "../routes/api-proposals";
+import * as apiStart from "../routes/api-start";
 import * as apiRules from "../routes/api-rules";
 import * as apiTurn from "../routes/api-turn";
 import * as apiVotes from "../routes/api-votes";
@@ -179,4 +180,9 @@ export function registerTools(server: McpServer, ctx: Ctx, player: Player) {
     description: "End your turn for today. FINAL: there is no undo. Whatever you have not done today (your move, your proposal) is skipped, and you cannot move, propose or vote until the next day. Not during the midnight lock.",
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
   }, async () => reply(await viaRoute(ctx, player, apiEndTurn.post, "POST", "end-turn", {})));
+
+  server.registerTool("start_game", {
+    description: "Start the game: day 1 begins now and runs to midnight in the game's time zone. Only the host (the first player to join) can, and only while the game is still being set up. FINAL: after it the starter rules change only by proposal.",
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+  }, async () => reply(await viaRoute(ctx, player, apiStart.post, "POST", "start", {})));
 }

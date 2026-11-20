@@ -175,12 +175,14 @@ code, not in the moderator's instructions:
 - **Accounts across games.** Per game for now (a deliberate choice). A global
   account may come later; the schema has no global users table to migrate from.
 
-- **Players.** Who. Up to 5 can join with the code (at most 8, rule 201); the seat count is a setting and the
+- **Players.** Who. Up to the game's size can join with the code (at most 8, rule 201); the seat count is a setting and the
   player colors are one data file.
-- **Starting a game.** Nothing flips a game from `setup` to `playing` yet; it is a
-  manual D1 update (see README). Seats close at that point.
-- **Who the host is.** The first person to join is marked host, which grants
-  nothing yet.
+- **Starting a game.** The host presses Start (`POST /<slug>/api/start`, MCP `start_game`): the game goes
+  from `setup` to `playing` and day 1 begins (rules 102.2, 203.1). Seats stay open while there are fewer
+  than 8 players, in play too (rule 102.3).
+- **Who the host is.** The first person to join is marked host. The host's only power is Start.
+- **Invites.** Each player has their own link, the join link plus `?from=<invite code>` (a hash of the game's
+  join code and the player's id, nothing stored), so the join page says who invited you (rule 102.3).
 - **Moderator access to D1.** The moderator (a GitHub Action today) will get its own
   D1 access later, with a narrow token that can write scores, turns and
   notifications but not accounts or sessions. Not built.

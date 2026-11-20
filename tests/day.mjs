@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as pjoin } from "node:path";
-import { ROOT, client, connect, createGame, d1, join, migrate, newState, startRulesStub, startServer, tool } from "./lib.mjs";
+import { ROOT, client, connect, createGame, d1, join, migrate, newState, freePort, startRulesStub, startServer, tool } from "./lib.mjs";
 import { CONFIRM_SQL } from "../src/lib/proposals.js";
 import { dayOpenBinds } from "../src/lib/day-gate.js";
 
@@ -73,7 +73,7 @@ let srv, stub;
 const SITE = "http://day.test";
 try {
   migrate(state);
-  stub = await startRulesStub(8899, { "/busterbenson/day/main/RULES.md": "# Rules\n" });
+  stub = await startRulesStub(await freePort(), { "/busterbenson/day/main/RULES.md": "# Rules\n" });
   const R = { rulesBase: stub.base, repo: "busterbenson/day" };
   const g = await createGame(state, { slug: "day", name: "Days", max: 4, ...R });
   // The clock. 2026-03-08 is the spring-forward day in Los Angeles (23 h long): noon PDT is 19:00Z; its midnight is 07:00Z.
@@ -81,7 +81,7 @@ try {
   const setClock = (iso) => d1(state, `INSERT INTO dev_controls (key, value) VALUES ('clock', '${iso}') ON CONFLICT (key) DO UPDATE SET value = excluded.value`);
   const setControl = (k, v) => v === null ? d1(state, `DELETE FROM dev_controls WHERE key = '${k}'`) : d1(state, `INSERT INTO dev_controls (key, value) VALUES ('${k}', '${v}') ON CONFLICT (key) DO UPDATE SET value = excluded.value`);
   setClock("2026-03-08T19:00:00.000Z");
-  srv = await startServer(state, 8796, ["DEV_MODE=1", `SITE_URL=${SITE}`, `RULES_BASE_URL=${stub.base}`]);
+  srv = await startServer(state, await freePort(), ["DEV_MODE=1", `SITE_URL=${SITE}`, `RULES_BASE_URL=${stub.base}`]);
   const A = srv.base;
   const gid = d1(state, "SELECT id FROM games WHERE slug = 'day'")[0].id;
   const ana = await join(A, "day", g.code, { email: "ana@example.com", name: "Ana", color: "teal" });

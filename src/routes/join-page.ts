@@ -2,9 +2,11 @@
 // The form posts to /<slug>/api/join; the emailed link finishes the join. The shapes and colors come from the one
 // data file (pieces.json); a color someone already has is unavailable.
 import { page } from "../lib/pages";
+import { inviterOf } from "../lib/invite";
 import { Ctx, PALETTE, SHAPES, colorOf, esc, normCode, seatLimit, seatsTaken } from "../lib/util";
 
-export const get = async ({ env, params, data }: Ctx) => {
+/** @rule 102.3 */
+export const get = async ({ env, params, data, request }: Ctx) => {
   const code = normCode(params.code);
   const game = data.game!;
   const home = `/${esc(game.slug)}/`;
@@ -16,12 +18,14 @@ export const get = async ({ env, params, data }: Ctx) => {
   const taken = await seatsTaken(env, game.id);
   const takenBy = new Map(taken.map((t) => [t.color, t.display_name]));
   const limit = seatLimit(game);
-  const closed = game.status !== "setup" || taken.length >= limit;
+  const closed = game.status === "over" || taken.length >= limit;
   const head = `<h1>${esc(game.name)}</h1>`;
   if (closed) {
-    return page(game.name, `${head}<div class="now">${game.status !== "setup" ? "This game has already started, so it's closed to new players." : "This game is full."}</div>
+    return page(game.name, `${head}<div class="now">${game.status === "over" ? "This game is over, so it's closed to new players." : "This game is full."}</div>
       <p><a href="${home}">See the board</a></p>`, 409, { right });
   }
+  const inviter = await inviterOf(env, game, new URL(request.url).searchParams.get("from"));
+  const invitedBy = inviter ? `<span class="invitedby"><span class="dot" style="background:${esc(colorOf(inviter.color).hex)}"></span>${esc(inviter.display_name)} invited you</span>` : "";
   const dots = taken.map((t) => `<span class="dot" style="background:${esc(colorOf(t.color).hex)}"></span>`).join("");
   const firstFree = PALETTE.find((c) => !takenBy.has(c.key))?.key;
   const colors = PALETTE.map((c) => {
@@ -34,6 +38,7 @@ export const get = async ({ env, params, data }: Ctx) => {
   return page(
     `Join ${game.name}`,
     `${head}
+${invitedBy}
 <span class="seatchip"><span class="dots">${dots}</span>${taken.length} of ${limit} players</span>
 <form class="stack" id="f">
   <label class="field"><span>Your name</span><input type="text" name="name" maxlength="40" required autocomplete="nickname"></label>

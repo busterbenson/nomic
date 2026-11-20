@@ -4,7 +4,7 @@
 // the lock), the not-applied notification and the drafter-audit note. Runner side: moderator/test.mjs.
 // Run: npm test. Real `wrangler dev`, LOCAL D1 only; the clock and the deployed sha are dev_controls rows.
 import { createHash } from "node:crypto";
-import { client, createGame, d1, join, migrate, newState, startRulesStub, startServer } from "./lib.mjs";
+import { client, createGame, d1, join, migrate, newState, freePort, startRulesStub, startServer } from "./lib.mjs";
 import { DEADLINE_REASON, DEPLOY_REASON } from "../src/lib/votes.js";
 
 let pass = 0, fail = 0;
@@ -12,19 +12,20 @@ const check = (name, ok, detail = "") => {
   if (ok) { pass++; console.log(`  ok    ${name}`); } else { fail++; console.log(`  FAIL  ${name}${detail ? "  -> " + detail : ""}`); }
 };
 const J = JSON.stringify;
-const SITE = "http://localhost:8771";
+const SRV_PORT = await freePort();
+const SITE = `http://localhost:${SRV_PORT}`;
 const TOKEN = "mod-token-0123456789abcdefghij";
 const SHA1 = "a".repeat(40), SHA2 = "b".repeat(40), SHA3 = "c".repeat(40), SHA4 = "d".repeat(40);
 let srv = null, stub = null;
 const state = newState();
 try {
   migrate(state);
-  stub = await startRulesStub(8772, { "/busterbenson/mod/main/RULES.md": "# Rules\n" });
+  stub = await startRulesStub(await freePort(), { "/busterbenson/mod/main/RULES.md": "# Rules\n" });
   const g = await createGame(state, { slug: "mod", name: "Mod", max: 6, rulesBase: stub.base, repo: "busterbenson/mod" });
   d1(state, "CREATE TABLE IF NOT EXISTS dev_controls (key TEXT PRIMARY KEY, value TEXT)");
   const dev = (k, v) => d1(state, `INSERT INTO dev_controls (key, value) VALUES ('${k}', '${v}') ON CONFLICT (key) DO UPDATE SET value = excluded.value`);
   dev("clock", "2026-11-10T19:00:00.000Z");
-  srv = await startServer(state, 8771, ["DEV_MODE=1", `SITE_URL=${SITE}`, `RULES_BASE_URL=${stub.base}`]);
+  srv = await startServer(state, SRV_PORT, ["DEV_MODE=1", `SITE_URL=${SITE}`, `RULES_BASE_URL=${stub.base}`]);
   const A = srv.base;
   const gid = d1(state, "SELECT id FROM games WHERE slug = 'mod'")[0].id;
   const names = ["Ana", "Bo", "Cy"];
