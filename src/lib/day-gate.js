@@ -22,14 +22,16 @@ export function addDays(ymd, n) {
   return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
 }
 // The first instant of a calendar date in a time zone: its midnight, or (in a zone whose clocks jump at midnight) the
-// moment the date begins. Where clocks fall back across midnight (Asia/Beirut: 00:00 -> 23:00 the day before), the
-// date is reached twice; this is the FIRST time. Walk the window where any zone's midnight can fall an hour at a time
-// to the first hour that has reached the date, then binary-search that hour by minutes (no two transitions are less
-// than an hour apart, so inside one hour the test only flips once).
+// moment the date begins. Where clocks fall back at midnight (Asia/Beirut: 00:00 -> 23:00 the day before) the day
+// before has 25 hours, and the date begins at the second midnight. Walk the window where any zone's midnight can fall an
+// hour at a time to the first hour that has reached the date, then binary-search that hour by minutes (no two
+// transitions are less than an hour apart, so inside one hour the test flips only once). This finds the FIRST instant
+// the date is reached even if a zone's local date ever stepped backwards across midnight.
 /** @rule 203.1 */
 export function startOfDate(tz, ymd) {
   const [y, m, d] = ymd.split("-").map(Number);
   const base = Date.UTC(y, m - 1, d);
+  /** @rule 203.1 */
   const reached = (min) => localDate(tz, min * 60_000) >= ymd;
   let lo = (base - 15 * 3600_000) / 60_000; // minutes; before the date in every zone
   let hi = lo + 60;

@@ -261,7 +261,7 @@
   async function loadDay() {
     const r = await api("/api/day");
     const prev = DAY;
-    if (!r.ok) { DAY = null; drawDay(); return; }
+    if (!r.ok) { DAY = null; drawDay(); DAY_TIMER = setTimeout(loadDay, 60000); return; }
     DAY = r.data; DAY_AT = Date.now();
     const changed = prev && (prev.day !== DAY.day || prev.locked !== DAY.locked);
     drawDay(); if (DATA) drawGame(DATA);
