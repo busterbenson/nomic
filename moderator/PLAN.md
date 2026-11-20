@@ -194,5 +194,7 @@ proposal for good.
 **Gap to know about:** outside the two runs nothing retries. A deploy trigger that still fails at the deploy deadline, or a
 `pendingDeploy` left by a failed reconcile deploy, waits for the next night's main run (a notification file says so).
 
+**One launchd job for all games:** launchd does not start a job that is still running, and `run.sh` is one job. With one game (today) that is exactly what keeps the backstop off a live main run. With two games whose nights are at different clock times on the Mac, one game's main run could hold the job through the other's start; that would need one job per game. Not built (no second game yet).
+
 ## Not in this PR
 - the stale-bundle re-lock (`GAMES[slug].day < games.rules_day`), the `code-status` route (PR 8), the recap UI (PR 6).

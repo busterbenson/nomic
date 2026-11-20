@@ -539,9 +539,9 @@ export function notifyFile(dir, name, title, body) {
 async function deployWithRetry(opts, d, deployDeadlineAt, now) {
   const sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   const until = Date.parse(deployDeadlineAt);
-  for (;;) {
+  for (let tries = 1; ; tries++) {
     try { return await (opts.deploy ?? triggerDeploy)(d); }
-    catch (e) { if (!opts.watch || !Number.isFinite(until) || now() >= until) throw e; await sleep(opts.watchPollMs ?? WATCH_POLL_MS); }
+    catch (e) { if (!opts.watch || !Number.isFinite(until) || now() >= until || tries >= 200) throw e; await sleep(opts.watchPollMs ?? WATCH_POLL_MS); }
   }
 }
 
@@ -562,7 +562,9 @@ export async function runOnce(opts) {
     const pid = Number(readFileSync(lock, "utf8").trim());
     let alive = false;
     try { if (Number.isInteger(pid) && pid > 0) { process.kill(pid, 0); alive = true; } } catch (e) { alive = e.code === "EPERM"; }
-    if (!alive || Date.now() - statSync(lock).mtimeMs > STALE_LOCK_MIN * 60_000) rmSync(lock, { force: true });
+    const age = Date.now() - statSync(lock).mtimeMs;
+    if (!Number.isInteger(pid) && age < 10_000) alive = true; // another run between creating the lock and writing its pid
+    if (!alive || age > STALE_LOCK_MIN * 60_000) rmSync(lock, { force: true });
   }
   let fd;
   try { fd = openSync(lock, "wx"); } catch { return { status: "busy" }; }
@@ -596,16 +598,21 @@ async function watchNight(opts, lock) {
   if (r.status !== "claimed" && r.status !== "deploying") return { ...r, waited: waits };
   // 3. Watch the deploy: until the site has unlocked (no night pending), or the deploy grace and one cron tick are past.
   let polls = 0;
-  for (; polls < 600; polls++) {
+  // An answer with no night pending is "unlocked". A failed poll is not: it takes 3 in a row to give up. With no deploy
+  // deadline to go by, the watch is capped at 90 minutes.
+  for (let fails = 0; polls < 600; polls++) {
     await sleep(opts.watchPollMs ?? WATCH_POLL_MS); touch();
     const w = await get();
-    if (!w || !w.job) break;
+    if (w === null) { if (++fails >= 3) break; continue; }
+    fails = 0;
+    if (!w.job) break;
     const until = Date.parse(w.job.deploy_deadline_at);
-    if (Number.isFinite(until) && now() > until + DEPLOY_CRON_SLACK_MIN * 60_000) break;
+    if (Number.isFinite(until) ? now() > until + DEPLOY_CRON_SLACK_MIN * 60_000 : polls >= 120) break;
   }
   // 4. One more pass: it reverts and re-tags whatever the site listed as not applied meanwhile (a night that never went live).
   const f = await runPass(opts);
-  if (f.status === "failed") return { ...f, watched: polls };
+  // The night was claimed: its rules may have changed the time zone, whatever the last pass found.
+  if (f.status === "failed") return { ...f, watched: polls, reschedule: true };
   return { ...r, watched: polls, final: f.status, waited: waits };
 }
 

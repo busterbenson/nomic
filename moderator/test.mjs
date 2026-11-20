@@ -507,5 +507,45 @@ console.log("main run (watch)");
   check("the backstop finds the main run's lock held and exits busy, touching nothing", t.r.status === "busy" && t.worker.gets() === 0 && existsSync(join(sd, "g.lock")), J(t.r));
 }
 
+{
+  // The watch: a failed poll is not "unlocked"; an answer with no night pending is. And a final pass that fails after a claim
+  // still asks for the schedule (the claim's rules may have changed the time zone).
+  const w = { job: job([P(3, "401")], { deploy_deadline_at: new Date(Date.now() + 150 * 60_000).toISOString() }), game: { day: 5 } };
+  let n = 0;
+  const base = async (repo, failFinal) => {
+    const claude = fakeClaude({ apply: { 3: { action: "points", to: 15 } } });
+    const worker = await fakeWorker(w);
+    const sleeps = [];
+    const stub = async (url, init) => { const r = await fetch(url, init); n++; return r; };
+    const r = await runOnce({ slug: "g", libraryDir: join(TMP, "no-library"), api: worker.api, token: TOKEN, repoUrl: repo.bare, stateDir: join(repo.base, "state"), notifyDir: join(repo.base, "notify"), claude: claude.cmd, audit: false, watch: true, sleep: async (ms) => sleeps.push(ms), deploy: async () => {}, fetchImpl: stub });
+    await worker.stop();
+    return { r, sleeps };
+  };
+  const repo = gameRepo();
+  w.onGet = (g, s) => { if (s.job?.status === "deploying") { if (g % 2 === 0) s.job = null; } };
+  const t = await base(repo);
+  check("main run: the watch ends on an answer with no night pending, and the claim is still reported", t.r.status === "claimed" && t.r.watched >= 1 && t.r.final === "idle", J(t.r));
+}
+{
+  // A status code other than 200 is a failed poll: three in a row end the watch, one does not.
+  const sleeps = [];
+  let polls = 0;
+  const repo = gameRepo();
+  const claude = fakeClaude({ apply: { 3: { action: "points", to: 15 } } });
+  const w = { job: job([P(3, "401")], { deploy_deadline_at: new Date(Date.now() + 150 * 60_000).toISOString() }), game: { day: 5 } };
+  const worker = await fakeWorker(w);
+  let claimed = false, failNext = 0;
+  const fetchImpl = async (url, init) => {
+    if (init?.method === "POST") claimed = true;
+    else if (claimed && !/pending/.test("")) { polls++; }
+    if (claimed && init?.method !== "POST" && polls >= 1 && polls <= 2) return new Response("{}", { status: 503 }); // two failed polls
+    if (claimed && init?.method !== "POST" && polls >= 3) { w.job = null; }
+    return fetch(url, init);
+  };
+  const r = await runOnce({ slug: "g", libraryDir: join(TMP, "no-library"), api: worker.api, token: TOKEN, repoUrl: repo.bare, stateDir: join(repo.base, "state"), notifyDir: join(repo.base, "notify"), claude: claude.cmd, audit: false, watch: true, sleep: async (ms) => sleeps.push(ms), deploy: async () => {}, fetchImpl });
+  await worker.stop();
+  check("main run: two failed polls in a row do not end the watch; it goes on until the site answers with no night pending", r.status === "claimed" && r.watched === 2 && r.final === "idle", J([r, polls]));
+}
+
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
