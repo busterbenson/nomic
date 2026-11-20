@@ -2,7 +2,7 @@
 // A scripted stand-in for `claude -p`, for moderator/test.mjs only. It reads the prompt on stdin, finds the proposal's
 // number in the fenced data, and does what the scenario file next to it (fake-claude.scenario.json, written by the test)
 // says for that number. Every call is appended to fake-claude.calls.jsonl beside it.
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 const here = dirname(new URL(import.meta.url).pathname);
@@ -68,6 +68,15 @@ test("402.1: reaching ${step.to} wins", () => {
     result({ outcome: "applied" });
     break;
   }
+  case "ops": // a list of edits: {replace: [file, from, to]} | {write: [file, text]} | {remove: file} | {dir: file}
+    for (const o of step.ops) {
+      if (o.replace) { const t = readFileSync(join(cwd, o.replace[0]), "utf8"); if (!t.includes(o.replace[1])) throw new Error(`no ${o.replace[1]}`); edit(...o.replace); }
+      if (o.write) { mkdirSync(dirname(join(cwd, o.write[0])), { recursive: true }); writeFileSync(join(cwd, o.write[0]), o.write[1]); }
+      if (o.remove) rmSync(join(cwd, o.remove), { recursive: true, force: true });
+      if (o.dir) mkdirSync(join(cwd, o.dir), { recursive: true });
+    }
+    result(step.result ?? { outcome: "applied" });
+    break;
   case "outside": // writes where the night may not
     mkdirSync(join(cwd, "src"), { recursive: true });
     writeFileSync(join(cwd, "src", "evil.js"), "export const x = 1;\n");

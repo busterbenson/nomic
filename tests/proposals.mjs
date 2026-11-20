@@ -39,16 +39,16 @@ console.log("the moderator's code drafts (rule 103.1), after the mockup's makeDr
   ({ r, d } = drafted({ kind: "add", target: "400", words: "A tie goes to the older player." }));
   check("add a rule: the block's next free number (404), headed 'Add rule 404 to block 400:'", d.head === "Add rule 404 to block 400:" && d.new_num === "404" && d.after_text === "A tie goes to the older player." && r.scope === "block", J(d));
   ({ r, d } = drafted({ kind: "move", target: "403", to: "300" }));
-  check("move a rule: 'Move rule 403 (Paradox) to block 300 as rule 303:', and its old number keeps a forwarder", d.head === "Move rule 403 (Paradox) to block 300 as rule 303:" && d.new_num === "303" && d.after_text.endsWith("403 [Moved to 303]"), J(d));
+  check("move a rule: 'Move rule 403 (Paradox) to block 300 as rule 302:', and its old number keeps a forwarder", d.head === "Move rule 403 (Paradox) to block 300 as rule 302:" && d.new_num === "302" && d.after_text.endsWith("403 [Moved to 302]"), J(d));
   ({ r, d } = drafted({ kind: "move", target: "504", to: "300" }));
-  check("a moved rule's clauses move with it: 504 to block 300 as 303 gives 303.2 and 303.3, and only the forwarder keeps 504",
-    d.after_text.includes("303.2 When you move") && d.after_text.includes("303.3 You can only move") && !/504\.\d/.test(d.after_text) && d.after_text.endsWith("504 [Moved to 303]"), d.after_text);
+  check("a moved rule's clauses move with it: 504 to block 300 as 302 gives 302.2 and 302.3, and only the forwarder keeps 504",
+    d.after_text.includes("302.2 When you move") && d.after_text.includes("302.3 You can only move") && !/504\.\d/.test(d.after_text) && d.after_text.endsWith("504 [Moved to 302]"), d.after_text);
   ({ r, d } = drafted({ kind: "mark", target: "401" }));
   check("lock a rule: 'Mark rule 401 (Points) unanimous:' [majority] -> [unanimous]; it needs the votes of its CURRENT mark (rule 105.3)", d.head === "Mark rule 401 (Points) unanimous:" && d.before_text === "[majority]" && d.after_text === "[unanimous]" && markFor(B, { ...r, ...d }) === "majority", J(d));
   ({ r, d } = drafted({ kind: "mark", target: "400" }));
   check("lock a block: 'Mark block 400 (Points and winning) unanimous:'", d.head === "Mark block 400 (Points and winning) unanimous:" && r.scope === "block", J(d));
   ({ r, d } = drafted({ kind: "reword", target: "401", words: "A player whose proposal passes gets 15 points.", prefilled: true }));
-  check("reword with the current text edited in place (prefilled) is exact already: drafted by code, the words are the new text", !needsModel(r) && r.kind === "amend" && d.head === "Amend rule 401 (Points) to read:" && d.after_text === "A player whose proposal passes gets 15 points." && d.before_text === "A player whose proposal passes gets 10 points.", J(d));
+  check("reword with the current text edited in place (prefilled) is exact already: drafted by code, the words are the new text", !needsModel(r) && r.kind === "amend" && d.head === "Amend rule 401 (Points) to read:" && d.after_text === "A player whose proposal passes gets 15 points." && d.before_text === "A player whose proposal passes and is applied gets 10 points when it is applied (rule 107).", J(d));
   check("reword in plain words needs the small model; a clause reword is headed 'Edit clause 504.2 (...) to read:'", needsModel(req({ kind: "reword", target: "401", words: "15 points" })) && draftOf(B, req({ kind: "amend", target: "504.2", words: "x" }), "new").head.startsWith("Edit clause 504.2 ("));
   check("a target that is an inherited object key (constructor, __proto__, toString, hasOwnProperty) is no rule, for every kind (no junk draft, no crash)",
     ["constructor", "__proto__", "toString", "hasOwnProperty"].every((t) => ["amend", "addclause", "add", "repeal", "move", "mark"].every((k) => /There is no rule/.test(req({ kind: k, target: t, words: "x", to: "300", prefilled: true }).error || ""))) &&
@@ -279,7 +279,7 @@ try {
   const call = model.calls.at(-1);
   check("a reword in plain words goes to the small model once: the Messages API path, the key header and version, the player's words and the rule's text in the prompt, a small model",
     dm.status === 200 && model.calls.length === 1 && call.url === "/v1/messages" && call.key === true && call.version === "2023-06-01" && call.body.model === "claude-haiku-5-5" &&
-    call.body.messages[0].content.includes("worth 15 points") && call.body.messages[0].content.includes("A player whose proposal passes gets 10 points."), dm.text);
+    call.body.messages[0].content.includes("worth 15 points") && call.body.messages[0].content.includes("A player whose proposal passes and is applied gets 10 points when it is applied (rule 107)."), dm.text);
   check("...and its answer becomes the draft: 'Amend rule 401 (Points) to read:', the new text, drafted by the model, with the conflict it named (rule 108.3)",
     dm.data.proposal.head === "Amend rule 401 (Points) to read:" && dm.data.proposal.after_text === "A player whose proposal passes gets 15 points." && dm.data.proposal.drafted_by === "model" &&
     J(dm.data.proposal.conflicts) === J(["402"]) && /rule 402 \(rule 108\.3\)/.test(dm.data.proposal.conflict_note), dm.text);

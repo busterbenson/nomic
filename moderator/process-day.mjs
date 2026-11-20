@@ -133,25 +133,71 @@ export function touchable(p, conflictRule) {
   const notes = new Set(conflictRule ? [conflictRule] : []); // 108.4: the overridden rule gets a note (text only)
   return { rules, blocks, notes };
 }
-// Did the model's change stay inside what the proposal may touch? Compares the tree as committed (HEAD) with the
-// candidate: RULES.md section by section, rules/<n>.ts and rules/<n>.test.ts by rule number, the settings by key (only
-// keys whose [setting] tag sits in a section it may change). Returns a list of problems.
+// The outline of RULES.md: every block heading and every rule, in order, with the block each rule sits in.
 /** @rule 107.4 */
-export function scopeProblems({ beforeMd, afterMd, beforeSettings, afterSettings, changed, p, conflictRule }) {
+export function outline(md) {
+  const out = [];
+  let block = null;
+  for (const line of String(md).split("\n")) {
+    const b = /^##\s+(\d+)\./.exec(line), r = /^###\s+(\d+)\s/.exec(line);
+    if (b) { block = Number(b[1]); out.push({ block, rule: null, line: norm(line) }); }
+    else if (r) out.push({ block, rule: Number(r[1]), line: norm(line) });
+  }
+  return out;
+}
+const tagsIn = (t) => [...String(t ?? "").matchAll(/\[setting:\s*([A-Za-z0-9_.]+)\s*\]/g)].map((x) => x[1]);
+
+// Did the model's change stay inside what the proposal may touch? Compares the tree as committed (HEAD) with the
+// candidate. Returns a list of problems (empty = in scope):
+//   - the outline (block headings, which rules sit in which block, in what order, and each heading line with its mark)
+//     is unchanged apart from the rules the proposal changes; a heading's mark changes only in a mark proposal
+//   - RULES.md text changes only in those rules' sections (or the block heading of a block proposal); a rule that a
+//     prevailing proposal overrides (108.4) may only gain a short note at its end
+//   - the voted draft is in the changed rule's own section, word for word (unless redrafted, 107.3)
+//   - under rules/, only those rules' <n>.ts and <n>.test.ts; rulebook.test.ts only when the set of modules changes;
+//     nothing under rulings/ (rulings are not made by a proposal, 106.2)
+//   - settings.json changes only the keys the proposal sets, or that the voted draft or the rule as it stood names
+/** @rule 107.4, 108.4 */
+export function scopeProblems({ beforeMd, afterMd, beforeSettings, afterSettings, changed, p, conflictRule, moduleSetChanged = false }) {
   const out = [];
   const { rules, blocks, notes } = touchable(p, conflictRule);
   const a = sections(beforeMd), b = sections(afterMd);
-  const mayText = (k) => (k.startsWith("r") && (rules.has(Number(k.slice(1))) || notes.has(Number(k.slice(1))))) || (k.startsWith("b") && !k.includes(":") && blocks.has(Number(k.slice(1))));
-  for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) if (norm(a[k]) !== norm(b[k]) && !mayText(k)) out.push(`RULES.md ${k.startsWith("r") ? `rule ${k.slice(1)}` : k.startsWith("b") && !k.includes(":") ? `block ${k.slice(1)}` : "text outside any rule"} changed`);
-  if (p.after_text && !p.redraft && !norm(afterMd).includes(norm(p.after_text))) out.push("the draft that was voted on is not in RULES.md word for word");
+  const markChange = p.kind === "mark";
+  // the outline, without the rules the proposal changes (they may appear, disappear or move: add, repeal, move)
+  const keep = (o) => o.filter((x) => x.rule === null ? !blocks.has(x.block) || !markChange : !rules.has(x.rule));
+  const oa = keep(outline(beforeMd)), ob = keep(outline(afterMd));
+  if (JSON.stringify(oa) !== JSON.stringify(ob)) out.push("RULES.md: the order of the rules, the blocks they sit in, or a heading changed");
+  if (!markChange) for (const n of rules) {
+    const ha = outline(beforeMd).find((x) => x.rule === n), hb = outline(afterMd).find((x) => x.rule === n);
+    if (ha && hb && ha.block !== hb.block && p.kind !== "move") out.push(`RULES.md: rule ${n} moved to another block`);
+  }
+  for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    if (norm(a[k]) === norm(b[k])) continue;
+    const n = Number(k.slice(1));
+    if (k.startsWith("r") && rules.has(n)) continue;
+    if (k.startsWith("b") && !k.includes(":") && blocks.has(n) && markChange) continue;
+    if (k.startsWith("r") && notes.has(n) && a[k] !== undefined && b[k] !== undefined) {
+      const added = norm(b[k]).startsWith(norm(a[k])) ? norm(b[k]).slice(norm(a[k]).length) : null;
+      if (added !== null && added.length <= 300 && !/\[setting:|^#|\n#/.test(added)) continue;
+      out.push(`RULES.md rule ${n} may only gain a short note at its end (rule 108.4)`);
+      continue;
+    }
+    out.push(`RULES.md ${k.startsWith("r") ? `rule ${n}` : k.startsWith("b") && !k.includes(":") ? `block ${n}` : "text outside any rule"} changed`);
+  }
+  if (p.after_text && !p.redraft && !markChange) {
+    const own = [...rules].map((n) => b[`r${n}`] ?? "").join("\n");
+    if (!norm(own).includes(norm(p.after_text))) out.push("the draft that was voted on is not in the rule it changes, word for word");
+  }
   for (const f of changed) {
     const m = /^rules\/(\d+)\.(test\.)?ts$/.exec(f);
-    if (m && !rules.has(Number(m[1]))) out.push(`${f} belongs to rule ${m[1]}, which this proposal doesn't change`);
+    if (m) { if (!rules.has(Number(m[1]))) out.push(`${f} belongs to rule ${m[1]}, which this proposal doesn't change`); continue; }
+    if (f === "rules/rulebook.test.ts" && moduleSetChanged) continue; // a module added or removed changes its lists
+    if (f.startsWith("rules/") || f.startsWith("rulings/")) out.push(`${f} is not part of the rule this proposal changes`);
   }
-  const tagged = new Set();
-  for (const [k, t] of Object.entries({ ...a, ...b })) if (mayText(k)) for (const x of `${a[k] ?? ""}${b[k] ?? ""}`.matchAll(/\[setting:\s*([A-Za-z0-9_.]+)\s*\]/g)) tagged.add(x[1]);
+  if (!markChange) for (const n of rules) if (a[`r${n}`] && b[`r${n}`] && markOf(beforeMd, n) !== markOf(afterMd, n) && p.kind !== "move") out.push(`rule ${n}'s mark changed`);
+  const settable = new Set([...Object.keys(p.settings ?? {}), ...tagsIn(p.after_text), ...[...rules].flatMap((n) => tagsIn(a[`r${n}`]))]);
   for (const k of new Set([...Object.keys(beforeSettings ?? {}), ...Object.keys(afterSettings ?? {})])) {
-    if (JSON.stringify(beforeSettings?.[k]) !== JSON.stringify(afterSettings?.[k]) && !tagged.has(k)) out.push(`settings.json ${k} changed, but no rule this proposal changes names it`);
+    if (JSON.stringify(beforeSettings?.[k]) !== JSON.stringify(afterSettings?.[k]) && !settable.has(k)) out.push(`settings.json ${k} changed, but this proposal doesn't set it`);
   }
   return out;
 }
@@ -225,7 +271,7 @@ export function syncManifest(dir) {
 /** @rule 107.7 */
 export function discard(dir) {
   git(["checkout", "--", "."], dir, { allowFail: true });
-  git(["clean", "-fdq", "-e", "node_modules"], dir, { allowFail: true });
+  git(["clean", "-fdxq", "-e", "node_modules"], dir, { allowFail: true });
 }
 
 // ---- one proposal ------------------------------------------------------------------------------------------------
@@ -279,7 +325,7 @@ export async function applyOne({ dir, job, p, tonight, budgetMs, model = runMode
   const beforeMd = head("RULES.md");
   let beforeSettings = {};
   try { beforeSettings = JSON.parse(head("settings.json") || "{}"); } catch {}
-  const copy = join(dirname(dir), `model-P${p.number}`);
+  const copy = join(mkdtempSync(join(tmpdir(), "moderator-model-")), "game");
   const started = Date.now();
   const over = () => ({ applied: false, reason: `it ran over its budget of ${Math.round(budgetMs / 60000)} minutes (rule 107.5)` });
   let feedback = null, lastScope = null;
@@ -306,11 +352,11 @@ export async function applyOne({ dir, job, p, tonight, budgetMs, model = runMode
         const other = Number(result.conflict.rule);
         conflictRule = other;
         const mine = ruleOf(p.target);
-        const afterMd = readFileSync(join(dir, "RULES.md"), "utf8");
         const claimsIn = (md, n) => [...norm(sections(md)[`r${n}`]).matchAll(/prevails over (?:rule )?(\d+)/gi)].map((m) => Number(m[1]));
+        const claimsOf = (t) => [...norm(t).matchAll(/prevails over (?:rule )?(\d+)/gi)].map((m) => Number(m[1]));
         const yieldsIn = (md, n) => [...norm(sections(md)[`r${n}`]).matchAll(/gives way to (?:rule )?(\d+)/gi)].map((m) => Number(m[1]));
         const them = { number: other, mark: markOf(beforeMd, other) ?? "majority", added: 0, claims: claimsIn(beforeMd, other), yields: yieldsIn(beforeMd, other) };
-        const us = { number: mine ?? 9999, mark: p.mark === "unanimous" || markOf(beforeMd, mine) === "unanimous" ? "unanimous" : "majority", added: p.kind === "add" ? job.day : 0, claims: mine ? claimsIn(afterMd, mine) : [], yields: mine ? yieldsIn(afterMd, mine) : [] };
+        const us = { number: mine ?? 9999, mark: p.mark === "unanimous" || markOf(beforeMd, mine) === "unanimous" ? "unanimous" : "majority", added: p.kind === "add" ? job.day : 0, claims: claimsOf(p.after_text), yields: [] };
         if (prevailing(us, them) === them) {
           discard(dir);
           const by = tonight.find((t) => t.applied && ruleOf(t.target) === other);
@@ -324,10 +370,15 @@ export async function applyOne({ dir, job, p, tonight, budgetMs, model = runMode
       if (!paths.length) { feedback = "You changed no files. Apply the change to RULES.md and its code and tests, or write the result file with outcome not_applied and a reason."; continue; }
       let afterSettings = {};
       try { afterSettings = JSON.parse(readFileSync(join(dir, "settings.json"), "utf8")); } catch {}
-      const scope = scopeProblems({ beforeMd, afterMd: readFileSync(join(dir, "RULES.md"), "utf8"), beforeSettings, afterSettings, changed: paths, p: { ...p, redraft: earlier.length > 0 }, conflictRule });
+      let afterMd = null;
+      try { afterMd = readFileSync(join(dir, "RULES.md"), "utf8"); } catch {}
+      if (afterMd === null) { discard(dir); return { applied: false, reason: "its change removed RULES.md" }; }
+      const mods = (names) => names.filter((f) => /^\d+\.ts$/.test(f)).sort().join();
+      const moduleSetChanged = mods((git(["ls-tree", "--name-only", "HEAD", "rules/"], dir, { allowFail: true }) ?? "").split("\n").map((f) => f.replace(/^rules\//, ""))) !== mods(existsSync(join(dir, "rules")) ? readdirSync(join(dir, "rules")) : []);
+      const scope = scopeProblems({ beforeMd, afterMd, moduleSetChanged, beforeSettings, afterSettings, changed: paths, p: { ...p, redraft: earlier.length > 0 }, conflictRule });
       if (scope.length) {
         log?.({ event: "scope", number: p.number, attempt, problems: scope });
-        lastScope = scope[0];
+        lastScope = scope.join("; ").slice(0, 300);
         feedback = `The change went outside this proposal: ${scope.join("; ")}. Change only the rule this proposal changes (its text, module and tests), and put the voted draft in word for word.`;
         discard(dir);
         continue;
@@ -346,7 +397,7 @@ export async function applyOne({ dir, job, p, tonight, budgetMs, model = runMode
       discard(dir);
     }
     return { applied: false, reason: lastScope ? `its change went outside the rule it changes (${lastScope})` : `its code and tests couldn't be made to pass after ${MAX_FIXES} fixes` };
-  } finally { rmSync(copy, { recursive: true, force: true }); }
+  } finally { rmSync(dirname(copy), { recursive: true, force: true }); }
 }
 const oneLine = (s) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, 100);
 const clean = (s) => oneLine(s).replace(/[.\s]+$/, "").slice(0, 300);
@@ -498,7 +549,9 @@ export async function runOnce(opts) {
       const left = deadline - CLAIM_MARGIN_MIN * 60_000 - now();
       const budgetMs = Math.min((p.budget_minutes || 20) * 60_000, left);
       if (budgetMs <= 0) { tonight.push({ number: p.number, target: p.target, applied: false, reason: "the night ran out of time before it could be applied (rule 107.6)" }); continue; }
-      const r = await applyOne({ dir, job, p, tonight, budgetMs, model: opts.model, claude: opts.claude, log });
+      let r;
+      try { r = await applyOne({ dir, job, p, tonight, budgetMs, model: opts.model, claude: opts.claude, log }); }
+      catch (e) { discard(dir); r = { applied: false, error: true, reason: "the moderator could not apply it", detail: String(e.message || e).slice(0, 500) }; }
       if (r.error) log({ event: "model_error", number: p.number, detail: r.detail });
       tonight.push({ number: p.number, target: p.target, ...r });
       log({ event: r.applied ? "applied" : "not_applied", number: p.number, commit: r.commit, reason: r.reason, redrafted: r.redrafted });
