@@ -98,3 +98,80 @@ export async function chooseSpawn(env: Env, game: any) {
   if (!tile) return null;
   return { tile, occupants: ctx.players.filter((p: any) => p.x === tile.x && p.y === tile.y && p.z === tile.z).length };
 }
+
+// ---- the night (rules 107.2, 401, 402) -----------------------------------------------------------------------------
+// The players as the night's hooks see them (scores included).
+/** @rule 401, 402 */
+async function nightContext(env: Env, game: any, nowMs: number) {
+  const pieces = await env.DB.prepare("SELECT id, color, score, x, y, z FROM players WHERE game_id = ?").bind(game.id).all();
+  const { bundle, bundled } = bundleFor(game);
+  return makeContext({ day: game.day || null, now: nowIso(nowMs), settings: getSettings(bundled ? bundle.settings : game.settings), players: playersOf(pieces.results as PlayerRow[]) });
+}
+
+// The order the passed proposals are applied in (rule 107.2), by the game's own rule for it (the applyOrder hook).
+// `passed` rows carry `number`; the answer is the same rows, reordered.
+/** @rule 107.2 */
+export async function orderPassed<T extends { number: number }>(env: Env, game: any, passed: T[], nowMs: number): Promise<T[]> {
+  const ctx = await nightContext(env, game, nowMs);
+  const plain = passed.map((p: any) => ({ number: p.number, target: p.target ?? null, kind: p.kind ?? null }));
+  const order = rulesFor(game).applyOrder(ctx, plain).map((p: any) => p.number);
+  return order.map((n: number) => passed.find((p) => p.number === n)!);
+}
+
+// The next place in day n's night sequence (events.night_seq): 1 + the highest so far. Every event the night writes
+// takes one, so the night reads back in execution order whichever batch wrote it. Binds (game_id, day).
+/** @rule 107.2 */
+export const NEXT_NIGHT_SEQ = "(SELECT COALESCE(MAX(night_seq), 0) + 1 FROM events WHERE game_id = ? AND day = ?)";
+
+// The night takes effect (the deployed rules are the claimed commit): each applied proposal is enacted in the order
+// the moderator applied and committed them (apply_seq, from its claim; NOT the live rule 107's order, which the night
+// may itself have changed), its points given (rule 401, onEnacted), then the end of the night (rule 402, dayEnd: a win ends
+// the game). Returns the statements for ONE batch. Every one is guarded by "this proposal is still passed" (points,
+// enacted) or "a proposal of this day is still passed" (the win, rules_day), and the points and the win come BEFORE
+// the status changes in the batch, so a second run (or an overlapping one) gives nothing twice.
+/** @rule 107.2, 401, 402 */
+export async function enactStatements(env: Env, game: any, n: number, nowMs: number) {
+  // A proposal claimed before apply_seq existed (NULL) goes in P-number order, after any that have one.
+  const ordered = (await env.DB.prepare("SELECT id, number, player_id, target, kind FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed' AND commit_sha IS NOT NULL ORDER BY apply_seq IS NULL, apply_seq, number").bind(game.id, n).all()).results as any[];
+  if (!ordered.length) return [];
+  const now = nowIso(nowMs);
+  const ctx = await nightContext(env, game, nowMs);
+  const rules = rulesFor(game);
+  const before: Record<string, number> = Object.fromEntries(ctx.players.map((p: any) => [p.ref, p.score]));
+  const known = new Set(Object.keys(before));
+  const given: { player: string; delta: number; reason: string; number: number }[] = [];
+  const stmts: any[] = [];
+  const stillPassed = "EXISTS (SELECT 1 FROM proposals WHERE id = ? AND status = 'passed')";
+  for (const q of ordered) {
+    for (const e of rules.onEnacted(ctx, { number: q.number, player: q.player_id, target: q.target, kind: q.kind })) {
+      if (!known.has(e.player)) continue; // onEnacted can only return points (hooks.js refuses anything else)
+      given.push({ player: e.player, delta: e.delta, reason: e.reason, number: q.number });
+      stmts.push(env.DB.prepare(`UPDATE players SET score = score + ? WHERE game_id = ? AND id = ? AND ${stillPassed}`).bind(e.delta, game.id, e.player, q.id));
+      stmts.push(env.DB.prepare(
+        `INSERT INTO events (game_id, kind, text, created_at, day, phase, template, args, player_id, night_seq)
+         SELECT ?, 'points', ?, ?, ?, 'night', 'points', json_object('proposal', ?, 'delta', ?, 'rule', ?), ?, ${NEXT_NIGHT_SEQ} WHERE ${stillPassed}`,
+      ).bind(game.id, `+${e.delta}: ${e.reason}`, now, n, q.number, e.delta, e.rule, e.player, game.id, n, q.id));
+    }
+  }
+  const win = rules.dayEnd(ctx, { before, given: given.map(({ player, delta }) => ({ player, delta })), enacted: ordered.map((q) => q.number) }).find((e: any) => known.has(e.player)); // dayEnd can only return a win
+  const anyPassed = `EXISTS (SELECT 1 FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed')`;
+  if (win) {
+    stmts.push(env.DB.prepare(
+      `INSERT INTO events (game_id, kind, text, created_at, day, phase, template, args, player_id, night_seq)
+       SELECT ?, 'won', ?, ?, ?, 'night', 'won', json_object('rule', ?, 'reason', ?), ?, ${NEXT_NIGHT_SEQ} WHERE ${anyPassed}`,
+    ).bind(game.id, `Won: ${win.reason}`, now, n, win.rule, win.reason, win.player, game.id, n, game.id, n));
+    stmts.push(env.DB.prepare(`UPDATE games SET status = 'over' WHERE id = ? AND status = 'playing' AND ${anyPassed}`).bind(game.id, game.id, n));
+  }
+  stmts.push(env.DB.prepare(`UPDATE games SET rules_day = ? WHERE id = ? AND rules_day < ? AND ${anyPassed}`).bind(n, game.id, n, game.id, n));
+  // Each enacted proposal raises its rule's revision by one (rule 107.2): 1 + the proposals enacted on it before, counted
+  // by the rule they change (a clause, 402.1, is rule 402; an added rule is its new number).
+  for (const q of ordered) {
+    stmts.push(env.DB.prepare(
+      `UPDATE proposals SET status = 'enacted', decided_at = ?,
+         rev = 1 + (SELECT COUNT(*) FROM proposals e WHERE e.game_id = proposals.game_id AND e.status = 'enacted'
+           AND CAST(CASE WHEN e.kind = 'add' THEN e.new_num ELSE e.target END AS INTEGER) = CAST(CASE WHEN proposals.kind = 'add' THEN proposals.new_num ELSE proposals.target END AS INTEGER))
+       WHERE id = ? AND status = 'passed'`,
+    ).bind(now, q.id));
+  }
+  return stmts;
+}

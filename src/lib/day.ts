@@ -16,7 +16,7 @@
 //      by itself)
 //   3. finalize: day N done (or timed_out, when the deadline ended it), day N+1 open with its electorate and ballot,
 //      the game unlocked, in one batch
-import { bundleFor } from "../engine/host";
+import { NEXT_NIGHT_SEQ, bundleFor, enactStatements } from "../engine/host";
 import { getSettings, validTimeZone } from "./settings.js";
 import { Env, nowIso } from "./util";
 
@@ -45,7 +45,7 @@ export async function clockNow(env: Env): Promise<number> {
 // ---- midnights, the gate, its SQL: src/lib/day-gate.js (plain JS, shared with the tests) ---------------------------------
 export { addDays, dayGate, dayOpenBinds, dayOpenSql, isLocked, localDate, lockMessage, nextMidnight, startOfDate } from "./day-gate.js";
 import { deadlineAfter, nextMidnight } from "./day-gate.js";
-import { APPLY_BUDGET, DEADLINE_REASON, resultSentence, returnedBody, tally } from "./votes.js";
+import { DEADLINE_REASON, DEPLOY_GRACE_MINUTES, DEPLOY_REASON, ENACT_REASON, resultSentence, returnedBody, tally } from "./votes.js";
 
 // The game's time zone: the bundled rules' setting when the game has a bundle that sets one, else the game's own.
 /** @rule 203.1 */
@@ -54,6 +54,30 @@ export function timeZoneOf(game: { slug: string; settings: string }): string {
   const own = bundled ? bundle.settings?.["game.timezone"] : undefined;
   return validTimeZone(own) ? own : getSettings(game.settings)["game.timezone"];
 }
+
+// The game's settings in effect: the bundled rules' settings when the game has a bundle, else its own. The night reads
+// its budget per change from them (rule 107.5).
+/** @rule 107.5 */
+export function settingsOf(game: { slug: string; settings: string }) {
+  const { bundle, bundled } = bundleFor(game);
+  return getSettings(bundled ? bundle.settings : game.settings);
+}
+
+// The commit the deployed bundle was built from (the game repo at its newest day-N tag), or null for a game with no
+// bundle. Local tests set it per game in dev_controls ("bundle_sha:<slug>"), read only when DEV_MODE is "1".
+/** @rule 107.8 */
+export async function deployedSha(env: Env, game: { slug: string }): Promise<string | null> {
+  const dev = await devControl(env, `bundle_sha:${game.slug}`);
+  if (dev) return dev;
+  const { bundle, bundled } = bundleFor(game);
+  return bundled ? bundle.sha ?? null : null;
+}
+
+// How often the midnight run runs (wrangler.toml [triggers], every 5 minutes).
+export const CRON_SLACK_MS = 5 * 60_000;
+// The deploy deadline: a claimed night must be live this long after the 2 am deadline (rule 107.6).
+/** @rule 107.6 */
+export const deployDeadline = (deadlineMs: number) => deadlineMs + DEPLOY_GRACE_MINUTES * 60_000;
 
 // ---- reading today ---------------------------------------------------------------------------------------------------
 // The game's current day and this player's turn on it. A playing game with no day yet gets day 1 first (game start),
@@ -146,13 +170,14 @@ export async function countBallot(env: Env, game: any, day: DayRow, nowMs: numbe
     return { q, t };
   });
   const deadline = nowIso(deadlineAfter(timeZoneOf(game), Date.parse(day.ends_at)));
+  const settings = settingsOf(game); // the budget per change (rule 107.5), fixed on each proposal as it passes
   await env.DB.batch([
     ...writes.map(({ q, t }) => env.DB.prepare(
       `UPDATE proposals SET status = ?, yes = ?, no = ?, absent = ?, needed = ?, electorate = ?, why = ?, decided_at = ?,
          budget_minutes = ?, budget_effort = ?
        WHERE id = ? AND status = 'on_ballot' AND EXISTS (SELECT 1 FROM days WHERE game_id = ? AND n = ? AND status = 'locked')`,
     ).bind(t.passed ? "passed" : "failed", t.yes, t.no, t.absent, t.needed, t.electorate, resultSentence(t), now,
-      t.passed ? APPLY_BUDGET.minutes : null, t.passed ? APPLY_BUDGET.effort : null, q.id, game.id, day.n)),
+      t.passed ? settings["night.apply_minutes"] : null, t.passed ? settings["night.apply_effort"] : null, q.id, game.id, day.n)),
     env.DB.prepare(
       `UPDATE days SET status = 'processing', deadline_at = ? WHERE game_id = ? AND n = ? AND status = 'locked'
          AND EXISTS (SELECT 1 FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed')`,
@@ -164,32 +189,69 @@ export async function countBallot(env: Env, game: any, day: DayRow, nowMs: numbe
   return "done";
 }
 
-// The moderator's part of the night (rule 107.6). The moderator itself arrives in step 1 PR 5; until then this waits
-// for it. A processing day waits while any passed proposal is still unapplied and the deadline has not passed. At the
-// deadline, every passed proposal still unapplied is not applied (rule 107.7): no points, the reason recorded on it,
-// and it goes back to its proposer as a notification with the reason and a suggestion. Then play resumes on the rules
-// as they were: the lock always ends. Guarded by status, so a second run changes nothing and notifies nobody twice.
-// finalizeDay also refuses to close a day that still has a passed proposal waiting.
-/** @rule 107.6, 107.7 */
+// The moderator's part of the night (rules 107.2-107.8). The moderator (moderator/process-day.mjs on the Mac mini) applies
+// the passed proposals to the game's repo and CLAIMS the night before the deadline (POST /api/moderator/days/N/claim):
+// the day goes processing -> deploying, with the commit the day-N tag points at. This step then:
+//   processing, before the deadline              wait for the claim
+//   processing, at the deadline (no claim)       every passed proposal not applied (rule 107.6), timed_out
+//   deploying, the deployed bundle is that commit the night takes effect: points (rule 401), the win (rule 402), done
+//   deploying, 30 minutes past the deadline      the applied ones not applied either (they never went live), timed_out
+// Decided by what is stored (passed proposals still waiting), not by this run's copy of the day, so overlapping runs
+// agree. Every write is guarded by status, so a second run changes nothing and notifies nobody twice. finalizeDay also
+// refuses to close a day that still has a passed proposal waiting.
+/** @rule 107.6, 107.7, 107.8 */
 export async function awaitModerator(env: Env, game: any, day: DayRow, nowMs: number): Promise<StepResult> {
-  // Decided by what is stored (passed proposals still unapplied), not by this run's copy of the day's status, so a run
-  // that overlapped the count still waits.
   const left: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed'").bind(game.id, day.n).first();
-  const timedOut: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'not_applied' AND not_applied_reason = ?").bind(game.id, day.n, DEADLINE_REASON).first();
+  const timedOut: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'not_applied' AND not_applied_reason IN (?, ?, ?)").bind(game.id, day.n, DEADLINE_REASON, DEPLOY_REASON, ENACT_REASON).first();
   if (!(left?.n > 0)) return timedOut?.n > 0 ? "timed_out" : "done";
-  const deadline = Date.parse(day.deadline_at || "") || deadlineAfter(timeZoneOf(game), Date.parse(day.ends_at));
+  const fresh: any = (await env.DB.prepare("SELECT status, deadline_at, commit_sha FROM days WHERE game_id = ? AND n = ?").bind(game.id, day.n).first()) ?? day;
+  const deadline = Date.parse(fresh.deadline_at || "") || deadlineAfter(timeZoneOf(game), Date.parse(day.ends_at));
+  if (fresh.status === "deploying") {
+    // A matching bundle counts only until the deploy deadline (plus one cron interval, so a deploy live by 2:30 am is
+    // always seen); later, the night is not applied whatever is live (the next run reconciles).
+    if (fresh.commit_sha && nowMs < deployDeadline(deadline) + CRON_SLACK_MS && (await deployedSha(env, game)) === fresh.commit_sha) {
+      try {
+        if (await devControl(env, "enact_fail")) throw new Error("test failure: enact"); // local tests only
+        await env.DB.batch(await enactStatements(env, game, day.n, nowMs));
+        return "done";
+      } catch (e) {
+        // A rule's night code failed (onEnacted, dayEnd, applyOrder). Before the deploy deadline this is a failure like
+        // any other (the lock stays, the next tick tries again); after it, the lock still ends (rule 107.6): the
+        // waiting proposals are not applied (rule 107.7).
+        if (nowMs < deployDeadline(deadline)) throw e;
+        console.error(`midnight ${game.slug} day ${day.n}: the unlock failed past the deadline:`, (e as any)?.message || e);
+        await notApplyRemaining(env, game, day, nowMs, ENACT_REASON);
+        return "timed_out";
+      }
+    }
+    if (nowMs < deployDeadline(deadline)) return "wait";
+    await notApplyRemaining(env, game, day, nowMs, DEPLOY_REASON);
+    return "timed_out";
+  }
   if (nowMs < deadline) return "wait";
+  await notApplyRemaining(env, game, day, nowMs, DEADLINE_REASON);
+  return "timed_out";
+}
+
+// Every passed proposal of the day still waiting is not applied (rule 107.7): no points, the reason on it, and a
+// notification to its proposer with the reason and a suggestion. One notification per proposal, ever.
+/** @rule 107.7 */
+async function notApplyRemaining(env: Env, game: any, day: DayRow, nowMs: number, reason: string) {
   const now = nowIso(nowMs);
   const passed = (await env.DB.prepare("SELECT id, number, player_id FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed' ORDER BY number").bind(game.id, day.n).all()).results as any[];
-  await env.DB.batch(passed.flatMap((q) => [
-    env.DB.prepare("UPDATE proposals SET status = 'not_applied', not_applied_reason = ?, decided_at = ? WHERE id = ? AND status = 'passed'").bind(DEADLINE_REASON, now, q.id),
-    // One notification per proposal, ever: its id is the proposal's.
+  await env.DB.batch(passed.flatMap((q) => notAppliedStatements(env, game, q, reason, now)));
+}
+
+// The statements that send one passed proposal back (rule 107.7), guarded by its status. Shared with the claim route.
+/** @rule 107.7 */
+export function notAppliedStatements(env: Env, game: any, q: { id: string; number: number; player_id: string }, reason: string, now: string, guard = "", guardBinds: unknown[] = []) {
+  return [
+    env.DB.prepare(`UPDATE proposals SET status = 'not_applied', not_applied_reason = ?, decided_at = ? WHERE id = ? AND status = 'passed'${guard}`).bind(reason, now, q.id, ...guardBinds),
     env.DB.prepare(
       `INSERT OR IGNORE INTO notifications (id, game_id, player_id, kind, body, link, created_at)
        SELECT ?, ?, ?, 'not_applied', ?, ?, ? WHERE EXISTS (SELECT 1 FROM proposals WHERE id = ? AND status = 'not_applied')`,
-    ).bind(`not-applied-${q.id}`, game.id, q.player_id, returnedBody(q.number, DEADLINE_REASON), `/${game.slug}/`, now, q.id),
-  ]));
-  return "timed_out";
+    ).bind(`not-applied-${q.id}`, game.id, q.player_id, returnedBody(q.number, reason), `/${game.slug}/`, now, q.id),
+  ];
 }
 
 export const NIGHT_STEPS: NightStep[] = [
@@ -221,7 +283,7 @@ export async function tickGame(env: Env, gameIn: any, nowMs: number): Promise<st
     ]);
     day.status = "locked";
   }
-  if (day.status !== "locked" && day.status !== "processing") return day.status;
+  if (day.status !== "locked" && day.status !== "processing" && day.status !== "deploying") return day.status;
   return processDay(env, game, day, nowMs);
 }
 
@@ -245,11 +307,11 @@ export async function processDay(env: Env, game: any, day: DayRow, nowMs: number
     console.error(`midnight ${game.slug} day ${day.n} failed (the lock stays on):`, why);
     await env.DB.batch([
       env.DB.prepare(
-        `INSERT INTO events (game_id, kind, text, created_at, day, phase, template, args)
-         SELECT ?, 'night_failed', ?, ?, ?, 'night', 'nightFailed', json_object('day', ?)
-         WHERE EXISTS (SELECT 1 FROM days WHERE game_id = ? AND n = ? AND last_error IS NULL AND status IN ('locked', 'processing'))`,
-      ).bind(game.id, `Chalant could not finish processing day ${day.n}. The game stays locked until it does.`, nowIso(nowMs), day.n, day.n, game.id, day.n),
-      env.DB.prepare("UPDATE days SET last_error = ? WHERE game_id = ? AND n = ? AND status IN ('locked', 'processing')").bind(why, game.id, day.n),
+        `INSERT INTO events (game_id, kind, text, created_at, day, phase, template, args, night_seq)
+         SELECT ?, 'night_failed', ?, ?, ?, 'night', 'nightFailed', json_object('day', ?), ${NEXT_NIGHT_SEQ}
+         WHERE EXISTS (SELECT 1 FROM days WHERE game_id = ? AND n = ? AND last_error IS NULL AND status IN ('locked', 'processing', 'deploying'))`,
+      ).bind(game.id, `Chalant could not finish processing day ${day.n}. The game stays locked until it does.`, nowIso(nowMs), day.n, day.n, game.id, day.n, game.id, day.n),
+      env.DB.prepare("UPDATE days SET last_error = ? WHERE game_id = ? AND n = ? AND status IN ('locked', 'processing', 'deploying')").bind(why, game.id, day.n),
     ]);
     return "failed";
   }
@@ -268,7 +330,7 @@ export async function finalizeDay(env: Env, game: any, day: DayRow, nowMs: numbe
   const DONE = "status IN ('done', 'timed_out')";
   await env.DB.batch([
     env.DB.prepare(
-      `UPDATE days SET status = ?, processed_at = ?, last_error = NULL WHERE game_id = ? AND n = ? AND status IN ('locked', 'processing')
+      `UPDATE days SET status = ?, processed_at = ?, last_error = NULL WHERE game_id = ? AND n = ? AND status IN ('locked', 'processing', 'deploying')
          AND NOT EXISTS (SELECT 1 FROM proposals WHERE game_id = ? AND day_ballot = ? AND status IN ('on_ballot', 'passed'))`,
     ).bind(end, now, game.id, day.n, game.id, day.n),
     env.DB.prepare(

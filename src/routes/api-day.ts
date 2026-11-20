@@ -53,7 +53,7 @@ export const get = async (ctx: Ctx) => {
     processing_day: locked ? day!.n : null,
     message: locked ? lockMessage(day!.n) : null,
     failed: locked && !!day!.last_error,
-    deadline_at: locked && day!.status === "processing" ? day!.deadline_at ?? null : null,
+    deadline_at: locked && (day!.status === "processing" || day!.status === "deploying") ? day!.deadline_at ?? null : null,
     ballot: ballot?.n ?? 0,
     players: rows.map((r) => ({ name: r.name, color: colorOf(r.color), moved: !!r.moved_at, proposed: !!r.proposed, ended: !!r.ended_at, voted: r.voted ?? 0 })),
     you: player ? {

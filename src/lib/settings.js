@@ -26,11 +26,16 @@ export const DEFAULT_SETTINGS = {
   // daylight-saving change is 23 or 25 hours long. A change takes effect at the next midnight in the old zone, because
   // each day's end is fixed when the day begins.
   "game.timezone": "America/Los_Angeles",
+  // The moderator's budget for applying ONE passed proposal at night (rule 107.5): at most this many minutes, at this
+  // effort. Fixed on each proposal when it passes; the moderator's runner enforces it (moderator/process-day.mjs).
+  "night.apply_minutes": 20,
+  "night.apply_effort": "medium",
 };
 
 // Settings added after engine 1 shipped. A game's settings.json may leave these out (its tagged files predate them),
 // and then the default applies. Present, they are validated like any other, and RULES.md must name them.
-export const OPTIONAL_SETTINGS = Object.freeze(["game.timezone"]);
+export const OPTIONAL_SETTINGS = Object.freeze(["game.timezone", "night.apply_minutes", "night.apply_effort"]);
+export const EFFORTS = Object.freeze(["low", "medium", "high"]);
 
 // Is this an IANA time zone the runtime knows? (Intl throws a RangeError for anything else.)
 export function validTimeZone(v) {
@@ -50,6 +55,8 @@ const VALIDATORS = {
   "turn.move_distance": (v) => (isInt(v, 1, 5) ? null : "must be a whole number from 1 to 5"),
   mcp_enabled: (v) => (typeof v === "boolean" ? null : "must be true or false"),
   "game.timezone": (v) => (validTimeZone(v) ? null : "must be a time zone name like America/Los_Angeles"),
+  "night.apply_minutes": (v) => (isInt(v, 1, 60) ? null : "must be a whole number from 1 to 60"),
+  "night.apply_effort": (v) => (EFFORTS.includes(v) ? null : `must be one of ${EFFORTS.join(", ")}`),
 };
 function exactly(v, keys) {
   if (!isObj(v)) return "must be an object";

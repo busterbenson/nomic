@@ -7,7 +7,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync,
 import { tmpdir } from "node:os";
 import { join as pjoin } from "node:path";
 import { ROOT } from "./lib.mjs";
-import { ACTION_KINDS, HOOKS, RuleError, RuleSetError, assembleRules, deepFreeze, defineRule, makeContext, makeTiles, refuse, seededRng, validateEffect } from "../src/engine/hooks.js";
+import { ACTION_KINDS, HOOKS, RuleError, RuleSetError, assembleRules, deepFreeze, defineRule, effects, makeContext, makeTiles, refuse, seededRng, validateEffect } from "../src/engine/hooks.js";
 import { lintModule } from "../src/engine/lint.js";
 import { checkRulebook, parseRulesMd } from "../src/engine/rulesmd.js";
 import { DEFAULT_SETTINGS, validateSettings } from "../src/lib/settings.js";
@@ -30,27 +30,29 @@ const A = { ref: "a" };
 console.log("hook composition");
 const m = (rule, hooks) => defineRule({ rule, ...hooks });
 const one = m(505, { spawnTile: (c, cand) => cand[0] ?? null });
+const order = m(107, { applyOrder: (c, p) => [...p].sort((a, b) => a.number - b.number) }); // the one order rule every rule set needs (107.2)
 check("actionAllowed: modules run in RULE order, not list order, and the first refusal wins", (() => {
   const calls = [];
   const r = assembleRules([
     m(504, { actionAllowed: () => { calls.push(504); return refuse("late", 409); } }),
     m(202, { actionAllowed: () => { calls.push(202); return refuse("early", 403); } }),
     one,
+    order,
   ]).actionAllowed(ctx, A, { kind: "move" });
   return J(calls) === "[202]" && r.error === "early" && r.status === 403 && r.rule === 202;
 })());
 check("actionAllowed: a null (or undefined) from every module is null; a refusal defaults to status 400", (() => {
-  const rs = assembleRules([m(202, { actionAllowed: () => null }), m(204, { actionAllowed: () => undefined }), one]);
-  const rs2 = assembleRules([m(202, { actionAllowed: () => ({ error: "no" }) }), one]);
+  const rs = assembleRules([m(202, { actionAllowed: () => null }), m(204, { actionAllowed: () => undefined }), one, order]);
+  const rs2 = assembleRules([m(202, { actionAllowed: () => ({ error: "no" }) }), one, order]);
   return rs.actionAllowed(ctx, A, { kind: "move" }) === null && rs2.actionAllowed(ctx, A, { kind: "move" }).status === 400;
 })());
 check("actionAllowed: a malformed answer (a string, a bad status) is a RuleError naming the rule, never a quiet pass", (() => {
-  const bad = (v) => throws(() => assembleRules([m(202, { actionAllowed: () => v }), one]).actionAllowed(ctx, A, { kind: "move" }));
+  const bad = (v) => throws(() => assembleRules([m(202, { actionAllowed: () => v }), one, order]).actionAllowed(ctx, A, { kind: "move" }));
   const e = bad("nope");
   return e instanceof RuleError && e.rule === 202 && bad({ error: "x", status: 200 }) instanceof RuleError && bad({ error: "" }) instanceof RuleError;
 })());
 check("a module that throws becomes a RuleError with its rule and hook", (() => {
-  const e = throws(() => assembleRules([m(202, { actionAllowed: () => { throw new Error("boom"); } }), one]).actionAllowed(ctx, A, { kind: "move" }));
+  const e = throws(() => assembleRules([m(202, { actionAllowed: () => { throw new Error("boom"); } }), one, order]).actionAllowed(ctx, A, { kind: "move" }));
   return e instanceof RuleError && e.rule === 202 && e.hook === "actionAllowed" && /boom/.test(e.message);
 })());
 check("afterAction: effects of every module are joined in rule order", (() => {
@@ -58,38 +60,65 @@ check("afterAction: effects of every module are joined in rule order", (() => {
     m(504, { afterAction: () => [api.effects.chart([{ x: 1, y: 1 }])] }),
     m(402, { afterAction: () => [api.effects.points("a", 10, "why")] }),
     one,
+    order,
   ]);
   const out = rs.afterAction(ctx, A, { kind: "move" });
   return out.length === 2 && out[0].type === "points" && out[1].type === "chart" && out[1].tiles[0].z === 0;
 })());
-check("afterAction: an invalid effect from a module is a RuleError", throws(() => assembleRules([m(504, { afterAction: () => [{ type: "chart", tiles: [{ x: 0.5, y: 0 }] }] }), one]).afterAction(ctx, A, { kind: "move" })) instanceof RuleError);
-check("afterAction: no implementers is an empty list", J(assembleRules([one]).afterAction(ctx, A, { kind: "move" })) === "[]");
+check("afterAction: an invalid effect from a module is a RuleError", throws(() => assembleRules([m(504, { afterAction: () => [{ type: "chart", tiles: [{ x: 0.5, y: 0 }] }] }), one, order]).afterAction(ctx, A, { kind: "move" })) instanceof RuleError);
+check("afterAction: no implementers is an empty list", J(assembleRules([one, order]).afterAction(ctx, A, { kind: "move" })) === "[]");
 check("spawnTile: exactly one module; zero or two fail when the rules are assembled, naming the hook", (() => {
   const none = throws(() => assembleRules([m(202, {})]));
-  const two = throws(() => assembleRules([one, m(506, { spawnTile: () => null })]));
+  const two = throws(() => assembleRules([one, order, m(506, { spawnTile: () => null })]));
   return none instanceof RuleSetError && /spawnTile needs exactly one rule to implement it, found 0/.test(none.message) &&
     two instanceof RuleSetError && /found 2 \(505, 506\)/.test(two.message);
 })());
 check("spawnTile: returns one of the candidates (a copy), null for no room, and refuses a tile that is not a candidate", (() => {
   const cand = [{ x: 1, y: 2, z: 0 }, { x: 3, y: 4, z: 0 }];
-  const ok = assembleRules([m(505, { spawnTile: (c, cs) => cs[1] })]).spawnTile(ctx, cand);
-  const none = assembleRules([m(505, { spawnTile: () => null })]).spawnTile(ctx, cand);
-  const off = throws(() => assembleRules([m(505, { spawnTile: () => ({ x: 9, y: 9, z: 0 }) })]).spawnTile(ctx, cand));
+  const ok = assembleRules([m(505, { spawnTile: (c, cs) => cs[1] }), order]).spawnTile(ctx, cand);
+  const none = assembleRules([m(505, { spawnTile: () => null }), order]).spawnTile(ctx, cand);
+  const off = throws(() => assembleRules([m(505, { spawnTile: () => ({ x: 9, y: 9, z: 0 }) }), order]).spawnTile(ctx, cand));
   return J(ok) === '{"x":3,"y":4,"z":0}' && none === null && off instanceof RuleError;
 })());
-check("a module implementing a hook the engine doesn't run yet (tally, dayEnd ...) is refused, so it can't bundle and silently do nothing", (() => {
-  const problems = throws(() => assembleRules([m(202, { tally: () => 1, dayEnd: () => [] }), one]))?.problems ?? [];
-  return problems.some((x) => /tally is not run by the engine yet/.test(x)) && problems.some((x) => /dayEnd is not run by the engine yet/.test(x)) &&
+check("a module implementing a hook the engine doesn't run yet (tally, voteMark, electorate) is refused, so it can't bundle and silently do nothing", (() => {
+  const problems = throws(() => assembleRules([m(202, { tally: () => 1, electorate: () => [] }), one, order]))?.problems ?? [];
+  return problems.some((x) => /tally is not run by the engine yet/.test(x)) && problems.some((x) => /electorate is not run by the engine yet/.test(x)) &&
     throws(() => defineRule({ rule: 202, voteMark: () => "majority" })) instanceof RuleSetError &&
-    Object.values(HOOKS).filter((h) => !h.wired).length === 6;
+    J(Object.entries(HOOKS).filter(([, h]) => !h.wired).map(([k]) => k)) === '["voteMark","electorate","tally"]';
 })());
+check("applyOrder (107.2) is a decide hook: a rule set needs exactly one", (() => {
+  const none = throws(() => assembleRules([one]))?.problems ?? [];
+  const two = throws(() => assembleRules([one, order, m(108, { applyOrder: (c, p) => p })]))?.problems ?? [];
+  return none.some((x) => /applyOrder needs exactly one rule to implement it, found 0/.test(x)) && two.some((x) => /applyOrder needs exactly one rule to implement it, found 2 \(107, 108\)/.test(x));
+})());
+check("applyOrder: the order rule's answer, as the caller's own rows; an answer that drops, adds or repeats a proposal is a RuleError", (() => {
+  const rows = [{ number: 5, id: "x5" }, { number: 2, id: "x2" }];
+  const got = assembleRules([one, order]).applyOrder(ctx, rows);
+  const drop = throws(() => assembleRules([one, m(107, { applyOrder: (c, p) => p.slice(1) })]).applyOrder(ctx, rows));
+  const dup = throws(() => assembleRules([one, m(107, { applyOrder: (c, p) => [p[0], p[0]] })]).applyOrder(ctx, rows));
+  return J(got.map((r) => r.id)) === '["x2","x5"]' && got[0] === rows[1] && drop instanceof RuleError && dup instanceof RuleError;
+})());
+check("onEnacted (401) and dayEnd (402): effects joined in rule order, each tagged with its rule; only points and win at night", (() => {
+  const rs = assembleRules([one, order, m(401, { onEnacted: (c, p) => [effects.points(p.player, 10, "x")] }), m(402, { dayEnd: (c, r) => r.given.map((g) => effects.win(g.player, "y")) }), m(403, { onEnacted: () => [effects.points("b", 1, "z")] })]);
+  const e = rs.onEnacted(ctx, { number: 1, player: "a" });
+  const w = rs.dayEnd(ctx, { before: {}, given: [{ player: "a", delta: 10 }] });
+  const chart = throws(() => assembleRules([one, order, m(401, { onEnacted: () => [effects.chart([{ x: 0, y: 0 }])] })]).onEnacted(ctx, { number: 1, player: "a" }));
+  const frozen = throws(() => assembleRules([one, order, m(401, { onEnacted: (c, p) => { p.player = "me"; return []; } })]).onEnacted(ctx, { number: 1, player: "a" }));
+  return J(e.map((x) => [x.rule, x.player, x.delta])) === '[[401,"a",10],[403,"b",1]]' && w.length === 1 && w[0].type === "win" && w[0].rule === 402 && chart instanceof RuleError && frozen instanceof RuleError;
+})());
+check("each night hook takes only the effect its enactment applies: a win from onEnacted, or points from dayEnd, is refused with a RuleError naming the hook (never dropped)", (() => {
+  const winEnacted = throws(() => assembleRules([one, order, m(401, { onEnacted: (c, p) => [effects.win(p.player, "x")] })]).onEnacted(ctx, { number: 1, player: "a" }));
+  const pointsEnd = throws(() => assembleRules([one, order, m(402, { dayEnd: () => [effects.points("a", 5, "y")] })]).dayEnd(ctx, { before: {}, given: [] }));
+  return winEnacted instanceof RuleError && winEnacted.rule === 401 && /win effect can't be returned by onEnacted \(it takes: points\)/.test(winEnacted.message) &&
+    pointsEnd instanceof RuleError && pointsEnd.rule === 402 && /points effect can't be returned by dayEnd \(it takes: win\)/.test(pointsEnd.message);
+})(), "");
 check("a bad module is refused: unknown hook, non-function hook, rule number missing or out of range, the same rule twice", (() => {
   const p = (mods) => throws(() => assembleRules(mods))?.problems ?? [];
-  return p([{ rule: 202, dance: () => 1 }, one]).some((x) => /unknown hook dance/.test(x)) &&
-    p([{ rule: 202, actionAllowed: "yes" }, one]).some((x) => /must be a function/.test(x)) &&
-    p([{ actionAllowed: () => null }, one]).some((x) => /whole number from 100/.test(x)) &&
-    p([{ rule: 5, actionAllowed: () => null }, one]).length > 0 &&
-    p([m(202, {}), m(202, {}), one]).some((x) => /two modules/.test(x)) &&
+  return p([{ rule: 202, dance: () => 1 }, one, order]).some((x) => /unknown hook dance/.test(x)) &&
+    p([{ rule: 202, actionAllowed: "yes" }, one, order]).some((x) => /must be a function/.test(x)) &&
+    p([{ actionAllowed: () => null }, one, order]).some((x) => /whole number from 100/.test(x)) &&
+    p([{ rule: 5, actionAllowed: () => null }, one, order]).length > 0 &&
+    p([m(202, {}), m(202, {}), one, order]).some((x) => /two modules/.test(x)) &&
     throws(() => defineRule({ rule: 202, nope: () => 1 })) instanceof RuleSetError;
 })());
 check("ctx is deep-frozen plain data: a hook cannot change the players, the settings or the turn", (() => {
@@ -244,18 +273,18 @@ check("hookClaimProblems: every hook the LOADED module has must be a tagged func
 }
 
 console.log("how rules share a hook");
-check("every wired hook declares one combine mode: veto (can-I), sequence (effects), decide (one handler)", J(Object.fromEntries(Object.entries(HOOKS).filter(([, h]) => h.wired).map(([k, h]) => [k, h.mode]))) === '{"actionAllowed":"veto","afterAction":"sequence","spawnTile":"decide"}' && Object.values(HOOKS).every((h) => ["veto", "sequence", "decide"].includes(h.mode)));
+check("every wired hook declares one combine mode: veto (can-I), sequence (effects), decide (one handler)", J(Object.fromEntries(Object.entries(HOOKS).filter(([, h]) => h.wired).map(([k, h]) => [k, h.mode]))) === '{"actionAllowed":"veto","afterAction":"sequence","spawnTile":"decide","applyOrder":"decide","onEnacted":"sequence","dayEnd":"sequence"}' && Object.values(HOOKS).every((h) => ["veto", "sequence", "decide"].includes(h.mode)));
 check("veto: a refusal names the rule that made it", (() => {
-  const r = assembleRules([m(202, { actionAllowed: () => null }), m(504, { actionAllowed: () => refuse("no", 409) }), one]).actionAllowed(ctx, A, { kind: "move" });
+  const r = assembleRules([m(202, { actionAllowed: () => null }), m(504, { actionAllowed: () => refuse("no", 409) }), one, order]).actionAllowed(ctx, A, { kind: "move" });
   return r.rule === 504 && r.status === 409;
 })());
 check("decide: two handlers for a single-value hook FAIL the assembly (the plan's rule); no precedence is invented until Buster approves one", (() => {
-  const e = throws(() => assembleRules([one, m(506, { spawnTile: () => null })]));
+  const e = throws(() => assembleRules([one, order, m(506, { spawnTile: () => null })]));
   return e instanceof RuleSetError && /found 2 \(505, 506\)/.test(e.message);
 })());
 check("rules never edit each other: a module's hooks are its own functions, and each module is its own rule number", (() => {
-  const rs = assembleRules([m(504, { actionAllowed: () => null }), m(202, { actionAllowed: () => null }), one]);
-  return J(rs.implementers("actionAllowed")) === "[202,504]" && J(rs.modules) === "[202,504,505]";
+  const rs = assembleRules([m(504, { actionAllowed: () => null }), m(202, { actionAllowed: () => null }), one, order]);
+  return J(rs.implementers("actionAllowed")) === "[202,504]" && J(rs.modules) === "[107,202,504,505]";
 })());
 check("worksWith lists, per rule and hook, the other rules that share the hook", J(worksWith({ 202: ["actionAllowed"], 504: ["actionAllowed", "afterAction"], 505: ["spawnTile"] })) === '{"202":{"actionAllowed":[504]},"504":{"actionAllowed":[202]}}');
 check("a function claimed by more than 3 rules is reported as a warning (never a failure)", overClaimed("f.ts", "/** @rule 101, 102, 103, 104 */\nfunction big() {}\n/** @rule 101, 102 */\nfunction ok() {}\n").length === 1 && /claimed by 4 rules/.test(overClaimed("f.ts", "/** @rule 101, 102, 103, 104 */\nfunction big() {}\n")[0]) && runClaimsCheck().warnings.length === 0);
@@ -273,21 +302,21 @@ const put = (dir, rel, text) => { mkdirSync(pjoin(dir, rel, ".."), { recursive: 
   const out = pjoin(work, "out-ok");
   const e = quiet(() => bundle({ BUNDLE_OUT: out, GAMES_SOURCE: "tests/fixtures/games" }));
   const gen = existsSync(pjoin(out, "games.ts")) ? readFileSync(pjoin(out, "games.ts"), "utf8") : "";
-  check("the fixture game bundles: its tests run and pass, and games.ts holds its text, settings and modules plus the starter pack", e === null && /"bundled": \{ slug: "bundled"/.test(gen) && /export const STARTER/.test(gen) && /modules: \[m0, m1, m2\]/.test(gen) && /fixture game/.test(gen), String(e));
+  check("the fixture game bundles: its tests run and pass, and games.ts holds its text, settings and modules plus the starter pack", e === null && /"bundled": \{ slug: "bundled"/.test(gen) && /export const STARTER/.test(gen) && /modules: \[m0, m1, m2, m3\]/.test(gen) && /fixture game/.test(gen), String(e));
   check("games.ts carries the claim map of the game (rule -> file#function) and of the engine, for rule cards", [/"202\.2":\["rules\/202\.ts#actionAllowed","rules\/504\.ts#actionAllowed"\]/, /"504\.2":\["rules\/504\.ts#afterAction"\]/, /"504\.3":\["rules\/504\.ts#actionAllowed"\]/, /claims: \{[^}]*"505":\["rules\/505\.ts#spawnTile"\]/].every((re) => re.test(gen)) && /ENGINE_CLAIMS: Record<string, string\[\]> = \{.*"505":\["src\/engine\/hooks\.js#spawnTile","src\/engine\/host\.ts#chooseSpawn"\]/.test(gen), gen.slice(gen.indexOf("ENGINE_CLAIMS"), gen.indexOf("ENGINE_CLAIMS") + 300));
-  check("the game's modules are copied next to games.ts, where the Worker bundler follows the imports", ["games/bundled/rules/202.ts", "games/bundled/rules/504.ts", "starter/rules/505.ts"].every((f) => existsSync(pjoin(out, f))));
+  check("the game's modules are copied next to games.ts, where the Worker bundler follows the imports", ["games/bundled/rules/107.ts", "games/bundled/rules/202.ts", "games/bundled/rules/504.ts", "starter/rules/505.ts", "starter/rules/401.ts"].every((f) => existsSync(pjoin(out, f))));
 }
 const must = (name, env, re) => { const e = quiet(() => bundle(env)); check(name, e instanceof BundleError && re.test(e.message), String(e?.message ?? "no error").slice(0, 300)); };
 must("a module that calls fetch fails the build, with the file and line", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/202.ts", `import { defineRule } from "promptocracy/engine";\nexport default defineRule({ rule: 202, actionAllowed() { return fetch("https://x"); } });`)) }, /lint failed[\s\S]*bad[\s\S]*rules\/202\.ts: line \d+ of the code uses "fetch"/);
 must("a module that imports a foreign package fails the build", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/504.ts", `import fs from "node:fs";\n` + readFileSync(pjoin(FIX, "rules/504.ts"), "utf8"))) }, /imports "node:fs"/);
-must("game.json that lists a module rules/ does not hold (or holds one it does not list) fails the build", { GAMES_SOURCE: tree("bad", (d) => put(d, "game.json", `{ "engine": 1, "modules": [202, 504] }`)) }, /lists modules \[202,504\] but rules\/ holds \[202,504,505\]/);
+must("game.json that lists a module rules/ does not hold (or holds one it does not list) fails the build", { GAMES_SOURCE: tree("bad", (d) => put(d, "game.json", `{ "engine": 1, "modules": [202, 504] }`)) }, /lists modules \[202,504\] but rules\/ holds \[107,202,504,505\]/);
 must("a game that needs another engine version fails the build", { GAMES_SOURCE: tree("bad", (d) => put(d, "game.json", `{ "engine": 2, "modules": [202, 504, 505] }`)) }, /engine 2, this platform runs engine 1/);
 must("a game with no game.json fails the build", { GAMES_SOURCE: tree("bad", (d) => execFileSync("mv", [pjoin(d, "game.json"), pjoin(work, "moved-" + seq++)])) }, /game\.json is missing/);
 must("two spawn rules (or none) fail the build", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/504.ts", readFileSync(pjoin(FIX, "rules/504.ts"), "utf8").replace("/** @rule 504.2 */\n  afterAction(", "/** @rule 504.2 */\n  spawnTile() { return null; },\n  /** @rule 504.2 */\n  afterAction("))) }, /spawnTile needs exactly one rule to implement it, found 2/);
 must("text, settings and modules out of step fail the build (a [setting] the file lacks)", { GAMES_SOURCE: tree("bad", (d) => put(d, "RULES.md", readFileSync(pjoin(FIX, "RULES.md"), "utf8").replace("[setting: max_players]", "[setting: max_players] [setting: board.nope]"))) }, /names \[setting: board\.nope\]/);
 must("a module file named for another rule than it implements fails the build", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/202.ts", readFileSync(pjoin(FIX, "rules/202.ts"), "utf8").replace("rule: 202", "rule: 203"))) }, /rules\/202\.ts must default-export defineRule\(\{ rule: 202/);
 must("a game whose own tests fail does not bundle, and the failing output is in the message", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/202.test.ts", `import { test } from "node:test";\nimport assert from "node:assert/strict";\ntest("fails on purpose", () => assert.equal(1, 2));\n`)) }, /tests fail against this engine[\s\S]*fails on purpose/);
-must("a game with no tests does not bundle", { GAMES_SOURCE: tree("bad", (d) => { for (const f of ["202.test.ts", "505.test.ts", "rulebook.test.ts"]) execFileSync("mv", [pjoin(d, "rules", f), pjoin(work, "moved-" + seq++)]); }) }, /no tests/);
+must("a game with no tests does not bundle", { GAMES_SOURCE: tree("bad", (d) => { for (const f of ["107.test.ts", "202.test.ts", "505.test.ts", "rulebook.test.ts"]) execFileSync("mv", [pjoin(d, "rules", f), pjoin(work, "moved-" + seq++)]); }) }, /no tests/);
 must("a settings.json that is not valid fails the build", { GAMES_SOURCE: tree("bad", (d) => put(d, "settings.json", J({ ...DEFAULT_SETTINGS, "board.chart_radius": 99 }))) }, /board\.chart_radius/);
 must("a module function with no @rule tag fails the build, naming file, line and function", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/505.ts", readFileSync(pjoin(FIX, "rules/505.ts"), "utf8").replace("  /** @rule 505 */\n", ""))) }, /rule claims failed[\s\S]*rules\/505\.ts:\d+ spawnTile has no @rule tag/);
 must("a tag that names a rule the game's RULES.md does not have fails the build", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/505.ts", readFileSync(pjoin(FIX, "rules/505.ts"), "utf8").replace("@rule 505", "@rule 599"))) }, /spawnTile: @rule 599 is not in RULES\.md/);
@@ -356,11 +385,17 @@ console.log("fetching a game: the latest day-N tag of a git remote");
     mkdirSync(srepo, { recursive: true });
     const sg = (...a) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.test", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", ...a], { cwd: srepo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     sg("init", "-q", "-b", "main"); cpSync(FIX, srepo, { recursive: true }); sg("add", "-A"); sg("commit", "-q", "-m", "setup");
-    for (const t of ["day-0", "day-0.1", "day-0.2", "day-0.10", "day-0.01", "day-0.0", "day-00", "day-3.1", "day-0.99999"]) sg("tag", t);
+    for (const t of ["day-0", "day-0.1", "day-0.2", "day-0.10", "day-0.01", "day-0.0", "day-00", "day-0.99999"]) sg("tag", t);
     const s1 = latestDayTag(`file://${srepo}`);
-    check("setup revisions: day-0.10 beats day-0.2 and day-0 (by number), and only day 0 has them (day-3.1, day-0.01, day-0.0, day-00 and a 5-digit revision are ignored)", s1.tag === "day-0.10" && s1.day === 0, J(s1));
+    check("setup revisions: day-0.10 beats day-0.2 and day-0 (by number); day-0.01, day-0.0, day-00 and a 5-digit revision are ignored", s1.tag === "day-0.10" && s1.day === 0, J(s1));
     sg("tag", "day-1");
     check("the first real day beats every setup revision: once day 1 is tagged, day-1 is what the build fetches", latestDayTag(`file://${srepo}`).tag === "day-1" && latestDayTag(`file://${srepo}`).day === 1);
+    for (const t of ["day-1.0", "day-01.1"]) sg("tag", t);
+    check("a misspelled reconcile revision (day-1.0, day-01.1) is ignored", latestDayTag(`file://${srepo}`).tag === "day-1");
+    sg("tag", "day-1.2");
+    check("a reconcile revision (rule 107.7): day-1.2 beats day-1, and is still day 1", latestDayTag(`file://${srepo}`).tag === "day-1.2" && latestDayTag(`file://${srepo}`).day === 1);
+    sg("tag", "day-2");
+    check("and the next day beats it", latestDayTag(`file://${srepo}`).tag === "day-2");
   }
   const out = pjoin(work, "out-git");
   const e = quiet(() => bundle({ BUNDLE_OUT: out, GAMES_MANIFEST: manifest, GAMES_GIT_BASE: `file://${base}` }));

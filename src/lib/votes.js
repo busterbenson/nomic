@@ -35,9 +35,15 @@ export const SUGGESTION = "Try splitting it into smaller proposals or simplifyin
 /** @rule 107.7 */
 export const returnedBody = (number, reason) => `P${number} passed but was not applied: ${reason}. It gave no points. ${SUGGESTION}`;
 
-// Rule 107.5: the budget the moderator has for applying each passed proposal, fixed when it passes. Read by the
-// moderator; nothing enforces it yet (the moderator loop, step 1 PR 5).
-export const APPLY_BUDGET = Object.freeze({ minutes: 20, effort: "medium" });
+// Rule 107.7: an applied proposal whose change was not live by the deploy deadline (the 2 am deadline + 30 minutes).
+/** @rule 107.6, 107.7 */
+export const DEPLOY_REASON = "the change was applied but did not go live by 2:30 am";
+// Rule 107.7: the change went live, but a rule's night code (its points, the win) failed at the unlock until past the
+// deploy deadline, so the lock ended without it.
+/** @rule 107.6, 107.7 */
+export const ENACT_REASON = "its rules went live, but their points could not be given by 2:30 am";
+// How long after the deadline a claimed night may take to go live (the build and deploy), in minutes.
+export const DEPLOY_GRACE_MINUTES = 30;
 
 /** @rule 104.3 */
 export const voteToast = (n, vote) => `P${n}: you voted ${vote === "yes" ? "Yes" : "No"}. You can change it until midnight.`;

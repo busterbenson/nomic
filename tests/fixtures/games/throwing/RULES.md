@@ -7,6 +7,9 @@ These are the rules of the bundled fixture game. The Worker answers /api/rules f
 ### 101 Follow the rules
 Every player must follow the rules in this file.
 
+### 107 The night
+**107.2** Passed proposals are applied in the order they were proposed.
+
 ## 200. Players and turns [majority]
 
 ### 201 Game size
