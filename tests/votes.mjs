@@ -9,7 +9,7 @@ import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as pjoin } from "node:path";
-import { ROOT, client, connect, createGame, d1, join, migrate, newState, startRulesStub, startServer, tool } from "./lib.mjs";
+import { ROOT, client, connect, createGame, d1, join, migrate, newState, freePort, startRulesStub, startServer, tool } from "./lib.mjs";
 import { dayOpenBinds, deadlineAfter } from "../src/lib/day-gate.js";
 import { neededOf } from "../src/lib/proposals.js";
 import { DEADLINE_REASON, VOTE_SQL, resultSentence, returnedBody, tally } from "../src/lib/votes.js";
@@ -100,19 +100,20 @@ console.log("migration 0007");
 }
 
 // ---------------------------------------------------------------- end to end
-const SITE = "http://localhost:8781";
+const SRV_PORT = await freePort();
+const SITE = `http://localhost:${SRV_PORT}`;
 let srv = null, stub = null;
 const state = newState();
 try {
   migrate(state);
-  stub = await startRulesStub(8782, { "/busterbenson/vote/main/RULES.md": "# Rules\n" });
+  stub = await startRulesStub(await freePort(), { "/busterbenson/vote/main/RULES.md": "# Rules\n" });
   const g = await createGame(state, { slug: "vote", name: "Votes", max: 6, rulesBase: stub.base, repo: "busterbenson/vote" });
   d1(state, "CREATE TABLE IF NOT EXISTS dev_controls (key TEXT PRIMARY KEY, value TEXT)");
   const setClock = (iso) => d1(state, `INSERT INTO dev_controls (key, value) VALUES ('clock', '${iso}') ON CONFLICT (key) DO UPDATE SET value = excluded.value`);
   // Day 1 is Saturday 2026-10-31; day 2 is Sunday 2026-11-01, the fall-back day in Los Angeles: 25 hours, from
   // 07:00Z to 2026-11-02 08:00Z.
   setClock("2026-10-31T19:00:00.000Z");
-  srv = await startServer(state, 8781, ["DEV_MODE=1", `SITE_URL=${SITE}`, `RULES_BASE_URL=${stub.base}`]);
+  srv = await startServer(state, SRV_PORT, ["DEV_MODE=1", `SITE_URL=${SITE}`, `RULES_BASE_URL=${stub.base}`]);
   const A = srv.base;
   const gid = d1(state, "SELECT id FROM games WHERE slug = 'vote'")[0].id;
   const names = ["Ana", "Bo", "Cy", "Dee", "Eve"], colors = ["teal", "cobalt", "jade", "orchid", "sky"];

@@ -59,7 +59,7 @@ try {
   await inv("invite: a player of another game (Ada, in 'chrome') gets 401 on 'setup' (her session is that game's only)", adaOnSetup.status === 401);
   await inv("invite: a player of a game in setup gets their own link: the game's join link ending in its code, with their invite code", deeGet.status === 200 && deeGet.data.url.startsWith(`${srv.base}/setup/join/${open.code}?from=`));
   await inv("invite: a game already playing, with room (Ada, 3 of 8), gives the link too (rule 102.3)", adaOwn.status === 200 && adaOwn.data.url.startsWith(`${srv.base}/chrome/join/`));
-  await inv("invite: a full game answers no link and the reason (the menu shows it disabled)", zedGet.status === 200 && zedGet.data.url === null && zedGet.data.reason === "The game has 1 player.", zedGet.text);
+  await inv("invite: a full game answers no link and the reason (the menu shows it disabled)", zedGet.status === 200 && zedGet.data.url === null && zedGet.data.reason === "The game is full (1 of 1).", zedGet.text);
   const cookieOf = (c, slug) => [...c.jar].find(([k]) => k === `s|/${slug}`)[1];
   const deeCookie = cookieOf(dee, "setup"), eliCookie = cookieOf(eli, "setup"), louCookie = cookieOf(lou, "launch"), zedCookie = cookieOf(zed, "tiny");
   // a game where two players share a name (joining does not need unique names): one has ended their turn, the other has not

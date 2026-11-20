@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, copyFileSync, writeFileSync, rmSync, readFileSync as readText } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as pjoin } from "node:path";
-import { ROOT, COLORS, authorizeQuery, client, connect, consent, createGame, d1, exchange, finish, form, join, mcp, migrate, newPkce, newState, registerClient, sha256Hex, startRulesStub, startServer, tool } from "./lib.mjs";
+import { ROOT, COLORS, authorizeQuery, client, connect, consent, createGame, d1, exchange, finish, form, join, mcp, migrate, newPkce, newState, registerClient, sha256Hex, freePort, startRulesStub, startServer, tool } from "./lib.mjs";
 import { chartOffsets, chartedAround, coordLabel, diagonals, islandCoords, tileLabel, neighbors, parseLabel, validCoord, withinSteps, xLabel, yLabel, zLabel } from "../src/lib/geometry.js";
 import { DEFAULT_SETTINGS, getSettings, settingsForSize, spawnSpots, validateSettings } from "../src/lib/settings.js";
 import { DIAGONAL_MOVES, SHARED_TILES } from "../src/lib/board-rules.js";
@@ -147,12 +147,12 @@ const playersOf = (slug) => d1(state, `SELECT display_name AS name, x, y, z, tur
 const tkey = (t) => `${t.x},${t.y},${t.z}`;
 try {
   migrate(state);
-  stub = await startRulesStub(8897, { "/busterbenson/hex/main/RULES.md": "# Rules\n" });
+  stub = await startRulesStub(await freePort(), { "/busterbenson/hex/main/RULES.md": "# Rules\n" });
   const R = { rulesBase: stub.base, repo: "busterbenson/hex" };
   const g = await createGame(state, { slug: "hex", name: "Blank board", max: 3, ...R });
   const big = await createGame(state, { slug: "eight", name: "Eight", max: 8, size: 8, ...R });
   const prop = await createGame(state, { slug: "prop", name: "Proposals", max: 2, ...R });
-  srv = await startServer(state, 8795, ["DEV_MODE=1", "SITE_URL=http://hex.test", `RULES_BASE_URL=${stub.base}`]);
+  srv = await startServer(state, await freePort(), ["DEV_MODE=1", "SITE_URL=http://hex.test", `RULES_BASE_URL=${stub.base}`]);
   const A = srv.base;
 
   console.log("a new game");
@@ -732,7 +732,7 @@ console.log("production vars");
   try {
     migrate(st2);
     const lg = await createGame(st2, { slug: "loc", repo: "busterbenson/hex", rulesBase: stub.base });
-    local = await startServer(st2, 8798, ["DEV_MODE=1"]); // no MAIL_FROM / SITE_URL given: the harness blanks the production ones
+    local = await startServer(st2, await freePort(), ["DEV_MODE=1"]); // no MAIL_FROM / SITE_URL given: the harness blanks the production ones
     const p = await join(local.base, "loc", lg.code, { email: "l@example.com", name: "L", color: "teal" });
     const jr = await client(local.base).post("/loc/api/join", { code: lg.code, email: "l2@example.com", name: "L2", color: "cobalt" });
     check("locally the link points at the local origin and mail goes to the outbox, not Cloudflare", jr.data.dev_link.startsWith(local.base + "/loc/auth/verify") && d1(st2, "SELECT COUNT(*) AS n FROM outbox")[0].n >= 2);

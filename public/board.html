@@ -97,7 +97,7 @@
     return { ok: res.ok, status: res.status, data };
   };
   let ME = null, DATA = null, INVITE = null;   // who is looking, and the last /api/game
-  let DAY = null, END_ASK = false, DAY_AT = 0, DAY_TIMER = 0, DAY_TICK = 0;   // the last /api/day, the End turn confirm, when it was fetched
+  let DAY = null, END_ASK = false, START_ASK = false, DAY_AT = 0, DAY_TIMER = 0, DAY_TICK = 0;   // the last /api/day, the End turn confirm, when it was fetched
   let PROP = null, BAL = null, BOOK = null, CARDS = null;   // the proposal controller (propose.js), the mounted rulebook, the card host
   let BOARD = null, SEL = null, VIEW = null;   // the last /api/board, the selected tile {x,y}, the drawn board
   let TAB = "summary", BOARD_OPEN = true, LASTMOVE = null, NOTES = { list: [], unread: 0 }, RULES_OK = false;
@@ -467,14 +467,16 @@
     if (pend) lead = `<div class="mb"><span><b>Move to ${esc(noLevel(pend.label))}</b> · <span class="charted-note">${tilesText(newlyCharted(pend))}</span></span><button class="btn small" id="make-move" type="button">Make this move</button><button class="btn ghost small" id="undo-move" type="button">Undo</button></div>`;
     else if (DAY && DAY.you && DAY.you.moved && me) lead = `<div class="mb"><span class="ok" aria-hidden="true">✓</span><span><b>Moved to ${esc(noLevel(me.at.label))}</b> today${LASTMOVE && LASTMOVE.day === DAY.day && LASTMOVE.n != null ? ` · <span class="charted-note">${tilesText(LASTMOVE.n)}</span>` : ""}</span></div>`;
     else if (DAY && DAY.you && DAY.you.ended) lead = `<div class="mb"><span>No move today</span></div>`;
-    else if (g && g.status === "setup") lead = `<div class="mb"><span><b>Setting up.</b> ${plural((DATA.players || []).length, "player")} of ${esc(g.max_players)} joined.</span>${ME && ME.player && ME.player.is_host ? `<button class="btn small" id="start-game" type="button">Start the game</button>` : ""}</div>`;
+    else if (g && g.status === "setup") lead = `<div class="mb"><span><b>Setting up.</b> ${plural((DATA.players || []).length, "player")} of ${esc(g.max_players)} joined.</span>${ME && ME.player && ME.player.is_host && !START_ASK ? `<button class="btn small" id="start-game" type="button">Start the game</button>` : ""}</div>${ME && ME.player && ME.player.is_host && START_ASK ? `<div class="dask" role="group" aria-label="Start the game"><span class="row"><button type="button" class="btn small" id="start-yes">Start</button><button type="button" class="linkbtn" id="start-no">Not yet</button></span></div>` : ""}`;
     else if (DAY && DAY.locked) lead = `<div class="mb"><span class="hint">The day is being processed.</span></div>`;
     else if (!ME) lead = `<div class="mb"></div>`;
     else if (move.ok) lead = `<div class="mb"><span class="hint">You have not moved today.</span></div>`;   // a state, not an instruction: the dashed tiles say where
     else lead = `<div class="mb"><span class="hint">${esc(move.why || "")}</span></div>`;
     box.innerHTML = lead + `<span class="slot" data-slot="bar-action"></span><span class="mbr"><button class="linkbtn" id="board-toggle" type="button" aria-expanded="${BOARD_OPEN}">${BOARD_OPEN ? "Hide board" : "Show board"}</button></span>`;
     $("playtop").classList.toggle("collapsed", !BOARD_OPEN);
-    const sg = $("start-game"); if (sg) sg.onclick = () => startGame(sg);
+    const sg = $("start-game"); if (sg) sg.onclick = () => { START_ASK = true; drawMoveBar(); const y = $("start-yes"); if (y) y.focus(); };
+    const sy = $("start-yes"); if (sy) sy.onclick = () => { START_ASK = false; startGame(sy); };
+    const sn = $("start-no"); if (sn) sn.onclick = () => { START_ASK = false; drawMoveBar(); const b = $("start-game"); if (b) b.focus(); };
     const mm = $("make-move"); if (mm) mm.onclick = () => makeMove(pend, mm);
     const um = $("undo-move"); if (um) um.onclick = () => select(null, null);
     $("board-toggle").onclick = () => { BOARD_OPEN = !BOARD_OPEN; drawMoveBar(); };

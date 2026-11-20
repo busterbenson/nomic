@@ -1,8 +1,9 @@
 // POST /<slug>/api/start {}: the host starts the game (rules 102.2, 203.1). Only the host can, and only a game still in
 // setup. It puts the game in play and begins day 1 through the day code (startDayOne), the same code that begins a day 1
-// the first time anyone asks for today. Refused with a plain reason otherwise.
+// the first time anyone asks for today, and tells the other players in the app. Refused with a plain reason otherwise.
 import { getPlayer } from "../lib/auth";
 import { clockNow, startDayOne } from "../lib/day";
+import { notify } from "../lib/notify";
 import { Ctx, json } from "../lib/util";
 
 /** @rule 102.2, 203.1 */
@@ -17,5 +18,8 @@ export const post = async (ctx: Ctx) => {
   const r = await env.DB.prepare("UPDATE games SET status = 'playing' WHERE id = ? AND status = 'setup'").bind(game.id).run();
   if ((r.meta?.changes ?? 0) < 1) return json({ error: "The game has already started." }, 409);
   await startDayOne(env, game, await clockNow(env));
+  // In-app only (no email): every other player hears it; the host who pressed Start does not. Only the Start press that
+  // won the guard above reaches this line, so a second attempt adds nothing.
+  await notify(env, ctx, game, { kind: "game_started", body: `${player.display_name} started the game. Day 1 is open.`, skipPlayerId: player.id });
   return json({ ok: true, day: 1 });
 };

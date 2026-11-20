@@ -57,6 +57,9 @@ try {
   const again = await ana.post("/start/api/start", {});
   const dayNow = (await ana.get("/start/api/day")).data;
   check("a game already in play refuses Start with a plain reason (409); /api/day sees day 1 open; a request does not make a second day", again.status === 409 && again.data.error === "The game has already started." && dayNow.day === 1 && dayNow.locked === false && days("start").length === 1 && started("start") === 1, again.text);
+  const gs = d1(state, `SELECT p.display_name AS who, n.body, n.emailed_at FROM notifications n JOIN players p ON p.id = n.player_id WHERE n.game_id = '${gid("start")}' AND n.kind = 'game_started'`);
+  check("Start tells every OTHER player in the app (Bo gets one), not the host, and sends no email; the second Start press (the 409) added none: exactly one row",
+    J(gs.map((r) => [r.who, r.body])) === J([["Bo", "Ana started the game. Day 1 is open."]]) && gs[0].emailed_at === null, J(gs));
   const at = d1(state, `SELECT x, y FROM players WHERE game_id = '${gid("start")}' AND display_name = 'Bo'`)[0];
   let mv = { status: 0, text: "" };
   for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) {
@@ -90,7 +93,7 @@ try {
   const full = await inv(ana);
   const fourth = await client(A).post("/start/api/join", { code: g.code, email: "di@example.com", name: "Di", color: "sky" });
   check("with 3 of 3 players the invite answers no link and the reason (the menu shows it disabled); a 4th join is refused, in play too",
-    full.status === 200 && full.data.url === null && full.data.reason === "The game has 3 players." && fourth.status === 409 && /full/.test(fourth.data.error), full.text + fourth.text);
+    full.status === 200 && full.data.url === null && full.data.reason === "The game is full (3 of 3)." && fourth.status === 409 && /full/.test(fourth.data.error), full.text + fourth.text);
   setClock("2026-03-09T07:00:05.000Z");
   const lockedDay = (await ana.get("/start/api/day")).data, lockedMove = await ana.post("/start/api/action", { kind: "move", x: 0, y: 1, z: 0 });
   check("the lock sees the started game: after midnight, before the cron, it is locked and a write is refused 423", lockedDay.locked === true && lockedDay.processing_day === 1 && lockedMove.status === 423, lockedMove.text);

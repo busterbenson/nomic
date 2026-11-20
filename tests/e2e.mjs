@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
-import { ROOT, client, createGame, d1, finish, join as joinGame, migrate, newState, startPlaying, startRulesStub, startServer, COLORS } from "./lib.mjs";
+import { ROOT, client, createGame, d1, finish, join as joinGame, migrate, newState, startPlaying, freePort, startRulesStub, startServer, COLORS } from "./lib.mjs";
 
 let pass = 0, fail = 0;
 const J = JSON.stringify;
@@ -23,10 +23,11 @@ const state = newState();
 const state2 = newState();
 const state3 = newState();
 let main, bare, third, stub;
+const [PORT_MAIN, PORT_BARE, PORT_THIRD, PORT_STUB] = [await freePort(), await freePort(), await freePort(), await freePort()];
 try {
   migrate(state);
   // A stub for GitHub's raw host: tests never reach the real one.
-  stub = await startRulesStub(8890, {
+  stub = await startRulesStub(PORT_STUB, {
     "/busterbenson/game-one/main/RULES.md": RULES_ONE,
     "/busterbenson/game-two/main/RULES.md": RULES_TWO,
     "/busterbenson/game-tiny/main/docs/RULES.md": "# Tiny rules\n",
@@ -39,7 +40,7 @@ try {
   const small = await createGame(state, { slug: "tiny", name: "Tiny game", repo: "busterbenson/game-tiny", rulesPath: "docs/RULES.md", max: 2, ...R });
   const flaky = await createGame(state, { slug: "flaky", name: "Flaky game", repo: "busterbenson/game-flaky", ...R });
   const shape = await createGame(state, { slug: "shape", name: "Shape game", repo: "busterbenson/game-shape", ...R });
-  main = await startServer(state, 8791, ["DEV_MODE=1", "SITE_URL=http://example.test", `RULES_BASE_URL=${stub.base}`]);
+  main = await startServer(state, PORT_MAIN, ["DEV_MODE=1", "SITE_URL=http://example.test", `RULES_BASE_URL=${stub.base}`]);
   const A = main.base;
   const join = (b, code, o, c) => joinGame(b, code === small.code ? "tiny" : code === two.code ? "two" : "one", code, o, c);
 
@@ -429,7 +430,7 @@ try {
     // Its own server with SITE_URL unset, so the link's host is one the browser can reach.
     migrate(state3);
     const g3 = await createGame(state3, { slug: "one", name: "Game One", repo: "busterbenson/game-one", ...R });
-    third = await startServer(state3, 8794, ["DEV_MODE=1", `RULES_BASE_URL=${stub.base}`]);
+    third = await startServer(state3, PORT_THIRD, ["DEV_MODE=1", `RULES_BASE_URL=${stub.base}`]);
     const bl = await client(third.base).post("/one/api/join", { code: g3.code, email: "br@example.com", name: "Br", color: COLORS[0] });
     let out = "";
     try {
@@ -445,7 +446,7 @@ try {
   console.log("email not configured");
   migrate(state2);
   const g2 = await createGame(state2, { slug: "one", name: "Game One", repo: "busterbenson/game-one", ...R });
-  bare = await startServer(state2, 8792, ["DEV_MODE=0"]);
+  bare = await startServer(state2, PORT_BARE, ["DEV_MODE=0"]);
   const j503 = await client(bare.base).post("/one/api/join", { code: g2.code, email: "a@example.com", name: "A", color: COLORS[0] });
   check("with DEV_MODE unset and no email configured, /api/join is 503", j503.status === 503 && /not configured/i.test(j503.data.error), j503.text);
   check("so is /api/login", (await client(bare.base).post("/one/api/login", { email: "a@example.com" })).status === 503);
