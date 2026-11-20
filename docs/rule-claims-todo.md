@@ -93,9 +93,9 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/lib/proposals.js (3)
 
-- line 136: `own`
-- line 137: `cites`
-- line 248: `own`
+- line 137: `own`
+- line 138: `cites`
+- line 251: `own`
 
 ## src/lib/settings.js (12)
 
