@@ -38,7 +38,7 @@ import { checkRulebook } from "../src/engine/rulesmd.js";
 import { validateSettings } from "../src/lib/settings.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const TOP_LEVEL = new Set(["RULES.md", "game.json", "settings.json", "package.json", "package-lock.json", "README.md", "LICENSE", "LICENSE.md", ".gitignore", "rules", "rulings", "docs", ".github"]);
+const TOP_LEVEL = new Set(["RULES.md", "game.json", "settings.json", "package.json", "package-lock.json", "README.md", "AGENTS.md", "CLAUDE.md", "LICENSE", "LICENSE.md", ".gitignore", "rules", "rulings", "docs", ".github"]);
 const MAX_RULES_BYTES = 200_000;
 const MAX_FILES = 1000, MAX_BYTES = 10_000_000;
 const SLUG = /^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/;
