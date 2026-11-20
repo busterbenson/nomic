@@ -218,7 +218,7 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
     if (!active()) return "";
     const m = mine(), c = can(), u = S.ui;
     let html;
-    if (m) html = `<p>You proposed <a class="ppill" href="#${idOf(m.target)}" data-goto="${esc(m.target)}">${esc(m.n)}</a> today. It is on tomorrow's ballot. One proposal a day.</p>`;
+    if (m) html = `<p>You proposed <a class="ppill" href="#${idOf(m.target)}" data-goto="${esc(m.target)}">${esc(m.n)}</a> today. It is on tomorrow's ballot (rule ${rpill("103.2")}).</p>`;
     else if (!c.allowed) html = `<p>${esc(c.reason || "You can't propose right now.")}</p>`;
     else html = `<p><b>You haven't proposed a change today.</b> Pick a rule to change, or propose a new one.</p><button type="button" class="btn ghost small" data-p="pickblock">Propose a new rule</button>`;
     const pick = u && u.step === "pick" && !m && c.allowed
