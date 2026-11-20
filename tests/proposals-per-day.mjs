@@ -158,7 +158,7 @@ try {
   console.log("the web page reads the count from /api/day");
   const html = readFileSync(pjoin(ROOT, "public/board.html"), "utf8"), js = readFileSync(pjoin(ROOT, "public/js/propose.js"), "utf8");
   check("the page has no hard-coded 'of 1 today' and builds the count from you.proposals; the banner and add flow no longer say 'already proposed'",
-    !/of 1 today/.test(html) && /proposals\.made/.test(html) && /proposals\.limit/.test(html) && !/already proposed today/i.test(html + js) && !/One proposal a day/.test(html + js), "");
+    !/of 1 today/.test(html) && /DAY\.you\.proposals/.test(html) && /\$\{pr\.made\} of \$\{pr\.limit\} today/.test(html) && !/already proposed today/i.test(html + js) && !/One proposal a day/.test(html + js), "");
 } catch (e) {
   fail++;
   console.log("  FAIL  harness error:", e?.stack || e, e?.cause);
