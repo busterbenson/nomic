@@ -47,8 +47,11 @@ console.log("migration 0005");
     const ev = sql("SELECT game_id, kind, text, day, phase, template, args, player_id FROM events ORDER BY id");
     check("existing log lines keep their text; their new day / phase / template / args / player columns are empty",
       ev.length === 2 && ev[0].text === "Bo (Cobalt) moved to 2N 2E 1U." && ev.every((e) => e.day === null && e.phase === null && e.template === null && e.args === null && e.player_id === null), J(ev));
-    check("days and day_turns exist and are empty; turns and players are untouched; foreign keys are intact",
-      sql("SELECT COUNT(*) AS n FROM days")[0].n === 0 && sql("SELECT COUNT(*) AS n FROM day_turns")[0].n === 0 && sql("SELECT COUNT(*) AS n FROM turns")[0].n === 1 && sql("SELECT COUNT(*) AS n FROM players")[0].n === 3 && sql("PRAGMA foreign_key_check").length === 0);
+    check("days and day_turns exist and are empty; players are untouched; foreign keys are intact",
+      sql("SELECT COUNT(*) AS n FROM days")[0].n === 0 && sql("SELECT COUNT(*) AS n FROM day_turns")[0].n === 0 && sql("SELECT COUNT(*) AS n FROM players")[0].n === 3 && sql("PRAGMA foreign_key_check").length === 0);
+    const tr = sql("SELECT id, player_id, round, turn_index, prompt, status FROM turns");
+    check("a legacy prompt keeps everything but its round, which goes negative (old round 3 -> -3), so it can never count as a day's prompt",
+      J(tr) === J([{ id: "t1", player_id: "p1", round: -3, turn_index: 1, prompt: "hi", status: "submitted" }]), J(tr));
     const refused = (s) => { try { sql(s); return false; } catch { return true; } };
     check("the new columns and tables refuse bad values: a phase other than open/locked, a day status outside the list, a day that ends before it starts, an event phase other than day/night, args that are not JSON",
       refused("UPDATE games SET phase = 'paused' WHERE id = 'gp'") && refused("INSERT INTO days (game_id, n, starts_at, ends_at, status) VALUES ('gp', 1, 'b', 'c', 'pending')") &&
@@ -186,6 +189,14 @@ try {
   setControl("night_fail", null);
   await cron();
   check("once processing succeeds the lock lifts by itself: day 2 done (its error cleared), day 3 open, the game unlocked", dayRow(2).status === "done" && dayRow(2).last_error === null && dayRow(3)?.status === "open" && J(gameRow()) === J({ status: "playing", day: 3, phase: "open" }) && (await ana.get("/day/api/day")).data.locked === false, J([dayRow(2), dayRow(3), gameRow()]));
+
+  console.log("a late night");
+  // The cron was down for two days: day 3 ended at 2026-03-11 00:00 PDT (07:00Z) and the first tick is 2026-03-13 10:00 PDT.
+  setClock("2026-03-13T17:00:00.000Z");
+  await cron();
+  const d4 = dayRow(4);
+  check("a night processed days late still opens ONE day, starting where the last one ended and ending at the next midnight after now (not in the past)",
+    dayRow(3).status === "done" && d4?.status === "open" && d4.starts_at === "2026-03-11T07:00:00.000Z" && d4.ends_at === "2026-03-14T07:00:00.000Z" && !dayRow(5) && gameRow().day === 4 && (await ana.get("/day/api/day")).data.locked === false, J([dayRow(3), d4]));
 } catch (e) {
   fail++;
   console.log("  FAIL  harness error:", e?.stack || e, e?.cause);

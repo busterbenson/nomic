@@ -8,6 +8,7 @@ const execFileAsync = promisify(execFile);
 import { ROOT, client, createGame, d1, finish, join as joinGame, migrate, newState, startPlaying, startRulesStub, startServer, COLORS } from "./lib.mjs";
 
 let pass = 0, fail = 0;
+const J = JSON.stringify;
 const check = (name, ok, detail = "") => {
   if (ok) { pass++; console.log(`  ok    ${name}`); }
   else { fail++; console.log(`  FAIL  ${name}${detail ? "  -> " + detail : ""}`); }
@@ -327,6 +328,7 @@ try {
   startPlaying(state, "two");
   const aUnread = (await ada.get("/one/api/notifications")).data;
   const quill = client(A); await finish(quill, (await quill.post("/two/api/login", { email: "ada@example.com" })).data.dev_link);
+  const dayOneBefore = (await client(A).get("/one/api/day")).data.players.map((p) => p.proposed);
   const qTurn = await quill.post("/two/api/turn", { prompt: "Game two prompt: a rule about owls." });
   check("a turn in game two is recorded", qTurn.status === 200, qTurn.text);
   const pubOne2 = await client(A).get("/one/api/game"), pubTwo2 = await client(A).get("/two/api/game");
@@ -337,15 +339,15 @@ try {
   check("game two's notifications mention nothing from game one",
     zedNotes.notifications.length >= 2 && zedNotes.notifications.some((n) => n.body.includes("owls") || n.body.includes("Quill")) && !JSON.stringify(zedNotes).match(/Ada|Bo |Dup|Late|cats/), JSON.stringify(zedNotes));
   check("emails for game two's turn went to game two's other player and named the game",
-    d1(state, "SELECT to_addr, subject, body FROM outbox WHERE subject LIKE 'Game Two: %took their turn%'").every((o) => o.to_addr === "zed@example.com" && o.body.includes("http://example.test/two/")) &&
-    d1(state, "SELECT COUNT(*) AS n FROM outbox WHERE subject LIKE 'Game Two: %took their turn%'")[0].n === 1);
+    d1(state, "SELECT to_addr, subject, body FROM outbox WHERE subject LIKE 'Game Two: %proposed a change%'").every((o) => o.to_addr === "zed@example.com" && o.body.includes("http://example.test/two/")) &&
+    d1(state, "SELECT COUNT(*) AS n FROM outbox WHERE subject LIKE 'Game Two: %proposed a change%'")[0].n === 1);
   check("a game one player marking 'all read' leaves game two's unread alone",
     (await ada.post("/one/api/notifications/read", { all: true })).status === 200 && (await zed.get("/two/api/notifications")).data.unread === zedNotes.unread);
   check("the database holds no cross-game row (notifications, sessions, turns point at a player of their own game)",
     ["notifications", "sessions", "turns"].every((t) => d1(state, `SELECT COUNT(*) AS n FROM ${t} x JOIN players p ON p.id = x.player_id WHERE p.game_id != x.game_id`)[0].n === 0));
   check("the database refuses a row that points at another game's player",
     (() => { try { d1(state, "INSERT INTO notifications (id, game_id, player_id, kind, body, created_at) SELECT 'x', (SELECT id FROM games WHERE slug='one'), (SELECT id FROM players WHERE display_name='Zed'), 'k', 'b', 'now'"); return false; } catch { return true; } })());
-  check("game two's turn did not touch game one's turn counter", (await client(A).get("/one/api/game")).data.game.turn === 1);
+  check("game two's turn did not touch game one's day or its players' turns today", (await client(A).get("/one/api/game")).data.game.day === 1 && J((await client(A).get("/one/api/day")).data.players.map((p) => p.proposed)) === J(dayOneBefore), J((await client(A).get("/one/api/day")).data.players));
 
   console.log("landing page and routing");
   const land = await client(A).get("/");

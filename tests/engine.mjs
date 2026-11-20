@@ -395,6 +395,9 @@ console.log("the day: midnights in the game's time zone, the lock, End turn");
   check("a zone whose clocks jump AT midnight (Havana, 2026-03-08 00:00 -> 01:00): the day starts the moment the date begins, and is 23 h",
     localDate("America/Havana", startOfDate("America/Havana", "2026-03-08")) === "2026-03-08" && localDate("America/Havana", startOfDate("America/Havana", "2026-03-08") - 60_000) === "2026-03-07" &&
     startOfDate("America/Havana", "2026-03-09") - startOfDate("America/Havana", "2026-03-08") === 23 * H);
+  check("a zone whose clocks fall back AT midnight (Beirut, 2026-10-25 00:00 -> 23:00 the day before): Saturday is 25 h, and Sunday begins the first moment its date is reached",
+    startOfDate("Asia/Beirut", "2026-10-25") - startOfDate("Asia/Beirut", "2026-10-24") === 25 * H && localDate("Asia/Beirut", startOfDate("Asia/Beirut", "2026-10-25") - 60_000) === "2026-10-24" &&
+    (() => { const s = startOfDate("Asia/Beirut", "2026-10-25"); for (let t = s - 26 * H; t < s; t += 60_000) if (localDate("Asia/Beirut", t) >= "2026-10-25") return false; return true; })());
   check("other zones: Tokyo (UTC+9, no DST), Kiritimati (UTC+14) and Pago Pago (UTC-11) midnights", iso(startOfDate("Asia/Tokyo", "2026-06-01")) === "2026-05-31T15:00:00.000Z" &&
     iso(startOfDate("Pacific/Kiritimati", "2026-06-01")) === "2026-05-31T10:00:00.000Z" && iso(startOfDate("Pacific/Pago_Pago", "2026-06-01")) === "2026-06-01T11:00:00.000Z");
   check("calendar arithmetic crosses months, years and leap days", addDays("2026-12-31", 1) === "2027-01-01" && addDays("2028-02-28", 1) === "2028-02-29" && addDays("2026-03-01", -1) === "2026-02-28");

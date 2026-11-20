@@ -8,6 +8,10 @@
 --            first request after the deploy (the Worker computes day bounds in the game's time zone; SQL cannot).
 --   events   existing rows keep their text; the new day / phase / template / args / player_id columns are NULL
 --            (a line written before days existed belongs to no day).
+--   turns    the legacy prompt log. From now on `round` holds the DAY a prompt was made on (one a day), so the rows
+--            written under the turn model move out of the way: their round becomes negative (round 3 -> -3, still
+--            readable as "old round 3"). Otherwise a player's old round-1 prompt would count as their day-1 prompt.
+--            Nothing else in them changes.
 --   days, day_turns   new and empty.
 
 -- games: which day the game is on (0 = not started), whether the lock is on, and the last day whose rules are live.
@@ -58,3 +62,6 @@ ALTER TABLE events ADD COLUMN phase TEXT CHECK (phase IN ('day', 'night'));
 ALTER TABLE events ADD COLUMN template TEXT;
 ALTER TABLE events ADD COLUMN args TEXT CHECK (args IS NULL OR json_valid(args));
 ALTER TABLE events ADD COLUMN player_id TEXT;
+
+-- Legacy prompts (turn model) out of the day numbers: see the header.
+UPDATE turns SET round = -round WHERE round > 0;
