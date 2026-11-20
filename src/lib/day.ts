@@ -45,7 +45,7 @@ export async function clockNow(env: Env): Promise<number> {
 // ---- midnights, the gate, its SQL: src/lib/day-gate.js (plain JS, shared with the tests) ---------------------------------
 export { addDays, dayGate, dayOpenBinds, dayOpenSql, isLocked, localDate, lockMessage, nextMidnight, startOfDate } from "./day-gate.js";
 import { deadlineAfter, nextMidnight } from "./day-gate.js";
-import { DEADLINE_REASON, DEPLOY_GRACE_MINUTES, DEPLOY_REASON, resultSentence, returnedBody, tally } from "./votes.js";
+import { DEADLINE_REASON, DEPLOY_GRACE_MINUTES, DEPLOY_REASON, ENACT_REASON, resultSentence, returnedBody, tally } from "./votes.js";
 
 // The game's time zone: the bundled rules' setting when the game has a bundle that sets one, else the game's own.
 /** @rule 203.1 */
@@ -200,14 +200,25 @@ export async function countBallot(env: Env, game: any, day: DayRow, nowMs: numbe
 /** @rule 107.6, 107.7, 107.8 */
 export async function awaitModerator(env: Env, game: any, day: DayRow, nowMs: number): Promise<StepResult> {
   const left: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed'").bind(game.id, day.n).first();
-  const timedOut: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'not_applied' AND not_applied_reason IN (?, ?)").bind(game.id, day.n, DEADLINE_REASON, DEPLOY_REASON).first();
+  const timedOut: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'not_applied' AND not_applied_reason IN (?, ?, ?)").bind(game.id, day.n, DEADLINE_REASON, DEPLOY_REASON, ENACT_REASON).first();
   if (!(left?.n > 0)) return timedOut?.n > 0 ? "timed_out" : "done";
   const fresh: any = (await env.DB.prepare("SELECT status, deadline_at, commit_sha FROM days WHERE game_id = ? AND n = ?").bind(game.id, day.n).first()) ?? day;
   const deadline = Date.parse(fresh.deadline_at || "") || deadlineAfter(timeZoneOf(game), Date.parse(day.ends_at));
   if (fresh.status === "deploying") {
     if (fresh.commit_sha && (await deployedSha(env, game)) === fresh.commit_sha) {
-      await env.DB.batch(await enactStatements(env, game, day.n, nowMs));
-      return "done";
+      try {
+        if (await devControl(env, "enact_fail")) throw new Error("test failure: enact"); // local tests only
+        await env.DB.batch(await enactStatements(env, game, day.n, nowMs));
+        return "done";
+      } catch (e) {
+        // A rule's night code failed (onEnacted, dayEnd, applyOrder). Before the deploy deadline this is a failure like
+        // any other (the lock stays, the next tick tries again); after it, the lock still ends (rule 107.6): the
+        // waiting proposals are not applied (rule 107.7).
+        if (nowMs < deployDeadline(deadline)) throw e;
+        console.error(`midnight ${game.slug} day ${day.n}: the unlock failed past the deadline:`, (e as any)?.message || e);
+        await notApplyRemaining(env, game, day, nowMs, ENACT_REASON);
+        return "timed_out";
+      }
     }
     if (nowMs < deployDeadline(deadline)) return "wait";
     await notApplyRemaining(env, game, day, nowMs, DEPLOY_REASON);

@@ -113,11 +113,24 @@ try {
   await cron();
   check("then the 2 am fallback ends the lock: not applied with the deadline reason", prop(p5).status === "not_applied" && prop(p5).not_applied_reason === DEADLINE_REASON && day(4).status === "timed_out" && game().day === 5);
 
+  console.log("the unlock fails (a rule's night code throws)");
+  const p8 = ballot(5, "Cy", "401");
+  const d5 = await midnight();
+  await mod("POST", "days/5/claim", { sha: SHA3, outcomes: [{ number: p8, applied: true, commit: SHA3 }] });
+  dev("bundle_sha:mod", SHA3);
+  dev("enact_fail", "1");
+  await cron();
+  check("before the deploy deadline: the lock stays, the failure is recorded, no points", day(5).status === "deploying" && !!day(5).last_error && game().phase === "locked" && score("Cy") === 0, J(day(5)));
+  dev("clock", plus(d5.deadline_at, 31));
+  await cron();
+  check("past the deploy deadline the lock still ends (107.6): not applied with the reason, no points", prop(p8).status === "not_applied" && /could not be given/.test(prop(p8).not_applied_reason) && day(5).status === "timed_out" && game().phase === "open" && score("Cy") === 0, J([prop(p8), day(5)]));
+  d1(state, "DELETE FROM dev_controls WHERE key = 'enact_fail'");
+
   console.log("winning (rule 402)");
   d1(state, `UPDATE players SET score = 95 WHERE id = '${id.Ana}'; UPDATE players SET score = 98 WHERE id = '${id.Bo}'`);
-  const p6 = ballot(5, "Ana", "401"), p7 = ballot(5, "Bo", "402.1");
+  const p6 = ballot(6, "Ana", "401"), p7 = ballot(6, "Bo", "402.1");
   await midnight();
-  await mod("POST", "days/5/claim", { sha: SHA4, outcomes: [{ number: p6, applied: true, commit: SHA4 }, { number: p7, applied: true, commit: SHA4 }] });
+  await mod("POST", "days/6/claim", { sha: SHA4, outcomes: [{ number: p6, applied: true, commit: SHA4 }, { number: p7, applied: true, commit: SHA4 }] });
   dev("bundle_sha:mod", SHA4);
   await cron();
   const won = d1(state, `SELECT player_id, text FROM events WHERE game_id = '${gid}' AND kind = 'won'`);

@@ -45,8 +45,27 @@ test("402.1: reaching ${step.to} wins", () => {
   assert.equal(rule.dayEnd!(makeCtx(), { before: { a: ${step.to - 10} }, given: [{ player: "a", delta: 10 }] } as any).length, 1);
 });
 `);
+    if (step.flip) edit("RULES.md", "## 100. Core rules [unanimous]", "## 100. Core rules [majority]");
     if (step.conflict) result({ outcome: "applied", conflict: step.conflict });
     else result({ outcome: "applied" });
+    break;
+  }
+  case "gitwrite": { // tries to plant a git hook and config next to a good change
+    const cur = /gets (\d+) points when it is applied/.exec(readFileSync(join(cwd, "RULES.md"), "utf8"))[1];
+    edit("RULES.md", `gets ${cur} points when it is applied`, "gets 15 points when it is applied");
+    mkdirSync(join(cwd, ".git", "hooks"), { recursive: true });
+    writeFileSync(join(cwd, ".git", "config"), `[core]\n\tfsmonitor = touch ${step.marker}\n`);
+    writeFileSync(join(cwd, ".git", "hooks", "pre-commit"), `#!/bin/sh\ntouch ${step.marker}\n`, { mode: 0o755 });
+    result({ outcome: "applied" });
+    break;
+  }
+  case "spill": { // a good change to 401, and a quiet one to 402 (or another rule's tests)
+    edit("RULES.md", "gets 10 points when it is applied", "gets 15 points when it is applied");
+    edit("rules/401.ts", "proposal.player, 10,", "proposal.player, 15,");
+    edit("rules/401.test.ts", "delta: 10,", "delta: 15,");
+    if (step.weaken) writeFileSync(join(cwd, "rules/505.test.ts"), `import { test } from "node:test";\ntest("505", () => {});\n`);
+    else { edit("RULES.md", "The first player to reach 100 points wins.", "The first player to reach 20 points wins."); edit("rules/402.ts", ">= 100", ">= 20"); }
+    result({ outcome: "applied" });
     break;
   }
   case "outside": // writes where the night may not

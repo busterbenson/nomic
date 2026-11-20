@@ -67,7 +67,7 @@ No migration is needed: `days.status` already allows `deploying`, `days.commit_s
 ## The runner's state machine (one run, one game)
 
 ```
-lock (O_EXCL file; stale after 90 min) --busy--> exit 0 "another run holds the lock"
+lock (O_EXCL file holding the pid; stale when the pid is gone, or after 90 min) --busy--> exit 0 "another run holds the lock"
   -> GET pending
   -> reconcile: clone main; for each not_applied proposal whose commit (trailer "Proposal: P<k>") is on main and not
      yet reverted ("Reverts-Proposal: P<k>"), git revert it; tests; push main
@@ -84,8 +84,9 @@ lock (O_EXCL file; stale after 90 min) --busy--> exit 0 "another run holds the l
             from scripts/bundle-games.mjs, sandboxed) -> fail: one fix attempt with the failure output, up to 2
          -> pass: commit "P8: <title> (day 12, 4-1)" + "Proposal: P8" trailer; fail: reset to the last good commit
          -> 108: a conflict with a rule that prevails (rank) -> not applied, the reason names the rule
-       drafter audit per proposal (claude -p AUDIT.md, JSON out) -> night log; a material gap -> a case in
-         tests/drafter-cases.json on a platform branch + a draft PR (never merged by the runner) + a note in the claim
+       drafter audit per proposal while time is left before the claim margin (claude -p AUDIT.md, no tools, JSON out)
+         -> night log; a material gap -> a note in the claim, and after the claim a case in tests/drafter-cases.json
+         on a platform branch + a draft PR (never merged by the runner)
        push main (the commits) -> claim -> 409: revert locally nothing (D1 will list them as not applied; the next run
          reconciles) -> 200: tag day-N, push tag, trigger the deploy
   -> any thrown error: night log + a notification file; the 2 am fallback still ends the lock
@@ -103,6 +104,13 @@ proposal whose `Proposal: P<k>` commit is already there for this day); tags are 
   acceptEdits --permission-prompts none`: no shell, no web, no MCP, file tools confined to the worktree, user settings
   (and so this machine's approval hook) not loaded. Its environment is scrubbed to PATH, HOME, USER, LANG, TMPDIR: no
   Cloudflare token, no moderator token, no GitHub token. It cannot run tests, git or the network.
+- The model works in a COPY of the game's files with no `.git`; the script copies its changes back (a `.git`, a symlink
+  or `node_modules` it made is refused), and every git call runs with `core.fsmonitor=false` and `core.hooksPath=/dev/null`.
+  The model gets only what is enacted (the voted draft and what it replaces), not the player's own words.
+- Scope: RULES.md may change only in the sections of the rules the proposal changes (plus a 108.4 note on an
+  overridden rule), the voted draft must be in it word for word (unless redrafted, 107.3), `rules/<n>.ts` and
+  `rules/<n>.test.ts` only for those rules, and `settings.json` only for keys those sections tag. 108's marks are read
+  from the rules as they stood, and a precedence claim counts only if the rule's text makes it.
 - Everything the model wrote is checked by code: the changed paths (`git status --porcelain`, untracked included) must
   be under `RULES.md`, `settings.json`, `rules/`, `rulings/` (plus the one result file the runner reads and deletes);
   no symlinks; then the bundler's own `checkTree` (top-level files, game.json, lint: no network/globals/imports beyond
