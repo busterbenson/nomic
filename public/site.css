@@ -314,7 +314,7 @@ a.ppill:hover{background:var(--surface-2)}
 .chg del,.ruling del{color:var(--ink-muted);text-decoration-thickness:1.5px}
 .chg ins,.ruling ins{text-decoration:none;background:color-mix(in srgb,var(--accent) 22%,transparent);border-radius:3px;padding:0 3px;font-weight:700}
 .needline{margin:0;color:var(--ink-muted)}
-.cnote{font-size:.88rem}
+.cnote,.setline{font-size:.88rem}
 .proposeact{display:flex;flex-direction:column;gap:10px;align-items:flex-start}
 .proposeact>.pmenu,.proposeact>.ruling,.proposeact>.pf,.addrule>.pf,.addrule>.ruling{align-self:stretch}
 .addrule{padding:8px 0 0;display:flex;flex-direction:column;gap:10px;align-items:flex-start}

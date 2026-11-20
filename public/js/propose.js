@@ -60,6 +60,12 @@ export function wordDiff(a, b) {
 /** @rule 103.1 */
 export const diffOf = (p) => wordDiff(p.before_text || "", p.after_text || "");
 
+// The settings a reword sets (rule 110.1: a part's settings can still be changed), shown with the text change.
+/** @rule 110.1 */
+const settingsHTML = (p) => {
+  const e = Object.entries(p.settings || {});
+  return e.length ? `<p class="setline mono">${e.map(([k, v]) => `Sets <b>${esc(k)}</b> to <b>${esc(typeof v === "object" ? JSON.stringify(v) : String(v))}</b>`).join("<br>")}</p>` : "";
+};
 /** @rule 105.1 */
 const needText = (p) => (p.needs ? `${p.needs.mark} · needs ${p.needs.needed} of ${p.needs.of}` : p.mark || "");
 
@@ -104,7 +110,7 @@ export function createProposer({ api, me, day, refresh }) {
     const w = waiting && p.mine && canWithdraw() ? `<button class="linkbtn" type="button" data-p="withdraw" data-id="${esc(p.id)}">Withdraw</button>` : "";
     const err = S.ui && S.ui.wErr && S.ui.wId === p.id ? `<p class="notice err" role="alert">${esc(S.ui.wErr)}</p>` : "";
     return `<div class="chg${waiting ? " mine" : ""}" data-pn="${esc(p.n || "")}"><div class="ch">${pPill(p)}${playerPill(p)}<span class="pill ${waiting ? "drafting" : "bal"}">${waiting ? "On tomorrow's ballot" : "On today's ballot"}</span>${w}</div>
-<p class="mono head">${esc(p.head || "")}</p><p class="cdiff">${diffOf(p)}</p>${p.conflict_note ? `<p class="cnote">${withPills(p.conflict_note)}</p>` : ""}<p class="needline mono">${esc(needText(p))}</p>${err}</div>`;
+<p class="mono head">${esc(p.head || "")}</p><p class="cdiff">${diffOf(p)}</p>${settingsHTML(p)}${p.conflict_note ? `<p class="cnote">${withPills(p.conflict_note)}</p>` : ""}<p class="needline mono">${esc(needText(p))}</p>${err}</div>`;
   }
 
   // ---- what a rule's card gets -------------------------------------------------------------------------------
@@ -169,7 +175,7 @@ export function createProposer({ api, me, day, refresh }) {
     const p = S.ui.draft, off = S.ui.busy ? " disabled" : "";
     return `<article class="ruling pfd"><span class="stamp">DRAFTED</span><div class="from"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><polygon points="8,1 15,6 8,11 1,6" style="fill:var(--accent)"/><polygon points="1,6 8,11 8,15 1,10" style="fill:var(--ink)"/><polygon points="8,11 15,6 15,10 8,15" style="fill:var(--ink-muted)"/></svg>Chalant · moderator</div>
 ${p.words && !S.ui.prefilled ? `<p class="quote">You wrote: “${esc(p.words)}”</p>` : ""}
-<div class="draft"><p class="mono head"><b>${esc(p.head)}</b></p><p class="cdiff">${diffOf(p)}</p></div>
+<div class="draft"><p class="mono head"><b>${esc(p.head)}</b></p><p class="cdiff">${diffOf(p)}</p>${settingsHTML(p)}</div>
 ${p.conflict_note ? `<p class="cnote">${withPills(p.conflict_note)}</p>` : ""}<p class="needline mono">${esc(needText(p))}</p>
 ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : ""}
 <div class="row"><button class="btn small" type="button" data-p="confirm"${off}>Put it on tomorrow's ballot</button><button class="btn ghost small" type="button" data-p="edit"${off}>Change my words</button><button class="linkbtn" type="button" data-p="cancel">Cancel</button></div></article>`;
@@ -194,14 +200,16 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
   // The end of a block: the new rules on the ballot or waiting (ghost rows), and "+ Add a rule".
   /** @rule 103.1, 103.2 */
   function blockFootHTML(sec) {
+    // A change to the block itself (its mark, rule 105.3): on the ballot, or yours, waiting for tomorrow.
+    const marks = [...onBallot(), ...S.list.filter((p) => p.mine && p.status === "confirmed")].filter((p, i, a) => p.kind === "mark" && p.target === sec.num && a.indexOf(p) === i).map(chgHTML).join("");
     const g = ghosts(sec).map((p) => {
       const w = p.status === "confirmed";
       const title = p.title || String(p.after_text || "").split(/\s+/).slice(0, 6).join(" ");
       return `<div class="rule ghost" data-bal="1" data-pn="${esc(p.n || "")}"><div class="rh"><div class="gh"><span class="rn">new</span><span class="rt">${esc(title)}</span><span class="chips">${w ? `<span class="onb"><span class="bdot"></span>${esc(p.n)} · yours, tomorrow</span>` : `<span class="onb"><span class="bdot"></span>On the ballot · ${esc(p.n)}</span>`}</span><span class="prev">new rule, not in the book yet</span></div></div><div class="rbody">${chgHTML(p)}</div></div>`;
     }).join("");
-    if (!active()) return g;
+    if (!active()) return marks + g;
     const c = can(), u = S.ui, here = u && u.rule === sec.num && u.kind === "add";
-    return g + `<div class="addrule"><button class="linkbtn" type="button" data-p="add" data-n="${esc(sec.num)}"${c.allowed ? "" : ` disabled title="${esc(c.reason || "")}"`}>+ Add a rule</button>${here ? flowHTML() : ""}</div>`;
+    return marks + g + `<div class="addrule"><button class="linkbtn" type="button" data-p="add" data-n="${esc(sec.num)}"${c.allowed ? "" : ` disabled title="${esc(c.reason || "")}"`}>+ Add a rule</button>${here ? flowHTML() : ""}</div>`;
   }
 
   // The banner at the top of the rulebook: one proposal a day, said once.

@@ -106,6 +106,7 @@ export function registerTools(server: McpServer, ctx: Ctx, player: Player) {
       p.head,
       p.before_text ? `Before: ${p.before_text}` : null,
       p.after_text ? `After: ${p.after_text}` : null,
+      p.settings && Object.keys(p.settings).length ? `Sets: ${Object.entries(p.settings).map(([k, v]) => `${k} = ${v}`).join(", ")}` : null,
       p.conflict_note ? `Conflicts: ${p.conflict_note}` : null,
       p.needs ? `Needs: ${p.needs.mark}, ${p.needs.needed} of ${p.needs.of} votes` : null,
       "This is only a draft. Confirm it with confirm_proposal to make it your one proposal today (it goes on tomorrow's ballot).",
