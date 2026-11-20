@@ -33,7 +33,7 @@ export function drafterFlags(env: Env): DrafterFlags {
   if (!raw) return { ...DEFAULT_FLAGS };
   const names = raw.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
   // Names without a minus are exactly the levers that are on; only minus names start from the default and remove from it.
-  const known = names.filter((n) => n === "none" || n.replace(/^-/, "") in DEFAULT_FLAGS);
+  const known = names.filter((n) => n === "none" || Object.hasOwn(DEFAULT_FLAGS, n.replace(/^-/, "")));
   for (const n of names) if (!known.includes(n)) console.error("drafter: unknown DRAFTER_FLAGS name", n.slice(0, 30));
   if (!known.length) return { ...DEFAULT_FLAGS };   // a typo must not switch every lever off
   const on = known.every((n) => n.startsWith("-")) ? { ...DEFAULT_FLAGS } : { candidates: false, cache: false, structured: false };

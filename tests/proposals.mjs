@@ -305,10 +305,11 @@ console.log("the drafter upgrades: the 110.1 floor on a game that lacks the clau
   check("the API refusing the schema (400) is asked again once without it, and that answer is used", retried.seen.length === 2 && "format" in retried.seen[0].output_config && !("format" in retried.seen[1].output_config) && J(retried.outcome) === J(["301"]), J(retried.outcome));
   check("a 400 with no schema is a failure at once (no second request), and a second 400 is a failure after exactly one retry", notRetried.seen.length === 1 && notRetried.outcome === "failed" && twice.seen.length === 2 && twice.outcome === "failed");
   const errs = []; const realErr = console.error; console.error = (...x) => errs.push(x.join(" "));
+  const protoNames = F("constructor") === F("") && F("__proto__") === F("") && F("candidates,cahce") === J({ candidates: true, cache: false, structured: false }) && F("-cahce") === F("") && F("none,-cache") === F("none");
   const mixed = F("candidates,-cache"), spaced = F(" Cache , STRUCTURED "), typo = F("cahce");
   console.error = realErr;
   check("DRAFTER_FLAGS: a list with a plus name is exactly those on ('candidates,-cache' = candidates only), spaces and case don't matter, a misspelt name changes nothing and says so",
-    mixed === J({ candidates: true, cache: false, structured: false }) && spaced === J({ candidates: false, cache: true, structured: true }) && typo === F("") && errs.some((e) => /unknown DRAFTER_FLAGS name cahce/.test(e)), J(errs));
+    mixed === J({ candidates: true, cache: false, structured: false }) && spaced === J({ candidates: false, cache: true, structured: true }) && typo === F("") && protoNames && errs.some((e) => /unknown DRAFTER_FLAGS name cahce/.test(e)), J(errs));
 }
 
 // ---------------------------------------------------------------- migration 0006 on a database with data
