@@ -1,8 +1,9 @@
 // The MCP tools. A THIN ADAPTER: each tool builds a Request for the matching web route and calls that route's
-// own handler (api-rules, api-board, api-me, api-game, api-day, api-turn, api-proposals, api-action, api-end-turn), so validation, guards, log lines
+// own handler (api-rules, api-board, api-me, api-game, api-day, api-turn, api-proposals, api-action, api-end-turn, api-votes,
+// api-ballot), so validation, guards, log lines
 // and notifications are the web's, and a change to the turn model reaches MCP with no change here.
 // The player is attached to the internal Request (actAs); no cookie or token is forged.
-// NOT here yet: voting, and a catch-all "take an action". They arrive with the moderator.
+// NOT here yet: a catch-all "take an action". It arrives with the moderator.
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { Player, actAs } from "./auth";
@@ -16,6 +17,8 @@ import * as apiMe from "../routes/api-me";
 import * as apiProposals from "../routes/api-proposals";
 import * as apiRules from "../routes/api-rules";
 import * as apiTurn from "../routes/api-turn";
+import * as apiVotes from "../routes/api-votes";
+import * as apiBallot from "../routes/api-ballot";
 
 type Handler = (ctx: Ctx) => Promise<Response>;
 type Result = { status: number; text: string; data: any };
@@ -60,7 +63,7 @@ export function registerTools(server: McpServer, ctx: Ctx, player: Player) {
   }, async () => reply(await viaRoute(ctx, player, apiDay.get, "GET", "day")));
 
   server.registerTool("my_state", {
-    description: "Who you are in this game, where your piece stands, today's day and the midnight lock, what you have done today (moved, proposed, ended your turn) and what you may do right now (move, propose, end_turn).",
+    description: "Who you are in this game, where your piece stands, today's day and the midnight lock, what you have done today (moved, proposed, ended your turn, how many ballot items you voted on) and what you may do right now (move, propose, end_turn, vote).",
     annotations: read,
   }, async () => {
     const [me, g, board, day] = await Promise.all([
@@ -77,7 +80,7 @@ export function registerTools(server: McpServer, ctx: Ctx, player: Player) {
       game: { name: g.data.game.name, slug: g.data.game.slug, status: d.status, winning_score: g.data.game.winning_score },
       day: { number: d.day, ends_at: d.ends_at, timezone: d.timezone },
       lock: { locked: d.locked, processing_day: d.processing_day, message: d.message },
-      today: { moved: you?.moved ?? false, proposed: you?.proposed ?? false, ended: you?.ended ?? false },
+      today: { moved: you?.moved ?? false, proposed: you?.proposed ?? false, ended: you?.ended ?? false, voted_on: you?.voted ?? 0, ballot_items: d.ballot ?? 0 },
       you_can: you?.can ?? null,
     }) }] };
   });
@@ -142,6 +145,24 @@ export function registerTools(server: McpServer, ctx: Ctx, player: Player) {
     description: "Read the proposals you may see: every proposal that has reached a ballot, and your own confirmed proposal of today (hidden from others until tomorrow). Votes are never shown.",
     annotations: read,
   }, async () => reply(await viaRoute(ctx, player, apiProposals.get, "GET", "proposals")));
+
+  server.registerTool("read_ballot", {
+    description: "Read today's ballot: each proposal confirmed yesterday, its exact change, the votes it needs (its mark, of today's players; not voting counts as no), how many have voted and who, and your own vote. Nobody's vote and no total is shown until midnight, when the ballot is counted. Give `day` to read an earlier day's ballot with its results and every vote.",
+    inputSchema: { day: z.number().int().min(1).optional().describe("An earlier day's number, to read its counted ballot. Leave out for today's") },
+    annotations: read,
+  }, async ({ day }) => reply(await viaRoute(ctx, player, apiBallot.get, "GET", day === undefined ? "ballot" : `ballot?day=${day}`)));
+
+  server.registerTool("vote", {
+    description: "Vote yes or no on a proposal on today's ballot (like P3). You may vote on your own proposal, and change your vote until midnight or until you end your turn (ending your turn is final). Not voting counts as no. Nobody sees your vote until midnight. Not during the midnight lock (the lock message is returned).",
+    inputSchema: {
+      proposal: z.string().describe("The proposal, like \"P3\""),
+      vote: z.enum(["yes", "no"]).describe("yes or no"),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, async (args) => {
+    const r = await viaRoute(ctx, player, apiVotes.post, "POST", "votes", args);
+    return reply(r, r.data?.message ?? r.text);
+  });
 
   server.registerTool("move", {
     description: "Move your piece to a charted tile within your move distance. Once a day; not after you end your turn; not during the midnight lock. Name the tile by label (like \"3N 2E\") or by integer x and y.",

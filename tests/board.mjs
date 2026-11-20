@@ -482,7 +482,7 @@ try {
   console.log("  the tools");
   const init = await mcp(A, "pilot", tokMia, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } });
   check("initialize answers, naming the game and the player", init.status === 200 && init.data.result.serverInfo.name === "promptocracy-pilot" && /Pilot game as Mia/.test(init.data.result.instructions), init.text);
-  const TOOLS = ["confirm_proposal", "draft_proposal", "end_turn", "move", "my_state", "propose", "read_board", "read_day", "read_proposals", "read_rules", "withdraw_proposal"];
+  const TOOLS = ["confirm_proposal", "draft_proposal", "end_turn", "move", "my_state", "propose", "read_ballot", "read_board", "read_day", "read_proposals", "read_rules", "vote", "withdraw_proposal"];
   // The SDK's own client, as an AI app would use it: initialize, the initialized notification, list, call.
   const { Client: SdkClient } = await import("@modelcontextprotocol/sdk/client/index.js");
   const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
@@ -491,13 +491,13 @@ try {
     await sdk.connect(new StreamableHTTPClientTransport(new URL(`${A}/pilot/mcp`), { requestInit: { headers: { authorization: `Bearer ${tokMia}` } } }));
     const sdkTools = await sdk.listTools();
     const sdkState = await sdk.callTool({ name: "my_state", arguments: {} });
-    check("the SDK's own client connects with the token, lists the eleven tools and calls one", J(sdkTools.tools.map((t) => t.name).sort()) === J(TOOLS) && JSON.parse(sdkState.content[0].text).you.name === "Mia" && sdk.getServerVersion()?.name === "promptocracy-pilot");
-  } catch (e) { check("the SDK's own client connects with the token, lists the eleven tools and calls one", false, String(e?.stack || e)); }
+    check("the SDK's own client connects with the token, lists the thirteen tools and calls one", J(sdkTools.tools.map((t) => t.name).sort()) === J(TOOLS) && JSON.parse(sdkState.content[0].text).you.name === "Mia" && sdk.getServerVersion()?.name === "promptocracy-pilot");
+  } catch (e) { check("the SDK's own client connects with the token, lists the thirteen tools and calls one", false, String(e?.stack || e)); }
   finally { await sdk.close().catch(() => {}); }
   const list = await mcp(A, "pilot", tokMia, "tools/list", {});
-  check("the tools are read_rules, read_board, read_day, read_proposals, my_state, draft_proposal, confirm_proposal, withdraw_proposal, propose, move, end_turn: no voting, no catch-all action yet", J(list.data.result.tools.map((t) => t.name).sort()) === J(TOOLS), list.text);
+  check("the tools are read_rules, read_board, read_day, read_proposals, read_ballot, my_state, draft_proposal, confirm_proposal, withdraw_proposal, propose, vote, move, end_turn: no catch-all action yet", J(list.data.result.tools.map((t) => t.name).sort()) === J(TOOLS), list.text);
   const annot = (n) => list.data.result.tools.find((t) => t.name === n).annotations;
-  check("the read tools say they only read; the draft, confirm, withdraw, propose, move and end_turn tools do not", ["read_rules", "read_board", "read_day", "read_proposals", "my_state"].every((n) => annot(n).readOnlyHint === true) && ["draft_proposal", "confirm_proposal", "withdraw_proposal", "propose", "move", "end_turn"].every((n) => annot(n).readOnlyHint === false));
+  check("the read tools say they only read; the draft, confirm, withdraw, propose, vote, move and end_turn tools do not", ["read_rules", "read_board", "read_day", "read_proposals", "read_ballot", "my_state"].every((n) => annot(n).readOnlyHint === true) && ["draft_proposal", "confirm_proposal", "withdraw_proposal", "propose", "vote", "move", "end_turn"].every((n) => annot(n).readOnlyHint === false));
   const toolText = (n) => list.data.result.tools.find((t) => t.name === n).description;
   check("end_turn says it is final and has no undo; propose and move say once a day, not once per round", /final/i.test(toolText("end_turn")) && /no undo/i.test(toolText("end_turn")) && /once a day/i.test(toolText("propose")) && /once a day/i.test(toolText("move")) && !/round|on your turn/i.test(toolText("propose") + toolText("move")));
   check("the proposal tools say drafting is free, confirming is the day's one proposal, ending the turn is final, and the lock returns its message", /free/i.test(toolText("draft_proposal")) && /not yet a proposal/i.test(toolText("draft_proposal")) && /one a day/i.test(toolText("confirm_proposal")) && /final/i.test(toolText("confirm_proposal")) && /final/i.test(toolText("withdraw_proposal")) && ["draft_proposal", "confirm_proposal", "withdraw_proposal", "propose"].every((n) => /lock/i.test(toolText(n))));
@@ -515,7 +515,7 @@ try {
   check("my_state: who I am, where my piece stands, the day and its end, the lock, what I did today, what I can do now",
     s1.you.name === "Mia" && s1.you.turn_order === 0 && s1.you.color === "Teal" && s1.you.score === 0 && s1.you.is_host === true && J(s1.you.at) === J(b1.pieces[0].at) && s1.game.status === "playing" &&
     s1.day.number === 1 && s1.day.ends_at === dayWeb.ends_at && s1.day.timezone === dayWeb.timezone && J(s1.lock) === J({ locked: false, processing_day: null, message: null }) &&
-    J(s1.today) === J({ moved: false, proposed: false, ended: false }) && J(s1.you_can) === J(dayWeb.you.can) && noLeak(st.text), st.text);
+    J(s1.today) === J({ moved: false, proposed: false, ended: false, voted_on: 0, ballot_items: 0 }) && J(s1.you_can) === J(dayWeb.you.can) && noLeak(st.text), st.text);
   check("my_state has no turn order left: no whose_turn, your_turn, round or turn", !("whose_turn" in s1) && !("your_turn" in s1) && !("round" in s1.game) && !("turn" in s1.game));
   const s2 = JSON.parse((await tool(A, "pilot", tokMax, "my_state")).text);
   const maxDay = (await max.get("/pilot/api/day")).data;

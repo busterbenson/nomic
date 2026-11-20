@@ -67,8 +67,8 @@ export function partsOf(d) {
 // The mark a proposal needs, read from the marks in effect NOW. Confirm stores it (rule 105.4).
 /** @rule 105.4 */
 export const markFor = (book, d) => strictestMark(book, partsOf(d));
-// How many yes votes a mark needs of `electorate` players (rule 104: more than half; unanimous: all). For the slip.
-/** @rule 104, 105.1 */
+// How many yes votes a mark needs of `electorate` players (rule 104.1: more than half; unanimous: all).
+/** @rule 104.1, 105.1 */
 export const neededOf = (mark, electorate) => (mark === "unanimous" ? electorate : Math.floor(electorate / 2) + 1);
 
 // ---- numbers --------------------------------------------------------------------------------------------------------
@@ -91,7 +91,7 @@ export function nextClauseNum(rule) {
 // ---- what no proposal can change (rule 110.1) ---------------------------------------------------------------------
 // The site runs these parts the same in every game, whatever a game's text says: the floor. A game's own 110.1 can only
 // add to it (each "rule N" it names, and 110.1 itself: "this rule included").
-const SITE_FIXED = ["103.2", "107.1", "110.1", "202.4", "203.1"];
+const SITE_FIXED = ["103.2", "104.4", "104.5", "107.1", "107.6", "110.1", "202.4", "203.1"];
 /** @rule 110.1 */
 export function fixedParts(book) {
   const out = new Set(SITE_FIXED);
