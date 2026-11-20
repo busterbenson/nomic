@@ -182,6 +182,11 @@ console.log("the live eval's findings, kept as recorded answers (Rickshaw day-0.
   // A prefilled edit uses only the model's conflicts (the route ignores the rest), so a refusal there must not lose them.
   const pre = readModelAnswer(RB, rq("401", "A player whose proposal passes gets 10 points.", { prefilled: true }), '{"after_text": "A player whose proposal passes gets 10 points.", "conflicts": ["402", "203.1"], "settings": {"max_players": 3}}');
   check("a prefilled answer keeps every named conflict (402, and 203.1 too) and never refuses: the route reads only its conflicts", J(pre.conflicts) === J(["402", "203.1"]) && !pre.error, J(pre));
+  const preR = readModelAnswer(RB, rq("401", "A player whose proposal passes gets 10 points.", { prefilled: true }), '{"refuse": "This contradicts the midnight lock", "conflicts": ["107.1", "402"]}');
+  check("a prefilled answer that also says refuse still keeps its conflicts (the route reads only those)", J(preR.conflicts) === J(["107.1", "402"]) && !preR.error, J(preR));
+  check("a citation in the voice's own form '(504.2)' is read like 'rule 504.2': citedIn, and so the conflicts a repeal or move names (505 cites it)",
+    J(citedIn("You chart tiles (504.2), and (202.4) too. Not (3) or (2026) or 10 (points).")) === J(["504.2", "202.4"]) &&
+    referencesTo(parseBook(readFileSync(pjoin(ROOT, "tests/fixtures/rickshaw-day-0.2/RULES.md"), "utf8").replace("(rule 504.2)", "(504.2)")), "504").includes("505"));
   check("a refusal's sentence is clipped to 300 characters, whatever the model wrote into the setting's value",
     ans("504.2", `{"after_text": "x", "conflicts": [], "settings": {"board.chart_radius": ${J("v".repeat(500))}}}`).message?.length <= 300);
 }

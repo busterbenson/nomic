@@ -13,10 +13,12 @@ export const parseBook = (md) => parseRules(md);
 // A number the book really has (never an inherited key such as "constructor" or "__proto__").
 /** @rule 103.1 */
 export const has = (book, num) => typeof num === "string" && Object.hasOwn(book.byNum, num);
+// The rules voice cites a rule as a bare number in parentheses: "(202.4)", "(504)".
+const PAREN_CITE = /\((\d{3}(?:\.\d+)?)\)/g;
 // Every rule or clause number a text cites: "rule 504.2", "Rule 504", "rules 202.4 and 203.1", "rules 101, 102 or 103".
 const CITE = /\b[Rr]ules? (\d{3}(?:\.\d+)?(?![\d.]\d)(?:(?:, | and | or |, and |, or )\d{3}(?:\.\d+)?(?![\d.]\d))*)(?!\d)/g;
 /** @rule 108.3, 110.1 */
-export const citedIn = (text) => [...String(text).matchAll(CITE)].flatMap((m) => m[1].match(/\d{3}(?:\.\d+)?/g));
+export const citedIn = (text) => [...[...String(text).matchAll(CITE)].flatMap((m) => m[1].match(/\d{3}(?:\.\d+)?/g)), ...[...String(text).matchAll(PAREN_CITE)].map((m) => m[1])];
 
 export const KINDS = ["amend", "addclause", "add", "repeal", "move", "mark"];
 // The words the API also accepts for a kind ("reword" is what the menu calls "amend").
@@ -314,16 +316,17 @@ export function readModelAnswer(book, req, raw) {
   }
   if (!a || typeof a !== "object" || Array.isArray(a)) return { error: "malformed" };
   const refuse = (reason, message) => ({ error: "refused", reason, message: String(message).slice(0, 300) });
+  if (a.conflicts !== undefined && !Array.isArray(a.conflicts)) return { error: "malformed" };
+  const own = (k) => k === req.target || k.startsWith(req.target + ".") || req.target.startsWith(k + ".");
+  const conflicts = [...new Set((a.conflicts || []).map(String).filter((n) => /^\d{3}(\.\d+)?$/.test(n) && has(book, n) && !own(n)))];
+  // An edit in place is the player's exact text: the route reads only the conflicts from this answer, so name them all,
+  // whatever else the model said.
+  if (req.prefilled) return { after_text: String(req.words), conflicts, settings: {} };
   if (a.refuse !== undefined) {
     const why = typeof a.refuse === "string" ? a.refuse.replace(/\s+/g, " ").trim().slice(0, 300) : "";
     return why ? refuse("declined", why) : { error: "malformed" };
   }
-  if (a.conflicts !== undefined && !Array.isArray(a.conflicts)) return { error: "malformed" };
   if (a.settings !== undefined && (typeof a.settings !== "object" || a.settings === null || Array.isArray(a.settings))) return { error: "malformed" };
-  const own = (k) => k === req.target || k.startsWith(req.target + ".") || req.target.startsWith(k + ".");
-  const conflicts = [...new Set((a.conflicts || []).map(String).filter((n) => /^\d{3}(\.\d+)?$/.test(n) && has(book, n) && !own(n)))];
-  // An edit in place is the player's exact text: the route reads only the conflicts from this answer, so name them all.
-  if (req.prefilled) return { after_text: String(req.words), conflicts, settings: {} };
   const fixed = conflicts.filter((n) => fixedWhole(book, n));
   if (fixed.length) return refuse("110.1", `This would conflict with ${fixed.map((n) => `rule ${n}`).join(", ")}, which no proposal can change: the site runs ${fixed.length > 1 ? "them" : "it"} the same in every game (rule 110.1). Change the words so they leave ${fixed.length > 1 ? "them" : "it"} alone.`);
   const text = typeof a.after_text === "string" ? a.after_text.trim() : "";
