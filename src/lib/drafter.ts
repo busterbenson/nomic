@@ -11,8 +11,9 @@ import { modelPrompt, readModelAnswer } from "./proposals.js";
 import { Env } from "./util";
 
 export type DraftAnswer = { after_text: string; conflicts: string[]; settings: Record<string, unknown> };
+// "refused": the model or a check said no, with a sentence for the player (reason: declined, scope, setting, nochange, 110.1).
 export class DrafterError extends Error {
-  constructor(public code: "unavailable" | "failed" | "malformed", message: string) { super(message); }
+  constructor(public code: "unavailable" | "failed" | "malformed" | "refused", message: string, public reason?: string) { super(message); }
 }
 export const UNAVAILABLE = "Drafting a rewording is unavailable right now. You can still add a clause, add a rule, repeal, move or change a mark, or edit the wording yourself.";
 
@@ -50,6 +51,7 @@ export async function draftRewording(env: Env, book: any, rulesMd: string, req: 
   try { body = await res.json(); } catch { body = null; }
   const text = Array.isArray(body?.content) ? body.content.filter((b: any) => b?.type === "text").map((b: any) => b.text).join("") : "";
   const a = readModelAnswer(book, req, text);
+  if ("error" in a && a.error === "refused") throw new DrafterError("refused", String((a as any).message), String((a as any).reason));
   if ("error" in a) throw new DrafterError("malformed", "The moderator's draft came back garbled. Try again, or edit the wording yourself.");
   return a as DraftAnswer;
 }
