@@ -73,12 +73,13 @@ function fakeClaude(scenario) {
 const TOKEN = "test-token-0123456789abcdef";
 async function fakeWorker(state) {
   const claims = [];
+  let gets = 0;
   const server = createServer(async (req, res) => {
     let body = "";
     for await (const c of req) body += c;
     const send = (code, o) => { res.statusCode = code; res.setHeader("content-type", "application/json"); res.end(J(o)); };
     if (req.headers.authorization !== `Bearer ${TOKEN}`) return send(401, { error: "Not authorized." });
-    if (req.method === "GET" && req.url === "/g/api/moderator/pending") return send(200, { job: state.job, not_applied: state.not_applied ?? [], processed: state.processed ?? [] });
+    if (req.method === "GET" && req.url === "/g/api/moderator/pending") { gets++; state.onGet?.(gets, state); return send(200, { game: state.game, job: state.job, not_applied: state.not_applied ?? [], processed: state.processed ?? [] }); }
     const m = /^\/g\/api\/moderator\/days\/(\d+)\/claim$/.exec(req.url);
     if (req.method === "POST" && m) {
       const b = JSON.parse(body);
@@ -92,7 +93,7 @@ async function fakeWorker(state) {
     send(404, {});
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
-  return { api: `http://127.0.0.1:${server.address().port}`, claims, stop: () => new Promise((r) => server.close(r)) };
+  return { api: `http://127.0.0.1:${server.address().port}`, claims, gets: () => gets, stop: () => new Promise((r) => server.close(r)) };
 }
 
 const P = (number, target, o = {}) => ({ number, title: `Change ${target}`, kind: "amend", scope: "rule", target, words: `change ${target}`, draft_head: `Change ${target}`, before_text: "", after_text: "", settings: {}, conflicts: [], mark: "majority", yes: 4, no: 1, needed: 3, budget_minutes: 20, budget_effort: "medium", ...o });
@@ -102,13 +103,13 @@ async function night({ scenario, state, opts = {} }) {
   const repo = opts.repo ?? gameRepo();
   const claude = fakeClaude(scenario);
   const w = await fakeWorker(state);
-  const deploys = [], cases = [];
+  const deploys = [], cases = [], sleeps = [];
   const stateDir = opts.stateDir ?? join(repo.base, "state"), notifyDir = join(repo.base, "notify");
-  const run = () => runOnce({ slug: "g", libraryDir: opts.libraryDir ?? join(TMP, "no-library"), api: w.api, token: TOKEN, repoUrl: repo.bare, stateDir, notifyDir, claude: claude.cmd, deploy: async (d) => { if (opts.deployFails) throw new Error("the deploy trigger answered 503"); deploys.push(d); }, openAuditPr: async (c) => cases.push(c), audit: opts.audit ?? true });
+  const run = () => runOnce({ slug: "g", libraryDir: opts.libraryDir ?? join(TMP, "no-library"), api: w.api, token: TOKEN, repoUrl: repo.bare, stateDir, notifyDir, claude: claude.cmd, deploy: async (d) => { if (opts.deployFails) throw new Error("the deploy trigger answered 503"); deploys.push(d); }, openAuditPr: async (c) => cases.push(c), audit: opts.audit ?? true, watch: opts.watch, sleep: async (ms) => { sleeps.push(ms); opts.tick?.(ms); }, now: opts.now });
   const r = opts.twice ? await Promise.all([run(), run()]) : await run();
   await w.stop();
   const notes = existsSync(notifyDir) ? readdirSync(notifyDir) : [];
-  return { r, repo, claude, claims: w.claims, deploys, cases, notes, stateDir, notifyDir, run, state, worker: w };
+  return { sleeps, r, repo, claude, claims: w.claims, deploys, cases, notes, stateDir, notifyDir, run, state, worker: w };
 }
 
 // ---- the runner -----------------------------------------------------------------------------------------------------
@@ -407,6 +408,189 @@ console.log("moderator runner");
 {
   const t = await night({ scenario: { apply: {} }, state: { job: job([P(3, "401")]) }, opts: { audit: false, repo: { base: join(TMP, "nope"), bare: join(TMP, "nope", "missing.git") } } });
   check("a failed night (the repo can't be cloned) writes a notification file and reports failed", t.r.status === "failed" && t.notes.some((f) => /night-failed/.test(f)), J(t.r));
+}
+
+// ---- idle runs stop before the clone ----------------------------------------------------------------------------------
+console.log("idle runs");
+{
+  // The runner is idle inside the night window when nothing is in progress and nothing needs reconciling. The game repo
+  // here does not exist, so a clone would make the run fail: an idle run must answer with one GET and stop.
+  const nowhere = { base: join(TMP, "nowhere"), bare: join(TMP, "nowhere", "missing.git") };
+  const t = await night({ scenario: { apply: {} }, state: { job: null, not_applied: [], processed: [] }, opts: { repo: nowhere } });
+  check("idle: no night in progress and nothing to reconcile returns before cloning (one GET, no clone, no failure)", t.r.status === "idle" && t.r.cloned === false && t.worker.gets() === 1 && t.notes.length === 0, J(t.r));
+  const tp = await night({ scenario: { apply: {} }, state: { job: null, not_applied: [], processed: [{ n: 1, status: "done", commit_sha: "a".repeat(40) }] }, opts: { repo: nowhere } });
+  check("idle: a processed day that has its commit needs no tag check, so it is idle too", tp.r.status === "idle" && tp.r.cloned === false, J(tp.r));
+}
+{
+  // A not-applied proposal is listed by the Worker forever; the clone is needed once, to revert it, then it is settled.
+  const t = await night({ scenario: { apply: { 3: { action: "points", to: 15 } } }, state: { job: job([P(3, "401")]), refuseClaim: true }, opts: { audit: false } });
+  const na = { job: null, not_applied: [{ number: 3, day: 1, reason: "Chalant did not finish processing by 2:00 am" }], processed: [{ n: 1, status: "timed_out", commit_sha: null }] };
+  const nowhere = { base: t.repo.base, bare: join(TMP, "nowhere2", "missing.git") };
+  const t0 = await night({ scenario: { apply: {} }, state: na, opts: { repo: nowhere } });
+  check("idle: a not-applied proposal not yet reconciled still needs the clone (here it fails: the repo is missing)", t0.r.status === "failed", J(t0.r));
+  const t1 = await night({ scenario: { apply: {} }, state: na, opts: { repo: t.repo } });
+  check("idle: the run that reverts it clones and reconciles", t1.r.status === "idle" && t1.r.cloned === true && t1.r.reconciled === true, J(t1.r));
+  const t2 = await night({ scenario: { apply: {} }, state: na, opts: { repo: nowhere } });
+  check("idle: afterwards the same listing (not_applied forever, the day tagged) is idle with no clone", t2.r.status === "idle" && t2.r.cloned === false && t2.worker.gets() === 1, J(t2.r));
+  const t3 = await night({ scenario: { apply: {} }, state: { ...na, not_applied: [...na.not_applied, { number: 9, day: 2, reason: "x" }] }, opts: { repo: nowhere } });
+  check("idle: a NEW not-applied proposal brings the clone back", t3.r.status === "failed", J(t3.r));
+}
+{
+  // A processed day with no commit has an empty night: it still needs its tag (rule 107.8), once.
+  const t = await night({ scenario: { apply: {} }, state: { job: null, not_applied: [], processed: [{ n: 1, status: "done", commit_sha: null }] } });
+  check("idle: an untagged empty night is tagged (it needs the clone)", t.r.status === "idle" && t.r.cloned === true && remoteTags(t.repo.bare).includes("day-1"), J(t.r));
+  const nowhere = { base: t.repo.base, bare: join(TMP, "nowhere3", "missing.git") };
+  const t2 = await night({ scenario: { apply: {} }, state: { job: null, not_applied: [], processed: [{ n: 1, status: "done", commit_sha: null }] }, opts: { repo: nowhere } });
+  check("idle: once tagged, the same listing is idle with no clone", t2.r.status === "idle" && t2.r.cloned === false, J(t2.r));
+  writeFileSync(join(t.stateDir, "g.state.json"), J({ ...(existsSync(join(t.stateDir, "g.state.json")) ? JSON.parse(readFileSync(join(t.stateDir, "g.state.json"), "utf8")) : {}), pendingDeploy: { tag: "day-1.1", day: 1, sha: "b".repeat(40) } }));
+  const t3 = await night({ scenario: { apply: {} }, state: { job: null, not_applied: [], processed: [] }, opts: { repo: nowhere } });
+  check("idle: a deploy still pending in the state file needs the clone", t3.r.status === "failed", J(t3.r));
+  const t4 = await night({ scenario: { apply: {} }, state: { job: job([]), not_applied: [], processed: [] }, opts: { repo: nowhere, stateDir: join(TMP, "fresh-state") } });
+  check("idle: a night in progress is never idle", t4.r.status === "failed", J(t4.r));
+}
+
+{
+  // A night that crashed after its claim is resumed ("deploying"): the claim's rules may have changed the time zone, so the
+  // resume asks for the schedule once for that day (and the claiming run already did).
+  const repo = gameRepo(), sha = g(["rev-parse", "main"], repo.bare).trim();
+  const dep = () => ({ job: job([], { status: "deploying", commit_sha: sha }), not_applied: [], processed: [] });
+  const t = await night({ scenario: { apply: {} }, state: dep(), opts: { repo } });
+  check("a deploying resume asks for the schedule to be regenerated", t.r.status === "deploying" && t.r.reschedule === true, J(t.r));
+  const t2 = await night({ scenario: { apply: {} }, state: dep(), opts: { repo, stateDir: t.stateDir } });
+  check("and only once per day: the next resume does not", t2.r.status === "deploying" && t2.r.reschedule === false, J(t2.r));
+  const c = await night({ scenario: { apply: { 3: { action: "points", to: 15 } } }, state: { job: job([P(3, "401")]) }, opts: { audit: false } });
+  check("the claiming run records the day, so its own deploying resumes do not ask again", c.r.status === "claimed" && JSON.parse(readFileSync(join(c.stateDir, "g.state.json"), "utf8")).rescheduleDay === 1);
+}
+
+// ---- the main run: the whole night in one process ---------------------------------------------------------------------
+console.log("main run (watch)");
+{
+  // The count is the Worker's cron: the first two polls see no night, the third sees it processing.
+  const st = { job: null, game: { day: 5 }, onGet: (n, s) => { if (n === 3) s.job = job([P(3, "401")], { deploy_deadline_at: new Date(Date.now() + 150 * 60_000).toISOString() }); if (s.job?.status === "deploying" && n >= 7) s.job = null; } };
+  const t = await night({ scenario: { apply: { 3: { action: "points", to: 15 } } }, state: st, opts: { watch: true, audit: false } });
+  check("main run: polls for the count (30 s apart) until the night is processing, then applies and claims it", t.r.status === "claimed" && t.sleeps.slice(0, 2).every((ms) => ms === 30_000) && t.r.waited === 2 && t.claims.length === 1 && t.deploys.length === 1, J([t.r, t.sleeps]));
+  check("main run: after the claim it watches the deploy (45 s polls) until the site has no night pending, then makes a last pass", t.r.watched >= 1 && t.sleeps.includes(45_000) && t.r.final === "idle", J([t.r, t.sleeps]));
+  check("main run: the lock is released at the end", !existsSync(join(t.stateDir, "g.lock")));
+}
+{
+  const st = { job: null, game: { day: 5 }, onGet: (n, s) => { if (n === 2) s.game = { day: 6 }; } };
+  const nowhere = { base: join(TMP, "nowhere9"), bare: join(TMP, "nowhere9", "missing.git") };
+  const t = await night({ scenario: { apply: {} }, state: st, opts: { watch: true, repo: nowhere } });
+  check("main run: a quiet night (the day moved on, nothing to apply) stops waiting at once, and without a clone it is idle", t.r.status === "idle" && t.r.waited === 1 && t.sleeps.length === 1, J([t.r, t.sleeps]));
+}
+{
+  let clock = Date.parse("2026-11-21T08:02:00Z");
+  const nowhere = { base: join(TMP, "nowhere10"), bare: join(TMP, "nowhere10", "missing.git") };
+  const t = await night({ scenario: { apply: {} }, state: { job: null, game: { day: 5 } }, opts: { watch: true, repo: nowhere, now: () => clock, tick: (ms) => { clock += ms; } } });
+  check("main run: gives up waiting for the count after 15 minutes (30 polls), leaving the backstop to pick it up", t.r.status === "idle" && t.r.waited === 30 && t.worker.gets() === 32, J([t.r, t.worker.gets()]));
+}
+{
+  // The deploy trigger fails twice: the main run keeps trying until it works (a single pass tries once).
+  let fails = 2;
+  const repo = gameRepo();
+  const w = { job: job([P(3, "401")], { deploy_deadline_at: new Date(Date.now() + 150 * 60_000).toISOString() }), game: { day: 5 }, onGet: (n, s) => { if (s.job?.status === "deploying" && n >= 6) s.job = null; } };
+  const claude = fakeClaude({ apply: { 3: { action: "points", to: 15 } } });
+  const worker = await fakeWorker(w);
+  const deploys = [], sleeps = [];
+  const base = { slug: "g", libraryDir: join(TMP, "no-library"), api: worker.api, token: TOKEN, repoUrl: repo.bare, stateDir: join(repo.base, "state"), notifyDir: join(repo.base, "notify"), claude: claude.cmd, audit: false, sleep: async (ms) => sleeps.push(ms), deploy: async (d) => { if (fails-- > 0) throw new Error("the deploy trigger answered 503"); deploys.push(d); } };
+  const r = await runOnce({ ...base, watch: true });
+  await worker.stop();
+  check("main run: a deploy trigger that fails twice is retried every 45 s until it works", r.status === "claimed" && deploys.length === 1 && sleeps.filter((ms) => ms === 45_000).length >= 2, J([r, deploys.length, sleeps]));
+}
+{
+  // Codex P2 on #30: the night is claimed, but the deploy trigger never works. The main run must still watch until the
+  // Worker gives up on the night, then run its final pass, which reverts the change the Worker lists as not applied.
+  // Without that, the day-N tag keeps a rule that never took effect, and any later build would ship it.
+  let clock = Date.now();
+  const deadline = clock + 10 * 60_000;
+  const repo = gameRepo();
+  const w = {
+    job: job([P(3, "401")], { deploy_deadline_at: new Date(deadline).toISOString() }), game: { day: 5 },
+    onGet: (n, s) => {
+      // the Worker's */5 cron gives up on the night within one tick of the deploy deadline
+      if (s.job?.status === "deploying" && clock > deadline + 4 * 60_000) {
+        s.job = null; s.not_applied = [{ number: 3, day: 1, reason: "the change was applied but did not go live by 2:30 am" }];
+        s.processed = [{ n: 1, status: "timed_out", commit_sha: null }];
+      }
+    },
+  };
+  const claude = fakeClaude({ apply: { 3: { action: "points", to: 15 } } });
+  const worker = await fakeWorker(w);
+  const r = await runOnce({ slug: "g", libraryDir: join(TMP, "no-library"), api: worker.api, token: TOKEN, repoUrl: repo.bare, stateDir: join(repo.base, "state"), notifyDir: join(repo.base, "notify"), claude: claude.cmd, audit: false, watch: true, now: () => clock, sleep: async (ms) => { clock += ms; }, deploy: async () => { throw new Error("the deploy trigger answered 503"); } });
+  await worker.stop();
+  const log = g(["log", "--format=%B", "main"], repo.bare);
+  check("main run: a claimed night whose deploy never works is still watched, then its final pass reverts the not-applied change", (r.watched ?? 0) > 0 && /Reverts-Proposal: P3/.test(log), J([r, log.slice(0, 300), readFileSync(join(repo.base, "state", "g.night.jsonl"), "utf8").split("\n").map((l) => l.slice(0, 160))]));
+}
+{
+  // Codex P2 on #30 (second): the main run crashed, so the 01:00 BACKSTOP (watch off) claims the night, and the deploy
+  // never works. It must see the night through like the main run: watch, then a final pass that reverts the change.
+  let clock = Date.now();
+  const deadline = clock + 10 * 60_000;
+  const repo = gameRepo();
+  const w = {
+    job: job([P(3, "401")], { deploy_deadline_at: new Date(deadline).toISOString() }), game: { day: 5 },
+    onGet: (n, s) => {
+      if (s.job?.status === "deploying" && clock > deadline + 4 * 60_000) {
+        s.job = null; s.not_applied = [{ number: 3, day: 1, reason: "the change was applied but did not go live by 2:30 am" }];
+        s.processed = [{ n: 1, status: "timed_out", commit_sha: null }];
+      }
+    },
+  };
+  const claude = fakeClaude({ apply: { 3: { action: "points", to: 15 } } });
+  const worker = await fakeWorker(w);
+  const r = await runOnce({ slug: "g", libraryDir: join(TMP, "no-library"), api: worker.api, token: TOKEN, repoUrl: repo.bare, stateDir: join(repo.base, "state"), notifyDir: join(repo.base, "notify"), claude: claude.cmd, audit: false, watch: false, now: () => clock, sleep: async (ms) => { clock += ms; }, deploy: async () => { throw new Error("the deploy trigger answered 503"); } });
+  await worker.stop();
+  const log = g(["log", "--format=%B", "main"], repo.bare);
+  check("backstop: a night it claims (deploy never works) is watched to the end and its final pass reverts the not-applied change", (r.watched ?? 0) > 0 && /Reverts-Proposal: P3/.test(log), J([r, log.slice(0, 300)]));
+}
+{
+  // The backstop must not overlap a main run that is still watching.
+  const repo = gameRepo();
+  const sd = join(repo.base, "state");
+  mkdirSync(sd, { recursive: true });
+  writeFileSync(join(sd, "g.lock"), String(process.pid));
+  const t = await night({ scenario: { apply: {} }, state: { job: null, not_applied: [], processed: [] }, opts: { repo } });
+  check("the backstop finds the main run's lock held and exits busy, touching nothing", t.r.status === "busy" && t.worker.gets() === 0 && existsSync(join(sd, "g.lock")), J(t.r));
+}
+
+{
+  // The watch: a failed poll is not "unlocked"; an answer with no night pending is. And a final pass that fails after a claim
+  // still asks for the schedule (the claim's rules may have changed the time zone).
+  const w = { job: job([P(3, "401")], { deploy_deadline_at: new Date(Date.now() + 150 * 60_000).toISOString() }), game: { day: 5 } };
+  let n = 0;
+  const base = async (repo, failFinal) => {
+    const claude = fakeClaude({ apply: { 3: { action: "points", to: 15 } } });
+    const worker = await fakeWorker(w);
+    const sleeps = [];
+    const stub = async (url, init) => { const r = await fetch(url, init); n++; return r; };
+    const r = await runOnce({ slug: "g", libraryDir: join(TMP, "no-library"), api: worker.api, token: TOKEN, repoUrl: repo.bare, stateDir: join(repo.base, "state"), notifyDir: join(repo.base, "notify"), claude: claude.cmd, audit: false, watch: true, sleep: async (ms) => sleeps.push(ms), deploy: async () => {}, fetchImpl: stub });
+    await worker.stop();
+    return { r, sleeps };
+  };
+  const repo = gameRepo();
+  w.onGet = (g, s) => { if (s.job?.status === "deploying") { if (g % 2 === 0) s.job = null; } };
+  const t = await base(repo);
+  check("main run: the watch ends on an answer with no night pending, and the claim is still reported", t.r.status === "claimed" && t.r.watched >= 1 && t.r.final === "idle", J(t.r));
+}
+{
+  // A status code other than 200 is a failed poll: three in a row end the watch, one does not.
+  const sleeps = [];
+  let polls = 0;
+  const repo = gameRepo();
+  const claude = fakeClaude({ apply: { 3: { action: "points", to: 15 } } });
+  const w = { job: job([P(3, "401")], { deploy_deadline_at: new Date(Date.now() + 150 * 60_000).toISOString() }), game: { day: 5 } };
+  const worker = await fakeWorker(w);
+  let claimed = false, failNext = 0;
+  const fetchImpl = async (url, init) => {
+    if (init?.method === "POST") claimed = true;
+    else if (claimed && !/pending/.test("")) { polls++; }
+    if (claimed && init?.method !== "POST" && polls >= 1 && polls <= 2) return new Response("{}", { status: 503 }); // two failed polls
+    if (claimed && init?.method !== "POST" && polls >= 3) { w.job = null; }
+    return fetch(url, init);
+  };
+  const r = await runOnce({ slug: "g", libraryDir: join(TMP, "no-library"), api: worker.api, token: TOKEN, repoUrl: repo.bare, stateDir: join(repo.base, "state"), notifyDir: join(repo.base, "notify"), claude: claude.cmd, audit: false, watch: true, sleep: async (ms) => sleeps.push(ms), deploy: async () => {}, fetchImpl });
+  await worker.stop();
+  check("main run: two failed polls in a row do not end the watch; it goes on until the site answers with no night pending", r.status === "claimed" && r.watched === 2 && r.final === "idle", J([r, polls]));
 }
 
 console.log(`${pass} passed, ${fail} failed`);
