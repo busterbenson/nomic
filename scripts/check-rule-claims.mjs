@@ -2,7 +2,7 @@
 //   STRICT  src/engine/ and the starter rule modules (templates/rules/*.ts): a function with no `@rule <n>` JSDoc
 //           tag, or a tag naming a rule or clause that templates/RULES.md does not have, FAILS (exit 1).
 //   REPORT  the rest of src/ (routes, lib, index.ts): the functions with no claim are listed and written to
-//           docs/rule-claims-todo.md. They do not fail yet; a follow-up claims them (site plumbing goes under 302 / 102).
+//           docs/rule-claims-todo.md. They do not fail yet; a follow-up claims them (site plumbing goes under 101 / 102).
 // A game's own rule modules are held to the same rule by scripts/bundle-games.mjs, against that game's RULES.md.
 // Convention: docs/rule-claims.md.   --no-write: print the report, leave docs/rule-claims-todo.md alone.
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
@@ -12,7 +12,7 @@ import { checkFileClaims, findFunctions, knownNumbers, overClaimed } from "../sr
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** The code files under a folder, as repo-relative paths. @rule 302 */
+/** The code files under a folder, as repo-relative paths. @rule 101 */
 function codeFiles(dir, { skip = () => false } = {}) {
   const out = [];
   const walk = (d) => {
@@ -28,7 +28,7 @@ function codeFiles(dir, { skip = () => false } = {}) {
   return out;
 }
 
-/** Checks the strict set and reports the rest; returns {problems, unclaimed, strictCount}. @rule 302 */
+/** Checks the strict set and reports the rest; returns {problems, unclaimed, strictCount}. @rule 101 */
 export function runClaimsCheck() {
   const known = knownNumbers(readFileSync(join(ROOT, "templates/RULES.md"), "utf8"));
   const strict = [...codeFiles("src/engine"), ...codeFiles("templates/rules")];
@@ -54,7 +54,7 @@ export function runClaimsCheck() {
   return { problems, warnings, unclaimed, strictCount, total, strict };
 }
 
-/** The text of docs/rule-claims-todo.md. @rule 302 */
+/** The text of docs/rule-claims-todo.md. @rule 101 */
 export function todoDoc({ unclaimed, total }) {
   const byFile = new Map();
   for (const u of unclaimed) byFile.set(u.file, [...(byFile.get(u.file) ?? []), u]);
@@ -66,7 +66,7 @@ export function todoDoc({ unclaimed, total }) {
     "Every function that carries out the game should say which rule it implements, with a `@rule <number>` JSDoc tag",
     "(`docs/rule-claims.md`). `src/engine/` and the rule modules already do, and fail the check if they stop. The rest of",
     "`src/` is only reported for now: these functions have no claim yet. Site plumbing such as sign-in and email goes",
-    "under rule 302 or 102; a follow-up change claims them and moves `src/` into the strict set.",
+    "under rule 101 or 102; a follow-up change claims them and moves `src/` into the strict set.",
     "",
     `${unclaimed.length} of ${total} functions outside \`src/engine/\` are unclaimed.`,
     "",

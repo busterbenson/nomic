@@ -15,7 +15,9 @@
 //   * the modules load and assemble (exactly one spawn rule), and RULES.md, settings.json and the modules agree
 //     (the same check as the game's own rulebook test)
 //   * the game's own tests (node --test rules/*.test.ts) pass against THIS engine
-// Game code is only ever run in child processes with a scrubbed environment (no deploy token in reach).
+// Game code is only ever run in child processes with a scrubbed environment (no deploy token in reach), under Node's
+// permission model (read its own folder and the engine source; no writes, no processes, no workers).
+// A game's top level may hold only the files in TOP_LEVEL (above all no node_modules and no symlinks).
 // Any failure stops the build, so a bad game never ships and the previous deploy keeps running.
 //
 // Environment (all optional):
@@ -25,17 +27,18 @@
 //   BUNDLE_OUT=dir        where to write (default src/generated)
 //   BUNDLE_SKIP_TESTS=1   skip running the tests (the wrangler dev of the test suite; the tests run them once, directly)
 import { execFileSync, spawnSync } from "node:child_process";
-import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, realpathSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { ENGINE_VERSION } from "../src/engine/api.js";
-import { checkFileClaims, claimMap, knownNumbers, worksWith } from "../src/engine/claims.js";
+import { checkFileClaims, claimMap, hookClaimProblems, knownNumbers, worksWith } from "../src/engine/claims.js";
 import { lintModule } from "../src/engine/lint.js";
 import { checkRulebook } from "../src/engine/rulesmd.js";
 import { validateSettings } from "../src/lib/settings.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const TOP_LEVEL = new Set(["RULES.md", "game.json", "settings.json", "package.json", "package-lock.json", "README.md", "LICENSE", "LICENSE.md", ".gitignore", "rules", "rulings", "docs", ".github"]);
 const MAX_RULES_BYTES = 200_000;
 const SLUG = /^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/;
 const REPO = /^[A-Za-z0-9_-][A-Za-z0-9._-]*\/[A-Za-z0-9_-][A-Za-z0-9._-]*$/;
@@ -53,6 +56,31 @@ export function runNode(args, cwd, label, { timeout = 120_000 } = {}) {
     const r = spawnSync(process.execPath, [...stripFlags(), ...args], { cwd, env: scrubbedEnv(home), encoding: "utf8", timeout, maxBuffer: 20 * 1024 * 1024 });
     return { ok: r.status === 0, out: (r.stdout ?? "") + (r.stderr ?? ""), stdout: r.stdout ?? "", label };
   } finally { rmSync(home, { recursive: true, force: true }); }
+}
+
+// Game code (its modules' top-level code, its tests) runs under Node's permission model on top of the scrubbed
+// environment: it can read the game's own folder and the engine's source, and nothing else. It cannot write a file,
+// start a process or open a worker, and it cannot read /proc/<pid>/environ or the platform's other files. (Node's
+// permission model does not cover the network; with nothing secret reachable there is nothing to send.)
+// `node --permission` needs Node 22.13 or newer (22.6+ has --experimental-permission).
+export function runSandboxed(scriptArgs, dir, label, { timeout = 120_000 } = {}) {
+  const flags = process.allowedNodeEnvironmentFlags;
+  const perm = flags.has("--permission") ? "--permission" : flags.has("--experimental-permission") ? "--experimental-permission" : null;
+  if (!perm) fail("this Node has no permission model (--permission); the build needs Node 22.13 or newer to run game code safely");
+  const reads = [realpathSync(dir), realpathSync(join(ROOT, "src")), realpathSync(join(ROOT, "scripts")), realpathSync(join(ROOT, "package.json"))];
+  return runNode([perm, ...reads.map((p) => `--allow-fs-read=${p}`), ...scriptArgs], dir, label, { timeout });
+}
+
+// Runs each test file as its own script (node:test files run standalone), sandboxed. {ok, passed, out}.
+export function runTestFiles(files, dir, label) {
+  let passed = 0, out = "";
+  for (const f of files) {
+    const r = runSandboxed([f], dir, label);
+    out += `\n== ${f}\n${r.out}`;
+    passed += Number((/# pass (\d+)/.exec(r.out) ?? [])[1] ?? 0);
+    if (!r.ok) return { ok: false, passed, out };
+  }
+  return { ok: true, passed, out };
 }
 
 // ---- fetching ---------------------------------------------------------------------------------
@@ -96,8 +124,14 @@ export function assertNoLinks(dir, label) {
 // ---- checking one game tree ---------------------------------------------------------------------
 const readJson = (p, what) => { try { return JSON.parse(readFileSync(p, "utf8")); } catch (e) { fail(`${what} is missing or is not valid JSON (${e.message})`); } };
 
-export function checkTree(dir, label, { starter = false, skipTests = false } = {}) {
+export function checkTree(dirIn, label, { starter = false, skipTests = false } = {}) {
+  const dir = realpathSync(dirIn); // the permission model compares real paths (macOS /var is /private/var)
   assertNoLinks(dir, label);
+  if (!starter) {
+    // Only these may sit at the top of a game. Above all no node_modules: the build links its own engine there.
+    const top = readdirSync(dir).filter((n) => !TOP_LEVEL.has(n));
+    if (top.length) fail(`${label}: the game's top level may hold only ${[...TOP_LEVEL].join(", ")}; not ${top.join(", ")}`);
+  }
   const rulesPath = join(dir, "RULES.md");
   if (!existsSync(rulesPath)) fail(`${label}: RULES.md is missing`);
   if (statSync(rulesPath).size > MAX_RULES_BYTES) fail(`${label}: RULES.md is too large`);
@@ -136,18 +170,21 @@ export function checkTree(dir, label, { starter = false, skipTests = false } = {
     mkdirSync(nm, { recursive: true });
     if (!existsSync(join(nm, "promptocracy"))) symlinkSync(ROOT, join(nm, "promptocracy"), "dir");
   }
-  const chk = runNode([join(ROOT, "scripts", "check-game.mjs"), dir], dir, "check");
+  const chk = runSandboxed([join(ROOT, "scripts", "check-game.mjs"), dir], dir, "check");
   let verdict;
   try { verdict = JSON.parse(chk.stdout.trim().split("\n").pop()); } catch { fail(`${label}: the module check did not run:\n${chk.out.slice(-1500)}`); }
   if (verdict.problems.length) fail(`${label}: ${verdict.problems.join("\n  ")}`);
+  // The hooks the LOADED modules have must each be a tagged function the checker can see (closes any shape the line scan misses).
+  const hookProblems = files.flatMap((f) => hookClaimProblems(`rules/${f}`, sources[`rules/${f}`], verdict.hooks?.[parseInt(f)] ?? []));
+  if (hookProblems.length) fail(`${label}: rule claims failed:\n  ${hookProblems.join("\n  ")}`);
 
   let testSummary = "skipped";
   if (!skipTests) {
     const tf = tests.map((f) => `rules/${f}`);
     if (!tf.length) fail(`${label}: no tests (rules/*.test.ts). A game's rules need tests.`);
-    const t = runNode(["--test", ...tf], dir, "tests");
+    const t = runTestFiles(tf, dir, "tests");
     if (!t.ok) fail(`${label}: the game's tests fail against this engine:\n${t.out.slice(-4000)}`);
-    testSummary = `${(/# pass (\d+)/.exec(t.out) ?? [])[1] ?? "?"} passed`;
+    testSummary = `${t.passed} passed`;
   }
   return { rulesMd, settings, files, tests: testSummary, claims, worksWith: worksWith(verdict.hooks ?? {}) };
 }
@@ -191,9 +228,9 @@ export function bundleGames(env = process.env) {
     const startDir = join(ROOT, "templates");
     const sp = checkTree(startDir, "starter pack", { starter: true, skipTests: true });
     if (!skipTests) {
-      const t = runNode(["--test", ...readdirSync(join(startDir, "rules")).filter((f) => /\.test\.ts$/.test(f)).map((f) => `templates/rules/${f}`)], ROOT, "starter tests");
+      const t = runTestFiles(readdirSync(join(startDir, "rules")).filter((f) => /\.test\.ts$/.test(f)).sort().map((f) => `rules/${f}`), startDir, "starter tests");
       if (!t.ok) fail(`the starter pack's tests fail:\n${t.out.slice(-4000)}`);
-      sp.tests = `${(/# pass (\d+)/.exec(t.out) ?? [])[1] ?? "?"} passed`;
+      sp.tests = `${t.passed} passed`;
     }
     log(`starter pack: rules ${sp.files.join(" ")} (${sp.tests})`);
 

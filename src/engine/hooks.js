@@ -42,7 +42,7 @@ export const MAX_CHART_TILES = 500;
 
 // A module that threw. The routes answer 500 and log which rule and hook it was.
 export class RuleError extends Error {
-  /** @rule 302 */
+  /** @rule 101 */
   constructor(rule, hook, cause) {
     super(`rule ${rule} (${hook}) failed: ${cause?.message ?? cause}`);
     this.name = "RuleError";
@@ -53,7 +53,7 @@ export class RuleError extends Error {
 }
 // A rule set that cannot be assembled (a bad module, or an "exactly one" hook with zero or two implementations).
 export class RuleSetError extends Error {
-  /** @rule 302 */
+  /** @rule 101 */
   constructor(problems) {
     super(problems.join("; "));
     this.name = "RuleSetError";
@@ -62,7 +62,7 @@ export class RuleSetError extends Error {
 }
 
 // ---- small helpers modules and the engine share ----------------------------------
-/** @rule 302 */
+/** @rule 101 */
 export function deepFreeze(v) {
   if (v && typeof v === "object" && !Object.isFrozen(v)) {
     Object.freeze(v);
@@ -79,8 +79,11 @@ export function makeTiles(rows) {
   const map = new Map();
   for (const t of rows) map.set(tileKey(t.x, t.y, t.z ?? 0), Object.freeze({ x: t.x, y: t.y, z: t.z ?? 0 }));
   return Object.freeze({
+    /** @rule 501 */
     has: (x, y, z = 0) => map.has(tileKey(x, y, z)),
+    /** @rule 501 */
     get: (x, y, z = 0) => map.get(tileKey(x, y, z)),
+    /** @rule 501 */
     list: () => [...map.values()],
     size: map.size,
   });
@@ -88,7 +91,7 @@ export function makeTiles(rows) {
 
 // A small seeded generator (mulberry32 over an xmur3 hash of the seed text): the same seed gives the same
 // numbers. rng() is a float in [0, 1). The host chooses the seed; a join uses cryptoRng, not a seed.
-/** @rule 302 */
+/** @rule 101 */
 export function seededRng(seed) {
   let h = 1779033703 ^ String(seed).length;
   for (const c of String(seed)) { h = Math.imul(h ^ c.charCodeAt(0), 3432918353); h = (h << 13) | (h >>> 19); }
@@ -100,7 +103,7 @@ export function seededRng(seed) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-/** @rule 302 */
+/** @rule 101 */
 export function cryptoRng() {
   const buf = new Uint32Array(1);
   return () => (crypto.getRandomValues(buf)[0]) / 4294967296;
@@ -116,7 +119,7 @@ export function cryptoRng() {
 //   rng        () => float in [0,1)
 //   turn       { round, turn, moved }  the turn model of the games that still run on turns; goes when days arrive
 //   judge      optional, for rules that need a ruling (none yet)
-/** @rule 302 */
+/** @rule 101 */
 export function makeContext(o) {
   const ctx = {
     day: o.day ?? null,
@@ -139,14 +142,14 @@ export function makeContext(o) {
 //   points {type:"points", player, delta, reason}      (applied once points arrive)
 //   log    {type:"log", template, args}                (applied once the day log arrives)
 //   win    {type:"win", player, reason}                (applied once winning arrives)
-/** @rule 302 */
+/** @rule 101 */
 const isInt = (n) => Number.isSafeInteger(n);
-/** @rule 302 */
+/** @rule 101 */
 const isStr = (s, max = 400) => typeof s === "string" && s.length > 0 && s.length <= max;
 export const EFFECT_TYPES = Object.freeze(["chart", "points", "log", "win"]);
 export const APPLIED_EFFECTS = Object.freeze(["chart"]);
 
-/** @rule 302 */
+/** @rule 101 */
 export function validateEffect(e) {
   if (!e || typeof e !== "object" || Array.isArray(e)) return "an effect must be an object";
   switch (e.type) {
@@ -164,7 +167,7 @@ export function validateEffect(e) {
       return `unknown effect type ${JSON.stringify(e.type)}`;
   }
 }
-/** @rule 302 */
+/** @rule 101 */
 export function validateEffects(list) {
   if (!Array.isArray(list)) return "a hook that returns effects must return a list";
   for (const e of list) { const p = validateEffect(e); if (p) return p; }
@@ -172,23 +175,27 @@ export function validateEffects(list) {
 }
 // The effect constructors modules use (re-exported by api.js).
 export const effects = Object.freeze({
+  /** @rule 504.2 */
   chart: (tiles) => ({ type: "chart", tiles: tiles.map((t) => ({ x: t.x, y: t.y, z: t.z ?? 0 })) }),
+  /** @rule 401 */
   points: (player, delta, reason) => ({ type: "points", player, delta, reason }),
+  /** @rule 101 */
   log: (template, args = {}) => ({ type: "log", template, args }),
+  /** @rule 402 */
   win: (player, reason) => ({ type: "win", player, reason }),
 });
-/** @rule 302 */
+/** @rule 101 */
 export const refuse = (error, status = 400) => ({ error, status });
 
 // ---- modules -------------------------------------------------------------------
-/** @rule 302 */
+/** @rule 101 */
 export function defineRule(mod) {
   const problems = moduleProblems(mod);
   if (problems.length) throw new RuleSetError(problems);
   return Object.freeze(mod);
 }
 
-/** @rule 302 */
+/** @rule 101 */
 function moduleProblems(mod) {
   if (!mod || typeof mod !== "object" || Array.isArray(mod)) return ["a rule module must export an object"];
   const out = [];
@@ -204,7 +211,7 @@ function moduleProblems(mod) {
 
 // Assembles the hooks of a game's modules. Throws RuleSetError for a bad module, a rule number used twice, or a
 // wired "exactly one" hook with zero or two implementations. Returns the callable engine for the game.
-/** @rule 302 */
+/** @rule 101 */
 export function assembleRules(modules, { label = "rules" } = {}) {
   const problems = [];
   const list = Array.isArray(modules) ? modules : [];
@@ -212,7 +219,7 @@ export function assembleRules(modules, { label = "rules" } = {}) {
   const nums = list.filter((m) => m && Number.isInteger(m.rule)).map((m) => m.rule);
   for (const n of new Set(nums.filter((n, i) => nums.indexOf(n) !== i))) problems.push(`rule ${n} has two modules`);
   const sorted = [...list].filter((m) => m && Number.isInteger(m.rule)).sort((a, b) => a.rule - b.rule);
-  /** @rule 302 */
+  /** @rule 101 */
   const implementers = (hook) => sorted.filter((m) => typeof m[hook] === "function");
   for (const [hook, spec] of Object.entries(HOOKS)) {
     if (spec.mode === "decide" && spec.wired) {
@@ -222,15 +229,16 @@ export function assembleRules(modules, { label = "rules" } = {}) {
   }
   if (problems.length) throw new RuleSetError(problems.map((p) => `${label}: ${p}`));
 
-  /** @rule 302 */
+  /** @rule 101 */
   const call = (m, hook, args) => {
     try { return m[hook](...args); } catch (e) { throw new RuleError(m.rule, hook, e); }
   };
   return Object.freeze({
     modules: Object.freeze(sorted.map((m) => m.rule)),
+    /** @rule 101 */
     implementers: (hook) => implementers(hook).map((m) => m.rule),
     // null, or {error, status}: the first refusal in rule order.
-    /** @rule 202, 504 */
+    /** @rule 202.2, 504.3 */
     actionAllowed(ctx, actor, action) {
       for (const m of implementers("actionAllowed")) {
         const r = call(m, "actionAllowed", [ctx, actor, action]);

@@ -17,13 +17,13 @@ type Refusal = { error: string; status: number; rule?: number };
 const assembled = new WeakMap<Bundle, ReturnType<typeof assembleRules>>();
 
 // The bundle a game runs on, and whether it is the game's own (bundled) or the starter pack.
-/** @rule 302 */
+/** @rule 101 */
 export function bundleFor(game: { slug: string }): { bundle: Bundle; bundled: boolean } {
   const own = Object.hasOwn(GAMES, game.slug) ? (GAMES as Record<string, Bundle>)[game.slug] : null;
   return { bundle: own ?? (STARTER as Bundle), bundled: !!own };
 }
 
-/** @rule 302 */
+/** @rule 101 */
 export function rulesFor(game: { slug: string }) {
   const { bundle } = bundleFor(game);
   let r = assembled.get(bundle);
@@ -38,11 +38,11 @@ export function rulesFor(game: { slug: string }) {
 type PlayerRow = { id: string; color: string; score: number; x: number; y: number; z: number };
 /** @rule 102 */
 const playersOf = (rows: PlayerRow[]) => rows.map((p) => ({ ref: p.id, color: p.color, score: p.score, x: p.x, y: p.y, z: p.z }));
-/** @rule 103 */
+/** @rule 202.2 */
 const turnOf = (game: any) => ({ round: game.round, turn: game.turn, moved: game.last_move === `${game.round}:${game.turn}` });
 
 // A context with no board in it: enough for the questions the turn guard asks (may this player move at all?).
-/** @rule 103 */
+/** @rule 202.2 */
 export function lightContext(game: any) {
   return makeContext({ now: nowIso(), settings: getSettings(game.settings), turn: turnOf(game) });
 }
@@ -62,7 +62,7 @@ export async function boardContext(env: Env, game: any) {
 
 // Runs the game's actionAllowed hooks (a veto hook: any rule may refuse, the first in rule order wins). null, or the
 // refusal the route sends. A rule that throws is answered as a 500 refusal, so every caller handles it the same way.
-/** @rule 202, 504 */
+/** @rule 202.2, 504.3 */
 export function checkAction(game: any, ctx: any, actor: { ref: string }, action: any): Refusal | null {
   try {
     const r = rulesFor(game).actionAllowed(ctx, actor, action);

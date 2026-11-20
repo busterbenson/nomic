@@ -3,7 +3,7 @@
 // pack's own tests, and scripts/bundle-games.mjs (fixtures, a local git remote with day-N tags, failure cases,
 // and that game code runs with a scrubbed environment).
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as pjoin } from "node:path";
 import { ROOT } from "./lib.mjs";
@@ -11,9 +11,9 @@ import { ACTION_KINDS, HOOKS, RuleError, RuleSetError, assembleRules, deepFreeze
 import { lintModule } from "../src/engine/lint.js";
 import { checkRulebook, parseRulesMd } from "../src/engine/rulesmd.js";
 import { DEFAULT_SETTINGS, validateSettings } from "../src/lib/settings.js";
-import { BundleError, bundleGames, latestDayTag, runNode } from "../scripts/bundle-games.mjs";
+import { BundleError, bundleGames, latestDayTag, runNode, runSandboxed } from "../scripts/bundle-games.mjs";
 import * as api from "../src/engine/api.js";
-import { checkFileClaims, claimMap, findFunctions, knownNumbers, overClaimed, worksWith } from "../src/engine/claims.js";
+import { checkFileClaims, claimMap, findFunctions, hookClaimProblems, knownNumbers, overClaimed, worksWith } from "../src/engine/claims.js";
 import { runClaimsCheck, todoDoc } from "../scripts/check-rule-claims.mjs";
 
 let pass = 0, fail = 0;
@@ -213,6 +213,18 @@ check("a function with no @rule tag fails, naming file, line and function", chec
 check("a tag that names a rule or clause the RULES.md does not have fails (202 is not in this text), a clause that is there passes", checkFileClaims("f.ts", SRC, KNOWN).some((p) => /hook: @rule 202 is not in RULES\.md/.test(p)) && !checkFileClaims("f.ts", SRC, KNOWN).some((p) => /@rule 504\.2 is not/.test(p)));
 check("a claimed file passes, and the claim map lists rule -> file#function, sorted by number", checkFileClaims("f.ts", "/** @rule 504 */\nfunction x() {}\n/** @rule 505, 504 */\nfunction y() {}\n", KNOWN).length === 0 && J(claimMap({ "f.ts": "/** @rule 505, 504 */\nfunction y() {}\n/** @rule 504 */\nfunction x() {}\n" })) === '{"504":["f.ts#x","f.ts#y"],"505":["f.ts#y"]}');
 check("a malformed tag (@rule 5, @rule 12345) is refused", checkFileClaims("f.ts", "/** @rule 5 */\nfunction x() {}\n", KNOWN).some((p) => /not a rule number/.test(p)) && checkFileClaims("f.ts", "/** @rule 12345 */\nfunction x() {}\n", KNOWN).some((p) => /not a rule number/.test(p)));
+
+check("a // @rule line comment is not a claim (only a /** */ block is), and a regex literal holding a backtick does not hide the functions after it", (() => {
+  const f = findFunctions("// @rule 504\nfunction a() {}\nconst r = /`/;\n/** @rule 504 */\nfunction b() {}\nconst t = `x ${1}`;\nfunction c() {}\n");
+  return J(f.map((x) => [x.name, x.tags])) === J([["a", []], ["b", ["504"]], ["c", []]]);
+})());
+check("property hooks are found: name: (a) => ..., name: async function (...), name: x => ...", J(findFunctions("export default defineRule({\n  /** @rule 504 */\n  actionAllowed: (c, a) => null,\n  afterAction: async function (c) { return []; },\n  spawnTile: c => null,\n});\n").map((f) => [f.name, f.tags.length])) === '[["actionAllowed",1],["afterAction",0],["spawnTile",0]]');
+check("hookClaimProblems: every hook the LOADED module has must be a tagged function the scan can see (a multi-line signature fails closed)", (() => {
+  const ok = hookClaimProblems("rules/504.ts", "export default defineRule({\n  /** @rule 504 */\n  actionAllowed(a) {\n  },\n});\n", ["actionAllowed"]);
+  const miss = hookClaimProblems("rules/504.ts", "export default defineRule({\n  /** @rule 504 */\n  actionAllowed(\n    a,\n  ) {\n  },\n});\n", ["actionAllowed"]);
+  const untagged = hookClaimProblems("rules/504.ts", "export default defineRule({\n  actionAllowed(a) {\n  },\n});\n", ["actionAllowed"]);
+  return ok.length === 0 && miss.length === 1 && /hook actionAllowed has no function with a @rule tag/.test(miss[0]) && untagged.length === 1;
+})());
 {
   const r = runClaimsCheck();
   check("src/engine/ and the starter modules: every function claims a rule that templates/RULES.md has (the strict set)", r.problems.length === 0 && r.strictCount > 40, J(r.problems.slice(0, 5)));
@@ -251,7 +263,7 @@ const put = (dir, rel, text) => { mkdirSync(pjoin(dir, rel, ".."), { recursive: 
   const e = quiet(() => bundle({ BUNDLE_OUT: out, GAMES_SOURCE: "tests/fixtures/games" }));
   const gen = existsSync(pjoin(out, "games.ts")) ? readFileSync(pjoin(out, "games.ts"), "utf8") : "";
   check("the fixture game bundles: its tests run and pass, and games.ts holds its text, settings and modules plus the starter pack", e === null && /"bundled": \{ slug: "bundled"/.test(gen) && /export const STARTER/.test(gen) && /modules: \[m0, m1, m2\]/.test(gen) && /fixture game/.test(gen), String(e));
-  check("games.ts carries the claim map of the game (rule -> file#function) and of the engine, for rule cards", /claims: \{"202":\["rules\/202\.ts#actionAllowed","rules\/504\.ts#actionAllowed"\],"504":\["rules\/504\.ts#actionAllowed","rules\/504\.ts#afterAction"\],"505":\["rules\/505\.ts#spawnTile"\]\}/.test(gen) && /ENGINE_CLAIMS: Record<string, string\[\]> = \{.*"505":\["src\/engine\/hooks\.js#spawnTile","src\/engine\/host\.ts#chooseSpawn"\]/.test(gen), gen.slice(gen.indexOf("ENGINE_CLAIMS"), gen.indexOf("ENGINE_CLAIMS") + 300));
+  check("games.ts carries the claim map of the game (rule -> file#function) and of the engine, for rule cards", [/"202\.2":\["rules\/202\.ts#actionAllowed","rules\/504\.ts#actionAllowed"\]/, /"504\.2":\["rules\/504\.ts#afterAction"\]/, /"504\.3":\["rules\/504\.ts#actionAllowed"\]/, /claims: \{[^}]*"505":\["rules\/505\.ts#spawnTile"\]/].every((re) => re.test(gen)) && /ENGINE_CLAIMS: Record<string, string\[\]> = \{.*"505":\["src\/engine\/hooks\.js#spawnTile","src\/engine\/host\.ts#chooseSpawn"\]/.test(gen), gen.slice(gen.indexOf("ENGINE_CLAIMS"), gen.indexOf("ENGINE_CLAIMS") + 300));
   check("the game's modules are copied next to games.ts, where the Worker bundler follows the imports", ["games/bundled/rules/202.ts", "games/bundled/rules/504.ts", "starter/rules/505.ts"].every((f) => existsSync(pjoin(out, f))));
 }
 const must = (name, env, re) => { const e = quiet(() => bundle(env)); check(name, e instanceof BundleError && re.test(e.message), String(e?.message ?? "no error").slice(0, 300)); };
@@ -260,7 +272,7 @@ must("a module that imports a foreign package fails the build", { GAMES_SOURCE: 
 must("game.json that lists a module rules/ does not hold (or holds one it does not list) fails the build", { GAMES_SOURCE: tree("bad", (d) => put(d, "game.json", `{ "engine": 1, "modules": [202, 504] }`)) }, /lists modules \[202,504\] but rules\/ holds \[202,504,505\]/);
 must("a game that needs another engine version fails the build", { GAMES_SOURCE: tree("bad", (d) => put(d, "game.json", `{ "engine": 2, "modules": [202, 504, 505] }`)) }, /engine 2, this platform runs engine 1/);
 must("a game with no game.json fails the build", { GAMES_SOURCE: tree("bad", (d) => execFileSync("mv", [pjoin(d, "game.json"), pjoin(work, "moved-" + seq++)])) }, /game\.json is missing/);
-must("two spawn rules (or none) fail the build", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/504.ts", readFileSync(pjoin(FIX, "rules/504.ts"), "utf8").replace("/** @rule 504 */\n  afterAction(", "/** @rule 504 */\n  spawnTile() { return null; },\n  /** @rule 504 */\n  afterAction("))) }, /spawnTile needs exactly one rule to implement it, found 2/);
+must("two spawn rules (or none) fail the build", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/504.ts", readFileSync(pjoin(FIX, "rules/504.ts"), "utf8").replace("/** @rule 504.2 */\n  afterAction(", "/** @rule 504.2 */\n  spawnTile() { return null; },\n  /** @rule 504.2 */\n  afterAction("))) }, /spawnTile needs exactly one rule to implement it, found 2/);
 must("text, settings and modules out of step fail the build (a [setting] the file lacks)", { GAMES_SOURCE: tree("bad", (d) => put(d, "RULES.md", readFileSync(pjoin(FIX, "RULES.md"), "utf8").replace("[setting: max_players]", "[setting: max_players] [setting: board.nope]"))) }, /names \[setting: board\.nope\]/);
 must("a module file named for another rule than it implements fails the build", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/202.ts", readFileSync(pjoin(FIX, "rules/202.ts"), "utf8").replace("rule: 202", "rule: 203"))) }, /rules\/202\.ts must default-export defineRule\(\{ rule: 202/);
 must("a game whose own tests fail does not bundle, and the failing output is in the message", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/202.test.ts", `import { test } from "node:test";\nimport assert from "node:assert/strict";\ntest("fails on purpose", () => assert.equal(1, 2));\n`)) }, /tests fail against this engine[\s\S]*fails on purpose/);
@@ -277,6 +289,16 @@ check("the game's claims also say what each rule works with: 202 shares actionAl
   quiet(() => bundle({ BUNDLE_OUT: out, GAMES_SOURCE: "tests/fixtures/games" }));
   return /worksWith: \{"202":\{"actionAllowed":\[504\]\},"504":\{"actionAllowed":\[202\]\}\}/.test(readFileSync(pjoin(out, "games.ts"), "utf8"));
 })());
+must("a node_modules folder in a game fails the build (the build links its own engine; a game must not supply one)", { GAMES_SOURCE: tree("bad", (d) => put(d, "node_modules/promptocracy/package.json", `{"name":"promptocracy","exports":{"./engine":"./e.js","./engine/testing":"./e.js"}}`)) }, /top level may hold only[\s\S]*not node_modules/);
+must("any other unknown top-level file fails the build too", { GAMES_SOURCE: tree("bad", (d) => put(d, "build.mjs", "export const x = 1;\n")) }, /not build\.mjs/);
+must("a hook written in a shape the claim scan cannot see fails the build, naming the hook", { GAMES_SOURCE: tree("bad", (d) => put(d, "rules/505.ts", readFileSync(pjoin(FIX, "rules/505.ts"), "utf8").replace("spawnTile(ctx, candidates) {", "spawnTile(\n    ctx,\n    candidates,\n  ) {"))) }, /hook spawnTile has no function with a @rule tag/);
+{
+  mkdirSync(pjoin(work, "sandbox"), { recursive: true }); const probe = realpathSync(pjoin(work, "sandbox"));
+  writeFileSync(pjoin(probe, "p.mjs"), `const out = {};\nconst t = (k, f) => { try { f(); out[k] = "ALLOWED"; } catch (e) { out[k] = e.code ?? "other"; } };\nconst fs = process.getBuiltinModule("fs");\nt("read-etc", () => fs.readFileSync("/etc/hosts"));\nt("read-proc", () => fs.readFileSync("/proc/self/environ"));\nt("write", () => fs.writeFileSync(${J(pjoin(work, "sandbox-wrote.txt"))}, "x"));\nt("child", () => process.getBuiltinModule("child_process").execSync("echo hi"));\nt("worker", () => new (process.getBuiltinModule("worker_threads").Worker)("1", { eval: true }));\nt("read-own", () => fs.readFileSync("p.mjs"));\nconsole.log(JSON.stringify(out));\n`);
+  const r = runSandboxed([pjoin(probe, "p.mjs")], probe, "probe");
+  const o = r.ok ? JSON.parse(r.stdout) : {};
+  check("game code runs sandboxed: it can read its own folder, and cannot read other files (/etc, /proc), write a file, start a process or a worker", o["read-own"] === "ALLOWED" && ["read-etc", "read-proc", "write", "child", "worker"].every((k) => o[k] === "ERR_ACCESS_DENIED") && !existsSync(pjoin(work, "sandbox-wrote.txt")), r.out.slice(0, 400));
+}
 check("BUNDLE_SKIP_TESTS=1 skips the game's tests (and only the tests: the lint and the checks still run)", quiet(() => bundle({ BUNDLE_SKIP_TESTS: "1", GAMES_SOURCE: tree("bad", (d) => put(d, "rules/202.test.ts", `import { test } from "node:test";\ntest("x", () => { throw new Error("no"); });\n`)) })) === null);
 {
   process.env.PROMPTOCRACY_TEST_SECRET = "hunter2";

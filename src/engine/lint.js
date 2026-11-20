@@ -31,19 +31,19 @@ export const ALLOWED_IMPORT = "promptocracy/engine";
 export const TEST_IMPORTS = Object.freeze(["node:test", "node:assert", "node:assert/strict", "promptocracy/engine", "promptocracy/engine/testing"]);
 const OWN_FILE = /^\.\/[A-Za-z0-9_-]+(?:\.test)?\.ts$/;
 
-/** The code as the engine reads it: types stripped, comments gone, imports kept as written. @rule 302 */
+/** The code as the engine reads it: types stripped, comments gone, imports kept as written. @rule 101 */
 export function canonical(src) {
   return transformSync(String(src), { loader: "ts", format: "esm", target: "esnext", tsconfigRaw: { compilerOptions: { verbatimModuleSyntax: true } } }).code;
 }
 
-/** Problems (an empty list = the file passes). `name` only labels them; `kind` is "module" or "test". @rule 302 */
+/** Problems (an empty list = the file passes). `name` only labels them; `kind` is "module" or "test". @rule 101 */
 export function lintModule(src, name = "module", kind = "module") {
   const problems = [];
   let code;
   try { code = canonical(src); } catch (e) { return [`${name}: does not parse (${String(e.errors?.[0]?.text ?? e.message).slice(0, 120)})`]; }
-  /** The 1-based line of a position in the printed code. @rule 302 */
+  /** The 1-based line of a position in the printed code. @rule 101 */
   const lineOf = (i) => code.slice(0, i).split("\n").length;
-  /** Whether an import specifier is allowed for this kind of file. @rule 302 */
+  /** Whether an import specifier is allowed for this kind of file. @rule 101 */
   const allowed = (spec) => (kind === "test" ? TEST_IMPORTS.includes(spec) || OWN_FILE.test(spec) : spec === ALLOWED_IMPORT);
   const specs = [
     ...code.matchAll(/\b(?:import|export)\b[^;"]*?\bfrom\s*"([^"]*)"/g),

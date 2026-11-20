@@ -16,7 +16,7 @@ export { DEFAULT_SETTINGS };
 export const island = (width = 8, height = width) => islandCoords(width, height).map(([x, y]) => ({ x, y, z: 0 }));
 
 // A frozen ctx. `players` are {ref, x, y, z?}; `tiles` default to the 8x8 island; `settings` are overrides on the defaults.
-/** @rule 302 */
+/** @rule 101 */
 export function makeCtx(o = {}) {
   return makeContext({
     day: o.day ?? null,
@@ -34,7 +34,7 @@ export function makeCtx(o = {}) {
 /**
  * A game's files for its rulebook test: loadGame(import.meta.url) from rules/rulebook.test.ts reads RULES.md and
  * settings.json one folder up and loads every rules/<n>.ts. Game tests may not import node:fs, so this is how they
- * read their own game. Returns {rulesMd, settings, files, modules}. @rule 302
+ * read their own game. Returns {rulesMd, settings, files, modules}. @rule 101
  */
 export async function loadGame(testUrl) {
   const rulesDir = dirname(fileURLToPath(testUrl));

@@ -3,7 +3,7 @@
 // Format: "## 100. Title [unanimous]" is a block, "### 101 Title" a rule, "[setting: board.island]" names a setting.
 import { validateSettings } from "../lib/settings.js";
 
-/** @rule 302 */
+/** @rule 101 */
 const stripComments = (s) => s.replace(/<!--[\s\S]*?-->/g, "");
 
 /** @rule 101 */
