@@ -147,9 +147,10 @@ export const COMMISSION_DRAFT_SQL = `INSERT INTO proposals (id, game_id, player_
   SELECT ?, g.id, ?, g.day, 'commission', 'block', '${WORKSHOP_BLOCK}', ?, ?, ?, 'code', ?, 'draft', ? FROM games g WHERE g.id = ? AND ${dayOpenSql}`;
 
 // Whether a ticket's requester can pay its whole price now (rule 801.4): a price of 0 always can, otherwise their points must
-// cover all of it. Nothing is ever part-paid. In SQL, on the unaliased tickets table.
+// cover all of it. Nothing is ever part-paid. A ticket that was already paid (one reopened after it failed, rule 801.5) is paid:
+// it is never charged again. In SQL, on the unaliased tickets table.
 /** @rule 801.4 */
-const CAN_PAY = `tickets.price <= MAX(0, COALESCE((SELECT score FROM players WHERE game_id = tickets.game_id AND id = tickets.player_id), 0))`;
+const CAN_PAY = `(tickets.paid_at IS NOT NULL OR tickets.price <= MAX(0, COALESCE((SELECT score FROM players WHERE game_id = tickets.game_id AND id = tickets.player_id), 0)))`;
 // The next place in the queue (rule 803.1), taken in the statement that approves.
 const NEXT_PLACE = `(SELECT COALESCE(MAX(x.queue_pos), 0) + 1 FROM tickets x WHERE x.game_id = tickets.game_id)`;
 const pts = (col) => `${col} || CASE WHEN ${col} = 1 THEN ' point' ELSE ' points' END`;
@@ -168,15 +169,15 @@ function payStatements(db, where, binds, game, text, day, now) {
     db.prepare(`UPDATE tickets SET paid_at = ? WHERE ${where} AND state = 'Approved' AND paid_at IS NULL`).bind(now, ...binds),
     db.prepare(
       `INSERT OR IGNORE INTO ticket_log (ticket_id, day, kind, text, at)
-       SELECT t.id, ?, 'approved', ${text}, ? FROM tickets t WHERE ${mine} AND t.state = 'Approved' AND t.paid_at = ?`,
+       SELECT t.id, ?, 'approved', ${text}, ? FROM tickets t WHERE ${mine} AND t.state = 'Approved' AND t.approved_at = ?`,
     ).bind(day, now, ...binds, now),
     db.prepare(
       `INSERT INTO events (game_id, kind, text, created_at, day, phase, player_id)
-       SELECT t.game_id, 'commission_approved', 'W' || t.number || ' was approved.' || CASE WHEN t.paid > 0 THEN ' ' || p.display_name || ' paid ' || ${pts("t.paid")} || '.' ELSE '' END, ?, ?, 'night', t.player_id
+       SELECT t.game_id, 'commission_approved', 'W' || t.number || ' was approved.' || CASE WHEN t.paid > 0 AND t.paid_at = '${now}' THEN ' ' || p.display_name || ' paid ' || ${pts("t.paid")} || '.' ELSE '' END, ?, ?, 'night', t.player_id
        FROM tickets t JOIN players p ON p.game_id = t.game_id AND p.id = t.player_id
-       WHERE ${mine} AND t.state = 'Approved' AND t.paid_at = ? AND EXISTS (SELECT 1 FROM ticket_log l WHERE l.ticket_id = t.id AND l.kind = 'approved' AND l.at = ?)
-         AND NOT EXISTS (SELECT 1 FROM events e WHERE e.game_id = t.game_id AND e.kind = 'commission_approved' AND e.text LIKE 'W' || t.number || ' was approved.%')`,
-    ).bind(now, day, ...binds, now, now),
+       WHERE ${mine} AND t.state = 'Approved' AND t.approved_at = ? AND EXISTS (SELECT 1 FROM ticket_log l WHERE l.ticket_id = t.id AND l.kind = 'approved' AND l.at = ?)
+         AND NOT EXISTS (SELECT 1 FROM events e WHERE e.game_id = t.game_id AND e.kind = 'commission_approved' AND e.created_at = ? AND e.text LIKE 'W' || t.number || ' was approved.%')`,
+    ).bind(now, day, ...binds, now, now, now),
   ];
 }
 
@@ -213,19 +214,19 @@ export function countTicketStatements(db, game, q, result, day, now) {
       `INSERT INTO events (game_id, kind, text, created_at, day, phase, player_id)
        SELECT t.game_id, 'commission_ready', 'W' || t.number || ' is ready, not yet paid: ' || p.display_name || ' has ' || ${have} || ' of the ' || ${pts("t.price")} || ' it costs.', ?, ?, 'night', t.player_id
        FROM tickets t JOIN players p ON p.game_id = t.game_id AND p.id = t.player_id
-       WHERE ${mine} AND t.state = 'Ready' AND t.decided_at = ? AND NOT EXISTS (SELECT 1 FROM events e WHERE e.game_id = t.game_id AND e.kind = 'commission_ready' AND e.text LIKE 'W' || t.number || ' is ready%')`,
-    ).bind(now, day, q.id, now),
+       WHERE ${mine} AND t.state = 'Ready' AND t.decided_at = ? AND NOT EXISTS (SELECT 1 FROM events e WHERE e.game_id = t.game_id AND e.kind = 'commission_ready' AND e.created_at = ? AND e.text LIKE 'W' || t.number || ' is ready%')`,
+    ).bind(now, day, q.id, now, now),
     db.prepare(
       `INSERT OR IGNORE INTO notifications (id, game_id, player_id, kind, body, link, created_at)
-       SELECT 'ready-' || t.id, t.game_id, t.player_id, 'commission_ready', 'W' || t.number || ' is ready: P' || CAST(? AS INTEGER) || ' passed, but you have ' || ${have} || ' of the ' || ${pts("t.price")} || ' it costs. It joins the queue when you can pay.', ?, ?
+       SELECT 'ready-' || t.id || '-' || ?, t.game_id, t.player_id, 'commission_ready', 'W' || t.number || ' is ready: P' || CAST(? AS INTEGER) || ' passed, but you have ' || ${have} || ' of the ' || ${pts("t.price")} || ' it costs. It joins the queue when you can pay.', ?, ?
        FROM tickets t WHERE ${mine} AND t.state = 'Ready' AND t.decided_at = ?`,
-    ).bind(q.number, `/${game.slug}/`, now, q.id, now),
+    ).bind(now, q.number, `/${game.slug}/`, now, q.id, now),
     // can pay: Approved, in the order passed, paid once
     db.prepare(
-      `UPDATE tickets SET state = 'Approved', approved_at = ?, decided_at = ?, updated_at = ?, paid = price, queue_pos = ${NEXT_PLACE}
+      `UPDATE tickets SET state = 'Approved', approved_at = ?, decided_at = ?, updated_at = ?, paid = COALESCE(paid, price), queue_pos = ${NEXT_PLACE}
        WHERE ${passedGuard} AND ${CAN_PAY}`,
     ).bind(now, now, now, q.id, q.id),
-    ...payStatements(db, "proposal_id = ?", [q.id], game, `'Approved: P' || CAST(${q.number} AS INTEGER) || ' passed. ' || CASE WHEN t.paid > 0 THEN 'Paid ' || ${pts("t.paid")} || '. ' ELSE '' END || 'Place ' || t.queue_pos || ' in the queue.'`, day, now),
+    ...payStatements(db, "proposal_id = ?", [q.id], game, `'Approved: P' || CAST(${q.number} AS INTEGER) || ' passed. ' || CASE WHEN t.paid > 0 AND t.paid_at = '${now}' THEN 'Paid ' || ${pts("t.paid")} || '. ' ELSE '' END || 'Place ' || t.queue_pos || ' in the queue.'`, day, now),
   ];
 }
 
@@ -244,7 +245,7 @@ export async function readyIds(db, gameId) {
  */
 export function readyStatements(db, game, ids, day, now) {
   return ids.flatMap((id) => [
-    db.prepare(`UPDATE tickets SET state = 'Approved', approved_at = ?, updated_at = ?, paid = price, queue_pos = ${NEXT_PLACE} WHERE id = ? AND state = 'Ready' AND paid_at IS NULL AND ${CAN_PAY}`).bind(now, now, id),
-    ...payStatements(db, "id = ?", [id], game, `'Approved: ' || (SELECT display_name FROM players WHERE game_id = t.game_id AND id = t.player_id) || ' can pay now. Paid ' || ${pts("t.paid")} || '. Place ' || t.queue_pos || ' in the queue.'`, day, now),
+    db.prepare(`UPDATE tickets SET state = 'Approved', approved_at = ?, updated_at = ?, paid = COALESCE(paid, price), queue_pos = ${NEXT_PLACE} WHERE id = ? AND state = 'Ready' AND ${CAN_PAY}`).bind(now, now, id),
+    ...payStatements(db, "id = ?", [id], game, `'Approved: ' || (SELECT display_name FROM players WHERE game_id = t.game_id AND id = t.player_id) || ' can pay now. ' || CASE WHEN t.paid_at = '${now}' THEN 'Paid ' || ${pts("t.paid")} || '. ' ELSE '' END || 'Place ' || t.queue_pos || ' in the queue.'`, day, now),
   ]);
 }

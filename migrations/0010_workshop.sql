@@ -161,7 +161,8 @@ CREATE TABLE ticket_tasks (
 
 -- A ticket's log: dated entries written by the site (and, later, the moderator). kind: proposed, withdrawn, approved,
 -- ready, refused, reopened, note. A ticket is made ready, approved or refused once each time it is counted, however many times the count
--- runs (a reopened ticket can be counted again, rule 801.5); the index is the second line of defence behind the state guards.
+-- runs (a reopened ticket can be counted again, rule 801.5). The state guards are the real once-only protection; the index only stops a
+-- duplicate line in the same instant.
 CREATE TABLE ticket_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   ticket_id TEXT NOT NULL REFERENCES tickets(id),

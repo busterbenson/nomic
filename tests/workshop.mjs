@@ -397,6 +397,16 @@ try {
     const queued = tk(aW).queue_pos, paidBefore = tk(aW).paid, scoreBefore = score("Ana");
     const roF = await Ana.post(`${T}/W${aW}/reopen`, {});
     check("a Failed ticket reopens the next day as a draft; it leaves the queue, and nothing is refunded or charged", roF.status === 200 && tk(aW).state === "Draft" && tk(aW).queue_pos === null && queued !== null && tk(aW).paid === paidBefore && score("Ana") === scoreBefore, roF.text);
+    // the reopened ticket was paid once; passing again puts it back in the queue and never charges it again
+    const reC = await Ana.post(`${T}/W${aW}/confirm`, {});
+    await midnight();
+    for (const c of [Ana, Bo, Cy]) await yes(c, reC.data.ticket.proposal);
+    d1(state, `UPDATE players SET score = 0 WHERE id = '${id.Ana}'`);   // she could not pay the price now: the ticket was paid once already
+    await midnight();
+    const logs = d1(state, `SELECT kind, text FROM ticket_log WHERE ticket_id = '${tk(aW).id}' AND kind = 'approved' ORDER BY id`);
+    check("a reopened ticket that was paid once and passes again is Approved with a new queue place, never charged again (even at 0 points), and the log and the day's log say so without a second payment",
+      tk(aW).state === "Approved" && tk(aW).queue_pos > 0 && tk(aW).paid === paidBefore && score("Ana") === 0 && logs.length === 2 && !/Paid/.test(logs[1].text) && /Place \d+ in the queue\./.test(logs[1].text) &&
+      d1(state, `SELECT COUNT(*) AS n FROM events WHERE kind = 'commission_approved' AND text = 'W${aW} was approved.'`)[0].n === 1, J([tk(aW), logs]));
     const mcpR = await tool(A, "wk", (await connect(A, "wk", Bo, SITE)).access_token, "reopen_ticket", { ticket: "W2" });
     check("over MCP, reopen_ticket is the same route: Bo's Approved W2 is refused", mcpR.isError && /can't be reopened/.test(mcpR.text), mcpR.text);
   }
