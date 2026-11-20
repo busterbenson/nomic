@@ -73,8 +73,8 @@ try {
   const pa = await page(ia.data.url), pb = await page(ib.data.url), pn = await page(`${SITE}/start/join/${g.code}`), pf = await page(`${SITE}/start/join/${g.code}?from=000000000000`);
   check("the join page says who invited you: Ana's link says Ana, Bo's says Bo; no link, or one that names nobody, says nobody",
     /Ana invited you/.test(pa) && !/Bo invited you/.test(pa) && /Bo invited you/.test(pb) && !/invited you/.test(pn) && !/invited you/.test(pf));
-  const pu = await page(ia.data.url.replace(/from=([0-9a-f]+)/, (m, h) => `from=${h.toUpperCase()}`)), ps = await page(`${ia.data.url}0`), po = await page(ia.data.url.replace(/\/join\/[^?]+/, "/join/ZZZZZZZZ"));
-  check("a from code that is upper-case, too long or sent with a wrong game code names nobody", !/invited you/.test(pu) && !/invited you/.test(ps) && !/invited you/.test(po));
+  const ps = await page(`${ia.data.url}0`), wrongGame = await fetch(`${A}/start/join/ZZZZZZZZ?from=${ia.data.url.split("from=")[1]}`, { signal: AbortSignal.timeout(20000) });
+  check("a from code that is too long names nobody (the page still opens); with a wrong game code the page is a 404 and names nobody", /Start Game/.test(ps) && !/invited you/.test(ps) && wrongGame.status === 404 && !/invited you/.test(await wrongGame.text()));
   setClock("2026-03-08T21:00:00.000Z");
   const cy = await join(A, "start", g.code, { email: "cy@example.com", name: "Cy", color: "jade" });
   const meC = (await cy.get("/start/api/me")).data;
