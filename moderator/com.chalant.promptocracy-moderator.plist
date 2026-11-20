@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.chalant.promptocracy-moderator</string>
+    <!-- Disabled until Chalant's first-night trial (busterbenson/promptocracy, step 1 PR 5 runbook).
+         Remove this key, then run scripts/install-launchd.sh, to go live. -->
+    <key>Disabled</key>
+    <true/>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/chalantbenson/chalantbot/repos/promptocracy/moderator/run.sh</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>120</integer>
+    <key>StandardOutPath</key>
+    <string>/Users/chalantbenson/chalantbot/logs/promptocracy-moderator/launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/chalantbenson/chalantbot/logs/promptocracy-moderator/launchd.err.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Users/chalantbenson/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>/Users/chalantbenson</string>
+    </dict>
+</dict>
+</plist>

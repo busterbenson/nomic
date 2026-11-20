@@ -130,6 +130,10 @@ export function runModel({ prompt, cwd, timeoutMs, effort, claude = process.env.
     "--permission-mode", "acceptEdits", "--permission-prompts", "none", "--output-format", "json", "--effort", effort || "medium"];
   if (model) args.push("--model", model);
   const env = { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: process.env.HOME ?? homedir(), USER: process.env.USER ?? "", LANG: "en_US.UTF-8", TMPDIR: tmpdir() };
+  // claude's own credential: the subscription OAuth token (sk-ant-oat01-...), never an API key. The model has no shell
+  // or web tool, so it cannot read its environment or send anything anywhere.
+  const oat = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  if (oat && oat.startsWith("sk-ant-oat01-")) env.CLAUDE_CODE_OAUTH_TOKEN = oat;
   return new Promise((res) => {
     const child = spawn(claude, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
     let out = "", timedOut = false;

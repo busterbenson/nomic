@@ -5,7 +5,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-const here = process.env.FAKE_CLAUDE_DIR || dirname(new URL(import.meta.url).pathname);
+const here = dirname(new URL(import.meta.url).pathname);
 const scenario = JSON.parse(readFileSync(join(here, "fake-claude.scenario.json"), "utf8"));
 let prompt = "";
 for await (const c of process.stdin) prompt += c;

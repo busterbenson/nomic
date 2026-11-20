@@ -15,6 +15,9 @@ const J = JSON.stringify;
 const TMP = realpathSync(mkdtempSync(join(tmpdir(), "moderator-test-")));
 const g = (args, cwd) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
 
+// Secrets in the RUNNER's environment (as under launchd): none of them may reach the model's.
+Object.assign(process.env, { CLOUDFLARE_WORKERS_TOKEN: "cf-test", ANTHROPIC_API_KEY: "sk-ant-api-test", GITHUB_TOKEN: "gh-test", PROMPTOCRACY_MODERATOR_TOKEN_G: "mod-test", CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-test" });
+
 // Guard: no store of these tests may live under ~/chalantbot (a test write there would reach Buster as real data).
 const LIVE = join(homedir(), "chalantbot");
 check("guard: the test's state, notification and repo folders are not under ~/chalantbot", !TMP.startsWith(LIVE) && !TMP.startsWith(realpathSync(homedir()) + "/chalantbot"), TMP);
@@ -121,7 +124,7 @@ console.log("moderator runner");
   const rules = g(["show", "main:RULES.md"], t.repo.bare), mod = g(["show", "main:rules/401.ts"], t.repo.bare);
   check("happy path: text, code and tests changed together (107.4)", /gets 15 points/.test(rules) && /proposal\.player, 15,/.test(mod) && /reach 50 points/.test(rules));
   const calls = t.claude.calls();
-  check("the model runs restricted (no shell, no web), at the stored effort, with no secret in its environment", calls.length > 0 && calls.every((c) => c.restricted && (c.audit ? c.tools === "" : c.tools === "Read,Edit,Write,Glob,Grep") && (c.audit || c.effort === "medium")) && calls.every((c) => !c.env.some((k) => /TOKEN|CLOUDFLARE|GITHUB|GH_|ANTHROPIC|SECRET|KEY/i.test(k))), J(calls[0]));
+  check("the model runs restricted (no shell, no web), at the stored effort, with no secret in its environment", calls.length > 0 && calls.every((c) => c.restricted && (c.audit ? c.tools === "" : c.tools === "Read,Edit,Write,Glob,Grep") && (c.audit || c.effort === "medium")) && calls.every((c) => c.env.includes("CLAUDE_CODE_OAUTH_TOKEN") && !c.env.some((k) => k !== "CLAUDE_CODE_OAUTH_TOKEN" && /TOKEN|CLOUDFLARE|GITHUB|GH_|ANTHROPIC|SECRET|KEY|PROMPTOCRACY/i.test(k))), J(calls[0]));
   check("happy path: the night log has each application and the claim", readFileSync(join(t.stateDir, "g.night.jsonl"), "utf8").split("\n").filter((l) => /"event":"(applied|claim)"/.test(l)).length === 3);
 }
 {
