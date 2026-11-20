@@ -1,0 +1,57 @@
+// The Workshop tab in real Chromium (tests/browser-workshop.py): the ticket list, "Commission something" and the form, the
+// ticket page with its tasks, log and thread, posting, and the commission's row on the ballot, in light and dark at 1280 and
+// 390. A real `wrangler dev` on a throwaway LOCAL D1; the rules come from templates/RULES.md through a local stub.
+// Set WORKSHOP_SHOTS=<dir> to keep the screenshots. Run: node tests/workshop-browser.mjs
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import { ROOT, createGame, d1, join, migrate, newState, startPlaying, startRulesStub, startServer, freePort } from "./lib.mjs";
+
+const shots = process.env.WORKSHOP_SHOTS || "";
+if (shots) mkdirSync(shots, { recursive: true });
+const state = newState();
+let srv = null, stub = null, failed = false;
+try {
+  migrate(state);
+  const rules = readFileSync(ROOT + "/templates/RULES.md", "utf8");
+  stub = await startRulesStub(await freePort(), { "/busterbenson/shop/main/RULES.md": rules });
+  const g = await createGame(state, { slug: "shop", name: "The Shop", repo: "busterbenson/shop", rulesBase: stub.base });
+  srv = await startServer(state, await freePort(), ["DEV_MODE=1", `RULES_BASE_URL=${stub.base}`]);
+  const ada = await join(srv.base, "shop", g.code, { email: "ada@example.com", name: "Ada", color: "teal" });
+  const bo = await join(srv.base, "shop", g.code, { email: "bo@example.com", name: "Bo", color: "vermilion" });
+  const cy = await join(srv.base, "shop", g.code, { email: "cy@example.com", name: "Cy", color: "cobalt" });
+  startPlaying(state, "shop");
+  const gid = d1(state, "SELECT id FROM games WHERE slug = 'shop'")[0].id;
+  const T = "/shop/api/tickets";
+  const ok = (r, what) => { if (r.status !== 200) throw new Error(`${what}: ${r.status} ${r.text}`); return r; };
+  // Bo's commission, confirmed on day 1: it is on day 2's ballot. A long title and brief, to see how they wrap.
+  const bn = ok(await bo.post(T, {}), "bo open").data.ticket;
+  ok(await bo.post(`${T}/${bn}/edit`, { title: "A lantern that never goes out, however long the night and however hard the wind", brief: "A lantern that never goes out.\nIt hangs on the north hill and can be lit by anyone who is standing next to it, and it stays lit until someone else puts it out.", makes: [{ kind: "entry", name: "Lantern" }, { kind: "rule", num: "801.2" }], estimate: 3, running_cost: "Nothing.", tasks: ["Draw it", "Give it a tile", "Write its rule"] }), "bo edit");
+  ok(await bo.post(`${T}/${bn}/confirm`, {}), "bo confirm");
+  // Cy's ticket: approved, paid, in the queue, with a tick, a log and a thread (including Gremlin and Chalant, as later steps will post)
+  const cn = ok(await cy.post(T, {}), "cy open").data.ticket;
+  ok(await cy.post(`${T}/${cn}/edit`, { title: "A drum", brief: "A drum that can be heard on every tile.", makes: [{ kind: "entry", name: "Drum" }], estimate: 1, tasks: ["Draw it", "Give it a sound"] }), "cy edit");
+  ok(await cy.post(`${T}/${cn}/post`, { body: "Is it loud?" }), "cy post");
+  // the midnight roll: day 1 is over, day 2 is open and Bo's commission is on its ballot (Cy's was approved by the count before)
+  d1(state, `UPDATE proposals SET status = 'on_ballot' WHERE game_id = '${gid}' AND status = 'confirmed'`);
+  d1(state, `UPDATE days SET status = 'done' WHERE game_id = '${gid}' AND n = 1; UPDATE games SET day = 2 WHERE id = '${gid}'; INSERT INTO days (game_id, n, starts_at, ends_at, status) VALUES ('${gid}', 2, '2000-01-02T00:00:00.000Z', '${new Date(Date.now() + (7 * 60 + 41) * 60000).toISOString()}', 'open')`);
+  d1(state, `INSERT INTO electors (game_id, day, player_id) SELECT game_id, 2, id FROM players WHERE game_id = '${gid}'; UPDATE days SET electorate = 3 WHERE game_id = '${gid}' AND n = 2`);
+  const cid = d1(state, `SELECT id FROM tickets WHERE game_id = '${gid}' AND number = ${Number(cn.slice(1))}`)[0].id;
+  d1(state, `UPDATE tickets SET state = 'Approved', queue_pos = 1, price = 2, price_reason = 'Free. I like drums.', paid = 2, paid_at = 'x', approved_at = '2026-11-19T08:00:00.000Z' WHERE id = '${cid}'`);
+  d1(state, `UPDATE ticket_tasks SET done = 1, done_day = 1 WHERE ticket_id = '${cid}' AND pos = 1`);
+  d1(state, `INSERT INTO ticket_log (ticket_id, day, kind, text, at) VALUES ('${cid}', 1, 'approved', 'Approved: P9 passed. Paid 2 points. Place 1 in the queue.', '2026-11-19T08:00:00.000Z')`);
+  d1(state, `INSERT INTO ticket_posts (ticket_id, game_id, author_kind, body, at) VALUES ('${cid}', '${gid}', 'gremlin', 'Kicking this upstairs to Chalant.', '2026-11-19T09:00:00.000Z'), ('${cid}', '${gid}', 'chalant', 'Noted. Louder than the crow.', '2026-11-19T10:00:00.000Z')`);
+  const cookie = [...ada.jar].find(([k]) => k === "s|/shop")[1];
+  const vcookie = "-";
+  if (process.env.WORKSHOP_SERVE) { console.log("SERVE", srv.base, cookie); await new Promise((res) => setTimeout(res, Number(process.env.WORKSHOP_SERVE) * 1000)); }
+  const r = await promisify(execFile)("/usr/local/bin/python3", [ROOT + "/tests/browser-workshop.py", srv.base, shots || "-", cookie, vcookie], { timeout: 240000, maxBuffer: 1 << 24 });
+  process.stdout.write(r.stdout);
+} catch (e) {
+  failed = true;
+  if (e.stdout) process.stdout.write(e.stdout);
+  console.log("  FAIL  " + (e.stderr || e.message));
+} finally {
+  await srv?.stop(); await stub?.stop();
+  try { if (state.includes("promptocracy-test-")) rmSync(state, { recursive: true, force: true }); } catch {}
+}
+process.exit(failed ? 1 : 0);

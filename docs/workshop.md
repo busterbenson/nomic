@@ -7,9 +7,9 @@ Spec for Buster's OK (2026-11-20). Nothing here is built. It replaces the larger
 - Features are built only into a game's own repo and exist only for that game's players. Players can't propose changes to the platform.
 - Everything new (a creature, a tile, an item, a feature like a forum) comes in as a **commission**. Plain rule changes (reword, add, repeal, move, mark) stay ordinary proposals.
 - A commission creates a **ticket** that tracks everything about it: a brief, the catalog entries and rules it makes, an estimate, a cost, a log of tasks and progress, and a discussion.
-- The Workshop lives on the **Catalog tab**.
+- The Workshop is its own tab (it replaced the Catalog tab, Buster 2026-11-20): the ticket list first, then the catalog's groups. On a desktop the tab keeps room for a chat panel at its side (Gremlin, step 2).
 - A live helper, **Gremlin**, builds the brief with the player in real time and answers ticket discussions. He is clearly not Chalant, has a gremlin-y personality, and escalates what he isn't comfortable with to Chalant.
-- Gremlin is also **a creature in the game** by default, with his own piece.
+- Gremlin is **not on the board** (Buster 2026-11-20): he is an NPC who lives in the Workshop tab. No creature, no piece, no tile.
 - Gremlin **can charge points for a commission or offer it free**, by a generous but sometimes inconsistent logic; 0 by default for simple requests with no rules or code.
 
 ## The ticket
@@ -32,7 +32,7 @@ One page per commission, opened from the Workshop list or any pill that names it
 
 ## The flow
 
-1. **Commission.** On the Catalog tab, "Commission something" opens a draft ticket and a chat with Gremlin. The player describes it; Gremlin asks what he needs to know and fills in the brief, makes, estimate, cost and tasks as they go. Anything impossible (outside the game, against privacy, security or the law, or past the limits) is refused here, with the reason.
+1. **Commission.** On the Workshop tab, "Commission something" opens a draft ticket and a chat with Gremlin. The player describes it; Gremlin asks what he needs to know and fills in the brief, makes, estimate, cost and tasks as they go. Anything impossible (outside the game, against privacy, security or the law, or past the limits) is refused here, with the reason.
 2. **Confirm.** The player confirms the ticket at Gremlin's price (they can haggle with him before confirming; the price is final once confirmed, and a player who can't afford it can't confirm). It is one of their proposals for the day (103.2) and goes on tomorrow's ballot, where the ballot row shows the brief, the estimate and the cost.
 3. **Vote.** Like any proposal, at the mark of the block it adds to (105).
 4. **Pay and queue.** A passed commission's price comes out of the requester's points (spent: it no longer counts toward winning), and the ticket is Approved and joins the queue: first approved, first built.
@@ -55,11 +55,6 @@ One page per commission, opened from the Workshop list or any pill that names it
 - His logic is generous but a bit inconsistent on purpose. He prices by feel from a loose guide (a few points per night of work), and he can be charmed, grumpy or in a mood. He always gives a one-line reason on the ticket.
 - The guide, the mood and the range are in his prompt, with a hard ceiling (a setting) so a mood can't price a ticket out of reach of every player.
 
-## Gremlin on the board
-
-- Gremlin is the first creature in every game's catalog: neutral, with his own piece in the site's piece style (small, hunched, big ears, a wrench).
-- He stays on one tile (his workshop), placed when day 1 begins. Tapping him opens the Workshop. He doesn't move, bite or block anyone until a rule says otherwise.
-
 ## Limits from the world
 
 The site sets how long Chalant can build each night, the most nights one ticket can take, and the game's monthly running-cost budget. They are shown in the Workshop. A proposal can reword the rule that describes them, but no vote changes those numbers.
@@ -77,8 +72,6 @@ The site sets how long Chalant can build each night, the most nights one ticket 
 **801.4** Gremlin sets each commission's price in points when it's drafted, and says why. You pay it when the commission passes; points you pay no longer count toward winning (402). You can't confirm a commission you can't pay for.
 **804.1** Anyone in the game can post in a ticket's discussion. Gremlin answers; he can't change an approved ticket, and he hands questions he can't answer to the moderator.
 
-**805.1** Gremlin is a neutral creature (C1). He stays on his tile, the workshop, and does nothing else until a rule says so.
-
 701 (catalog entries) then says a new entry comes in by commission (801).
 
 ## What's cut from the bigger design
@@ -87,8 +80,8 @@ Two benches, giving points, the points-ordered queue, plaques and ribbon-cutting
 
 ## Build plan (each a PR, in order)
 
-1. **Tickets and threads (platform, migration).** Tables for tickets, tasks, log and posts; the Workshop list at the top of the Catalog tab; the ticket page; posting in a thread; the ballot row for a commission. No Gremlin yet: the requester fills in the brief by hand.
-2. **Gremlin (platform).** The commission chat and thread replies on Sonnet, the persona, prices, escalation (with a notification to the Mac mini), the daily cap, the safety fence; his piece and his place on the board (C1).
+1. **Tickets and threads (platform, migration).** Tables for tickets, tasks, log and posts; the Workshop tab (the ticket list at the top, the catalog under it); the ticket page; posting in a thread; the ballot row for a commission. No Gremlin yet: the requester fills in the brief by hand.
+2. **Gremlin (platform).** The commission chat and thread replies on Sonnet, the persona, prices, escalation (with a notification to the Mac mini), the daily cap, the safety fence.
 3. **The night (moderator).** Read the queue and threads, work the front ticket, tick tasks, log, answer, go live when done, the 3-failed-nights and 2x-estimate rules.
 4. **Rule text (Rickshaw).** Block 800, the 701 change, with the code each clause needs.
 

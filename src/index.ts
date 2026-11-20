@@ -23,6 +23,7 @@ import * as apiMe from "./routes/api-me";
 import * as apiRules from "./routes/api-rules";
 import * as apiTurn from "./routes/api-turn";
 import * as apiProposals from "./routes/api-proposals";
+import * as apiTickets from "./routes/api-tickets";
 import * as apiBoard from "./routes/api-board";
 import * as apiAction from "./routes/api-action";
 import * as apiDay from "./routes/api-day";
@@ -51,7 +52,7 @@ type Methods = { get?: Handler; post?: Handler };
 const API: Record<string, Methods> = {
   game: apiGame, me: apiMe, join: apiJoin, login: apiLogin, logout: apiLogout,
   turn: apiTurn, rules: apiRules, notifications: apiNotifications, board: apiBoard, action: apiAction,
-  day: apiDay, "end-turn": apiEndTurn, proposals: apiProposals, votes: apiVotes, ballot: apiBallot, invite: apiInvite, start: apiStart,
+  day: apiDay, "end-turn": apiEndTurn, proposals: apiProposals, tickets: apiTickets, votes: apiVotes, ballot: apiBallot, invite: apiInvite, start: apiStart,
 };
 
 const secure = (res: Response) => {
@@ -161,6 +162,12 @@ async function route(request: Request, env: Env, execCtx: ExecutionContext): Pro
   if (sub === "api" && segs.length === 5 && segs[2] === "proposals" && (segs[4] === "confirm" || segs[4] === "withdraw")) {
     ctx.params.id = segs[3];
     return run({ post: apiProposals.action(segs[4]) }, method, ctx);
+  }
+  // /api/tickets/<W3> (the ticket page), and /api/tickets/<W3>/edit, /confirm and /post (rules 801, 804)
+  if (sub === "api" && segs[2] === "tickets" && (segs.length === 4 || segs.length === 5)) {
+    ctx.params.n = segs[3];
+    if (segs.length === 4) return run({ get: apiTickets.one }, method, ctx);
+    if (segs[4] === "edit" || segs[4] === "confirm" || segs[4] === "post") return run({ post: apiTickets.action(segs[4]) }, method, ctx);
   }
   return notFound();
 }

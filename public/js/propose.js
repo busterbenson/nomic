@@ -12,6 +12,7 @@
 // Drafting is free and repeatable; only confirming counts. Nothing here decides what is allowed: the server's answers
 // (draft errors, the 110.1 refusal, the lock, one a day) are shown as they come.
 
+import { commissionHTML, wPill } from "./commission.js";
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const idOf = (num) => "r-" + String(num).replace(/\./g, "-");
 
@@ -108,7 +109,7 @@ export function createProposer({ api, me, day, refresh, pill, vote }) {
   const playerPill = (p) => (p.by ? (pill ? pill(p.by, p.mine) : `<span class="plpill"><span class="dot" style="background:${/^#[0-9a-f]{6}$/i.test(p.by.color && p.by.color.hex) ? p.by.color.hex : "#888"}"></span>${esc(p.by.name)}${p.mine ? " (you)" : ""}</span>`) : "");
   /** @rule 103.2 */
   /** The card a proposal opens: a new rule's own (ghost) card, else the rule it changes. A change to a block has no card. */
-  const cardKey = (p) => (!S.RB ? null : p.kind === "add" ? p.n : p.kind === "mark" && S.RB && S.RB.byNum[p.target] && S.RB.byNum[p.target].kind === "block" ? null : String(p.target).split(".")[0]);
+  const cardKey = (p) => (!S.RB || p.kind === "commission" ? null : p.kind === "add" ? p.n : p.kind === "mark" && S.RB && S.RB.byNum[p.target] && S.RB.byNum[p.target].kind === "block" ? null : String(p.target).split(".")[0]);
   /** @rule 103.2 */
   const pPill = (p) => (p.n ? (cardKey(p) ? `<button type="button" class="ppill" data-seecard="${esc(cardKey(p))}" aria-label="Open proposal ${esc(p.n)}">${esc(p.n)}</button>` : `<span class="ppill">${esc(p.n)}</span>`) : "");
 
@@ -119,7 +120,7 @@ export function createProposer({ api, me, day, refresh, pill, vote }) {
     const w = waiting && p.mine && canWithdraw() ? `<button class="linkbtn" type="button" data-p="withdraw" data-id="${esc(p.id)}">Withdraw</button>` : "";
     const err = S.ui && S.ui.wErr && S.ui.wId === p.id ? `<p class="notice err" role="alert">${esc(S.ui.wErr)}</p>` : "";
     return `<div class="chg${waiting ? " mine" : ""}" data-pn="${esc(p.n || "")}"><div class="ch">${pPill(p)}${playerPill(p)}<span class="pill ${waiting ? "drafting" : "bal"}">${waiting ? "On tomorrow's ballot" : "On today's ballot"}</span>${w}</div>
-<p class="mono head">${esc(p.head || "")}</p><p class="cdiff">${diffOf(p)}</p>${settingsHTML(p)}${p.conflict_note ? `<p class="cnote">${withPills(p.conflict_note)}</p>` : ""}<p class="needline mono">${esc(needText(p))}</p>${waiting ? "" : `<div class="slot" data-slot="ballot-vote" data-pn="${esc(p.n || "")}">${vote ? vote(p.n) : ""}</div>`}${err}</div>`;
+${p.kind === "commission" && p.ticket ? `<div class="sdiff">${wPill(p.ticket.n)}${commissionHTML(p.ticket)}</div>` : `<p class="mono head">${esc(p.head || "")}</p><p class="cdiff">${diffOf(p)}</p>`}${settingsHTML(p)}${p.conflict_note ? `<p class="cnote">${withPills(p.conflict_note)}</p>` : ""}<p class="needline mono">${esc(needText(p))}</p>${waiting ? "" : `<div class="slot" data-slot="ballot-vote" data-pn="${esc(p.n || "")}">${vote ? vote(p.n) : ""}</div>`}${err}</div>`;
   }
 
   // ---- what a rule's card gets -------------------------------------------------------------------------------

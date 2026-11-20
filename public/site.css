@@ -148,7 +148,7 @@ mark{background:color-mix(in srgb,var(--accent) 28%,transparent);color:inherit;b
 .players .you{font-weight:400}
 .players .st{display:block;font-family:var(--font-mono);font-size:.58rem;color:var(--ink-muted);font-weight:400}
 
-/* the book: tabs, then one panel (Summary, Rulebook, Catalog, History) */
+/* the book: tabs, then one panel (Summary, Rulebook, Workshop, History) */
 .rbwrap{padding:18px 0 48px;background:var(--sea)}
 .book{display:flex;flex-direction:column;gap:22px;min-width:0}
 .btabs{display:flex;align-items:flex-end;gap:22px;padding:0 24px;border-bottom:1.5px solid var(--line);overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;touch-action:pan-x;scrollbar-width:none}
@@ -371,7 +371,7 @@ button.me[aria-expanded="true"]{border-color:var(--ink)}
 .ppill:hover{background:var(--surface-2)}
 .rpill{cursor:pointer;background:var(--surface)}
 
-/* Summary: the day strip, two columns of cards (one on a phone: ballot, Propose, slips, Catalog last) */
+/* Summary: the day strip, two columns of cards (one on a phone: ballot, Propose, slips, Workshop last) */
 .sgrid{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;padding:0 24px}
 .scol{display:flex;flex-direction:column;gap:16px;min-width:0}
 .sw{background:var(--surface);border:1.5px solid var(--ink);border-radius:16px;padding:14px 16px 12px;display:flex;flex-direction:column;gap:10px;min-width:0}
@@ -476,3 +476,55 @@ button.me[aria-expanded="true"]{border-color:var(--ink)}
 .acct-invite input{flex:1;min-width:0;height:34px;padding:0 10px;border:1.5px solid var(--line);border-radius:10px;background:var(--sea);color:var(--ink);font-family:var(--font-mono);font-size:.7rem}
 .acct-invite .why{font-family:var(--font-mono);font-size:.68rem;font-weight:400;color:var(--ink-muted)}
 .acct-invite input:disabled{opacity:.55;cursor:not-allowed}
+
+/* The Workshop (rules 801-804): the tab, the ticket list, the ticket page. */
+/* The tab is a two-area grid on a desktop: the tickets and the catalog in the main area, and an empty side area kept for a
+   chat panel that a later step puts there (nothing is drawn in it now). On a phone there is one column. */
+.wk{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;padding:0 24px}
+.wkmain{display:flex;flex-direction:column;gap:18px;min-width:0}
+@media (min-width:900px){.wk{grid-template-columns:minmax(0,1fr) minmax(0,0px);grid-template-areas:"main side"}.wkmain{grid-area:main}}
+@media (max-width:760px){.wk{padding:0 16px}}
+.wk .cbox{padding:0}
+.wkact{margin-left:auto;display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap}
+.tlist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.trow{display:flex;align-items:center;justify-content:space-between;gap:6px 14px;flex-wrap:wrap;padding:10px 0;border-top:1px solid var(--line)}
+.trow:first-child{border-top:0}
+.tmain{min-width:0;flex:1 1 220px}
+.tlink{display:inline-flex;align-items:center;gap:10px;background:none;border:0;padding:4px 0;min-height:36px;font:inherit;color:inherit;text-align:left;cursor:pointer;max-width:100%}
+.tlink:hover .tt{text-decoration:underline}
+.tt{font-weight:700;overflow-wrap:anywhere}
+.tmeta{display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap}
+.tnum{font-size:.72rem;color:var(--ink-muted);white-space:nowrap}
+.wpill{font-family:var(--font-mono);font-size:.66rem;font-weight:700;border-radius:999px;padding:1px 8px;border:1.5px solid var(--accent);color:var(--accent);background:var(--surface);white-space:nowrap;line-height:1.5;display:inline-block}
+button.wpill{cursor:pointer;min-height:26px;padding:3px 9px}
+button.wpill:hover{background:var(--surface-2)}
+.wpill.big{font-size:1rem;padding:4px 14px}
+.tstate[data-state="Approved"],.tstate[data-state="Building"],.tstate[data-state="Done"]{border-color:var(--accent);color:var(--accent)}
+.tstate[data-state="Draft"],.tstate[data-state="Shelved"]{border-style:dashed}
+.tstate[data-state="Refused"],.tstate[data-state="Failed"]{border-color:var(--err);color:var(--err)}
+.cbrief{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.cfacts{margin:0;font-size:.72rem;color:var(--ink-muted)}
+.tk .tdl{margin:0;border-top:1px solid var(--line)}
+.tk .tr{display:grid;grid-template-columns:110px minmax(0,1fr);gap:2px 10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.tk .tr dt{font-family:var(--font-mono);font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-muted);align-self:start;padding-top:3px}
+.tk .tr dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.tbrief{white-space:pre-wrap}
+.makes{display:inline-flex;gap:6px;flex-wrap:wrap}
+.mk{display:inline-flex;align-items:center;gap:4px;border:1.5px dashed var(--line);border-radius:999px;padding:1px 8px;font-size:.86rem}
+.mk.dim{opacity:.72}
+.tsec{display:flex;flex-direction:column;gap:8px;margin-top:16px}
+.tsec h3{font-family:var(--font-mono);font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-muted);margin:0}
+.ttasks,.tlog,.tposts{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.ttasks li{display:flex;gap:10px;align-items:baseline}
+.ttasks .ck{width:16px;height:16px;border:1.5px solid var(--ink);border-radius:4px;display:inline-grid;place-items:center;font-size:.7rem;flex:none;transform:translateY(2px)}
+.ttasks li.done .ck{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.tlog li{font-size:.9rem}
+.tposts li{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;border-top:1px solid var(--line);padding-top:8px}
+.tposts li:first-child{border-top:0;padding-top:0}
+.tposts p{flex:1 1 100%;margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.plpill.npc{border:1.5px solid var(--accent);color:var(--accent);border-radius:999px;padding:1px 10px;font-weight:700;font-size:.82rem}
+.wkform,.wkpost{max-width:none}
+.wkform input,.wkform textarea,.wkpost textarea{font:inherit;color:inherit;background:var(--sea);border:1.5px solid var(--line);border-radius:10px;padding:8px;min-width:0;width:100%;box-sizing:border-box}
+.wkform input[type=number]{max-width:8em}
+.wkform textarea,.wkpost textarea{resize:vertical}
+.sdiff .wpill{align-self:flex-start}

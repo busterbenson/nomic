@@ -1,4 +1,4 @@
-// The page structure (step 1, the chrome PR): header, board band and move bar, players, the book (Summary, Rulebook, Catalog,
+// The page structure (step 1, the chrome PR): header, board band and move bar, players, the book (Summary, Rulebook, Workshop,
 // History), the rule card with its Back stack, the player card, the account menu and the bell. A real `wrangler dev` on a
 // throwaway LOCAL D1 and headless Chromium (tests/browser-chrome.py). The rules come from templates/RULES.md through a local stub.
 // Set CHROME_SHOTS=<dir> to keep the screenshots (light and dark, 1280 and 390). Run: node tests/chrome.mjs

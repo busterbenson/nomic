@@ -45,6 +45,7 @@ export async function clockNow(env: Env): Promise<number> {
 // ---- midnights, the gate, its SQL: src/lib/day-gate.js (plain JS, shared with the tests) ---------------------------------
 export { addDays, dayGate, dayOpenBinds, dayOpenSql, isLocked, localDate, lockMessage, nextMidnight, startOfDate } from "./day-gate.js";
 import { deadlineAfter, nextMidnight } from "./day-gate.js";
+import { countTicketStatements } from "./tickets.js";
 import { DEADLINE_REASON, DEPLOY_GRACE_MINUTES, DEPLOY_REASON, ENACT_REASON, resultSentence, returnedBody, tally } from "./votes.js";
 
 // The game's time zone: the bundled rules' setting when the game has a bundle that sets one, else the game's own.
@@ -158,10 +159,10 @@ export type NightStep = { name: string; run(env: Env, game: any, day: DayRow, no
 // lock was set (in its own batch) before this runs, and every vote's write checks it. Each item's write is guarded by
 // status = 'on_ballot', so a second run counts nothing twice. If any passed, the day goes to processing with the
 // 2 am deadline (rule 107.6); otherwise the night goes straight on to finalize.
-/** @rule 104.1, 104.2, 104.5, 107.6 */
+/** @rule 104.1, 104.2, 104.5, 107.6, 801.4, 803.1 */
 export async function countBallot(env: Env, game: any, day: DayRow, nowMs: number): Promise<StepResult> {
   if (day.status !== "locked") return "done"; // counted on an earlier run
-  const items = (await env.DB.prepare("SELECT id, number, mark, needed FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'on_ballot' ORDER BY number").bind(game.id, day.n).all()).results as any[];
+  const items = (await env.DB.prepare("SELECT id, number, mark, needed, kind FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'on_ballot' ORDER BY number").bind(game.id, day.n).all()).results as any[];
   const electors = await electorsOf(env, game.id, day.n);
   const votes = items.length ? ((await env.DB.prepare("SELECT proposal_id, player_id, vote FROM votes WHERE game_id = ? AND day = ?").bind(game.id, day.n).all()).results as any[]) : [];
   const now = nowIso(nowMs);
@@ -176,8 +177,11 @@ export async function countBallot(env: Env, game: any, day: DayRow, nowMs: numbe
       `UPDATE proposals SET status = ?, yes = ?, no = ?, absent = ?, needed = ?, electorate = ?, why = ?, decided_at = ?,
          budget_minutes = ?, budget_effort = ?
        WHERE id = ? AND status = 'on_ballot' AND EXISTS (SELECT 1 FROM days WHERE game_id = ? AND n = ? AND status = 'locked')`,
-    ).bind(t.passed ? "passed" : "failed", t.yes, t.no, t.absent, t.needed, t.electorate, resultSentence(t), now,
-      t.passed ? settings["night.apply_minutes"] : null, t.passed ? settings["night.apply_effort"] : null, q.id, game.id, day.n)),
+    ).bind(t.passed ? (q.kind === "commission" ? "approved" : "passed") : "failed", t.yes, t.no, t.absent, t.needed, t.electorate, resultSentence(t), now,
+      t.passed && q.kind !== "commission" ? settings["night.apply_minutes"] : null, t.passed && q.kind !== "commission" ? settings["night.apply_effort"] : null, q.id, game.id, day.n)),
+    // A commission that passed is approved, not passed: there is nothing for the moderator to apply (rule 107.2 is about rule
+    // changes), so it never joins the night's list. Its ticket joins the queue and its price is paid (rules 801.4, 803.1).
+    ...writes.filter(({ q }) => q.kind === "commission").flatMap(({ q, t }) => countTicketStatements(env.DB, game, q, { passed: t.passed, sentence: resultSentence(t) }, day.n, now)),
     env.DB.prepare(
       `UPDATE days SET status = 'processing', deadline_at = ? WHERE game_id = ? AND n = ? AND status = 'locked'
          AND EXISTS (SELECT 1 FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed')`,

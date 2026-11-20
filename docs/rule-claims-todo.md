@@ -7,15 +7,15 @@ Every function that carries out the game should say which rule it implements, wi
 `src/` is only reported for now: these functions have no claim yet. Site plumbing such as sign-in and email goes
 under rule 101 or 102; a follow-up change claims them and moves `src/` into the strict set.
 
-134 of 253 functions outside `src/engine/` are unclaimed.
+137 of 278 functions outside `src/engine/` are unclaimed.
 
 ## src/index.ts (5)
 
-- line 57: `secure`
-- line 67: `notFound`
-- line 73: `run`
-- line 78: `route`
-- line 169: `fetch`
+- line 58: `secure`
+- line 68: `notFound`
+- line 74: `run`
+- line 79: `route`
+- line 176: `fetch`
 
 ## src/lib/auth.ts (6)
 
@@ -66,9 +66,9 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/lib/mcp-tools.ts (3)
 
-- line 45: `reply`
-- line 46: `asJson`
-- line 48: `registerTools`
+- line 46: `reply`
+- line 47: `asJson`
+- line 49: `registerTools`
 
 ## src/lib/notify.ts (1)
 
@@ -121,6 +121,10 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 - line 99: `getSettings`
 - line 113: `settingsForSize`
 
+## src/lib/tickets.js (1)
+
+- line 20: `clean`
+
 ## src/lib/util.ts (27)
 
 - line 41: `validShape`
@@ -153,7 +157,7 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/routes/api-ballot.ts (1)
 
-- line 31: `pill`
+- line 32: `pill`
 
 ## src/routes/api-day.ts (1)
 
@@ -185,12 +189,17 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/routes/api-proposals.ts (1)
 
-- line 23: `out`
+- line 24: `out`
 
 ## src/routes/api-rules.ts (2)
 
 - line 11: `text`
 - line 14: `get`
+
+## src/routes/api-tickets.ts (2)
+
+- line 22: `out`
+- line 211: `need`
 
 ## src/routes/landing.ts (2)
 
