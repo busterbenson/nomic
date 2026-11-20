@@ -17,7 +17,7 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&
 const lines = (s) => String(s || "").split("\n").map((x) => x.trim()).filter(Boolean);
 
 export function createWorkshop({ api, me, pill, rpill, when, canCommission, refresh, cards }) {
-  const S = { list: [], detail: {}, form: null, busy: false, err: "", note: "", draftPost: {} };
+  const S = { list: [], detail: {}, form: null, busy: false, err: "", note: "", openErr: "", draftPost: {} };
 
   /** @rule 801.2 */
   async function load() {
@@ -51,7 +51,7 @@ export function createWorkshop({ api, me, pill, rpill, when, canCommission, refr
   function commissionButton() {
     if (!player()) return "";
     const c = canCommission();
-    return `<span class="wkact"><button type="button" class="btn small" data-w="open"${c.allowed ? "" : " disabled"}>Commission something</button>${c.allowed ? "" : `<span class="mnote">${esc(c.reason || "")}</span>`}</span>`;
+    return `<span class="wkact"><button type="button" class="btn small" data-w="open"${c.allowed ? "" : " disabled"}>Commission something</button>${c.allowed ? (S.openErr ? `<span class="mnote" role="alert">${esc(S.openErr)}</span>` : "") : `<span class="mnote">${esc(c.reason || "")}</span>`}</span>`;
   }
   const count = () => S.list.length;
   /** The Workshop tab: the tickets first, then the catalog's groups. @rule 801.2 */
@@ -145,9 +145,9 @@ ${editing ? formHTML(t) : factsHTML(t)}${editing ? "" : tasksHTML(t)}${logHTML(t
     const cur = cards.current();
     const n = cur && cur.kind === "ticket" ? cur.key : null;
     if (a === "open") {
-      S.err = "";
+      S.openErr = "";
       const r = await api("/api/tickets", {});
-      if (!r.ok) { S.err = (r.data && r.data.error) || "Something went wrong."; await refresh(); return; }
+      if (!r.ok) { S.openErr = (r.data && r.data.error) || "Something went wrong."; await refresh(); return; }
       await load();
       await open(r.data.ticket, false);
       return;

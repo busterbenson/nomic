@@ -194,14 +194,16 @@ export async function confirm(ctx: Ctx, player: any, raw: unknown, nowMs: number
   const pid = crypto.randomUUID();
   const ins = await env.DB.prepare(COMMISSION_DRAFT_SQL).bind(pid, player.id, t.brief, t.title, `Commission W${t.number}: ${t.title}`, sha, now, game.id, ...dayOpenBinds(game.day, nowMs, player.id)).run();
   if (!(ins?.meta?.changes > 0)) return out({ error: "The day changed under you. Reload and try again." }, 409);
+  // Undo only while the proposal is still a draft: a confirmed one stays linked and is settled by mine() next time.
   const undo = () => env.DB.batch([
-    env.DB.prepare("UPDATE tickets SET proposal_id = NULL WHERE id = ? AND proposal_id = ? AND state = 'Draft'").bind(t.id, pid),
+    env.DB.prepare("UPDATE tickets SET proposal_id = NULL WHERE id = ? AND proposal_id = ? AND state = 'Draft' AND EXISTS (SELECT 1 FROM proposals WHERE id = ? AND status = 'draft')").bind(t.id, pid, pid),
     env.DB.prepare("DELETE FROM proposals WHERE id = ? AND status = 'draft' AND kind = 'commission'").bind(pid),
   ]);
-  const link = await env.DB.prepare("UPDATE tickets SET proposal_id = ?, updated_at = ? WHERE id = ? AND state = 'Draft' AND proposal_id IS NULL").bind(pid, now, t.id).run();
+  // the link holds only if the ticket is as the checks above read it (an edit from another tab in between changes updated_at)
+  const link = await env.DB.prepare("UPDATE tickets SET proposal_id = ?, updated_at = ? WHERE id = ? AND state = 'Draft' AND proposal_id IS NULL AND updated_at = ?").bind(pid, now, t.id, t.updated_at).run();
   if (!(link?.meta?.changes > 0)) {   // another confirm of this ticket got there first: one ticket, one proposal
     await env.DB.prepare("DELETE FROM proposals WHERE id = ? AND status = 'draft' AND kind = 'commission'").bind(pid).run();
-    return out({ error: `W${t.number} is being put on the ballot. Reload and look again.` }, 409);
+    return out({ error: `W${t.number} changed or is being put on the ballot. Reload and look again.` }, 409);
   }
   let res: Out;
   try { res = await confirmProposal(ctx, player, pid, nowMs); } catch (e) { await undo(); throw e; }   // a draft proposal is undone; a confirmed one is settled by mine() next time
@@ -209,7 +211,7 @@ export async function confirm(ctx: Ctx, player: any, raw: unknown, nowMs: number
   const number = res.body?.proposal?.number;
   await env.DB.batch([
     env.DB.prepare("UPDATE tickets SET state = 'Proposed', proposed_at = ?, updated_at = ? WHERE id = ? AND state = 'Draft' AND proposal_id = ? AND EXISTS (SELECT 1 FROM proposals WHERE id = ? AND status = 'confirmed')").bind(now, now, t.id, pid, pid),
-    env.DB.prepare("INSERT INTO ticket_log (ticket_id, day, kind, text, at) SELECT id, ?, 'proposed', ?, ? FROM tickets WHERE id = ? AND state = 'Proposed' AND proposal_id = ?").bind(game.day, `Put on tomorrow's ballot as P${number}.`, now, t.id, pid),
+    env.DB.prepare("INSERT INTO ticket_log (ticket_id, day, kind, text, at) SELECT id, ?, 'proposed', ?, ? FROM tickets WHERE id = ? AND state = 'Proposed' AND proposal_id = ? AND NOT EXISTS (SELECT 1 FROM ticket_log l WHERE l.ticket_id = tickets.id AND l.kind = 'proposed' AND l.text = ?)").bind(game.day, `Put on tomorrow's ballot as P${number}.`, now, t.id, pid, `Put on tomorrow's ballot as P${number}.`),
   ]);
   const fresh = await findTicket(env, game.id, t.number);
   return out({ ok: true, ticket: await page(ctx, fresh, player, nowMs), message: `W${t.number} is P${number} on tomorrow's ballot.` });
