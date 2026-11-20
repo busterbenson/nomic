@@ -6,7 +6,7 @@ import re, sys
 from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
 
-base, out, cookie, sam_cookie, dee_cookie = sys.argv[1:6]
+base, out, cookie, sam_cookie, dee_cookie, eli_cookie, lou_cookie, zed_cookie = sys.argv[1:9]
 host = urlparse(base).hostname
 failed = []
 SLUG = "chrome"
@@ -133,7 +133,8 @@ with sync_playwright() as pw:
     page.click("#me-chip"); page.wait_for_selector("#acct:not([hidden])")
     am = text(page, "#acct")
     check("S1-ACC-01: the menu has the name, color and points, Your player card and Log out", "Ada" in am and "Teal · 0 points" in am and "Your player card" in am and "Log out" in am, am)
-    check("S1-ACC-02: no Connect your AI in the menu, the header or the Players aside; no Settings (Invite a friend only in a game in setup, checked below) (invite links per player have no backend yet)", not re.search(r"Invite|Connect your AI|Settings", text(page, "header") + text(page, "aside")), text(page, "header"))
+    outside = page.evaluate("(() => { const h = document.querySelector('header').cloneNode(true); const m = h.querySelector('#acct'); if (m) m.remove(); return h.innerText + ' ' + document.querySelector('aside').innerText; })()")
+    check("S1-ACC-02: no Connect your AI, Invite or Settings in the header (outside the menu) or the Players aside; the menu has no Connect your AI and no Settings (Invite a friend is in the menu while the game has room, checked below)", not re.search(r"Invite|Connect your AI|Settings", outside) and not re.search(r"Connect your AI|Settings", am), outside)
     page.click("#bell"); page.wait_for_timeout(200)
     check("opening the bell leaves focus on the bell (the header is redrawn under it)", page.evaluate("document.activeElement && document.activeElement.id") == "bell")
     check("S1-ACC-03: opening the bell closes the account menu", page.locator("#acct").is_hidden() and page.locator("#notes-panel").is_visible())
@@ -517,28 +518,58 @@ with sync_playwright() as pw:
     check("two players named Sam: no page errors", not errors, str(errors))
     c.close()
 
-    # ================= Invite a friend: the account menu of a player in a game still in setup =================
-    for w, h, scheme in [(1280, 900, "light"), (390, 844, "dark")]:
+    # ================= Start (the host, in a game in setup) and Invite a friend (any player, while there is room) =================
+    def as_player(w, h, scheme, slug, ck):
         c = b.new_context(viewport={"width": w, "height": h}, color_scheme=scheme, permissions=["clipboard-read", "clipboard-write"])
-        c.add_cookies([{"name": "s", "value": dee_cookie, "domain": host, "path": "/setup"}]); page = c.new_page()
+        c.add_cookies([{"name": "s", "value": ck, "domain": host, "path": "/" + slug}]); page = c.new_page()
         errors = []; page.on("pageerror", lambda e: errors.append(str(e))); page.on("console", lambda m: errors.append("console: " + m.text) if m.type == "error" else None)
-        page.goto(base + "/setup/"); page.wait_for_selector("#scores li"); page.wait_for_selector("#me-chip"); page.wait_for_timeout(500)
+        page.goto(base + f"/{slug}/"); page.wait_for_selector("#scores li"); page.wait_for_selector("#me-chip"); page.wait_for_selector("#movebar .mb"); page.wait_for_timeout(500)
+        return c, page, errors
+    for w, h, scheme in [(1280, 900, "light"), (1280, 900, "dark"), (390, 844, "light"), (390, 844, "dark")]:
+        tag = f"{w} {scheme}"
+        # the host (Dee, first to join "setup"): the status line and one filled Start button in its place
+        c, page, errors = as_player(w, h, scheme, "setup", dee_cookie)
+        line = text(page, "#movebar")
+        check(f"start {tag}: the host sees the status line and one Start button, in the move bar", "Setting up. 2 players of 8 joined." in line and page.locator("#movebar #start-game").count() == 1 and text(page, "#start-game") == "Start the game", line)
+        check(f"start {tag}: Start is the one filled button in the move bar (Hide board is a link)", page.locator("#movebar .btn:not(.ghost)").count() == 1 and page.locator("#start-game.ghost").count() == 0)
+        bb = box(page, "#start-game")
+        check(f"start {tag}: the button fits the screen (right edge {bb['r']:.0f} <= {w})", bb["r"] <= w and bb["x"] >= 0)
+        sideways(page, w, f"start {tag}")
+        if out != "-": page.screenshot(path=f"{out}/start-host-{w}-{scheme}.png", clip={"x": 0, "y": 0, "width": w, "height": min(h, 700)})
+        check(f"start {tag}: no page errors", not errors, str(errors)); c.close()
+        # another player (Eli, second to join): the status line only
+        c, page, errors = as_player(w, h, scheme, "setup", eli_cookie)
+        check(f"start {tag}: a player who is not the host sees the status line and no Start", "Setting up. 2 players of 8 joined." in text(page, "#movebar") and page.locator("#start-game").count() == 0, text(page, "#movebar"))
+        if out != "-" and w == 390: page.screenshot(path=f"{out}/start-guest-{w}-{scheme}.png", clip={"x": 0, "y": 0, "width": w, "height": min(h, 700)})
+        check(f"start {tag}: (guest) no page errors", not errors, str(errors)); c.close()
+        # Invite a friend: the account menu. In play with room (Ada), in setup with room (Dee), and disabled with the reason when full (Zed)
+        for who, slug, ck, kind in [("Ada", SLUG, cookie, "play"), ("Dee", "setup", dee_cookie, "setup")]:
+            c, page, errors = as_player(w, h, scheme, slug, ck)
+            page.click("#me-chip"); page.wait_for_selector("#acct:not([hidden])")
+            has = page.locator("#acct .acct-invite").count() == 1
+            val = page.input_value("#invite-url") if has else ""
+            check(f"invite {tag} ({kind}): {who} sees 'Invite a friend', their own link and Copy (enabled), and nothing else", has and text(page, "#acct .acct-invite").startswith("Invite a friend") and re.fullmatch(rf"https?://[^/]+/{slug}/join/\S+\?from=[0-9a-f]{{12}}", val) is not None and text(page, "#acct .acct-invite .btn") == "Copy" and page.locator("#invite-copy").is_enabled(), val[:0])
+            if w == 1280 and scheme == "light":
+                page.click("#invite-copy"); page.wait_for_timeout(200)
+                check(f"invite {tag} ({kind}): Copy puts the link on the clipboard and the button says Copied", page.evaluate("navigator.clipboard.readText()") == val and text(page, "#invite-copy") == "Copied")
+            sideways(page, w, f"invite {tag} ({kind})")
+            if out != "-":
+                page.add_style_tag(content="#invite-url{filter:blur(7px)}")   # the join code is a secret: never in a screenshot
+                page.screenshot(path=f"{out}/invite-menu-{kind}-{w}-{scheme}.png", clip={"x": 0, "y": 0, "width": w, "height": 420})
+            check(f"invite {tag} ({kind}): no page errors", not errors, str(errors)); c.close()
+        c, page, errors = as_player(w, h, scheme, "tiny", zed_cookie)
         page.click("#me-chip"); page.wait_for_selector("#acct:not([hidden])")
-        has = page.locator("#acct .acct-invite").count() == 1
-        val = page.input_value("#invite-url") if has else ""
-        check(f"invite {w}: a signed-in player in a game in setup sees 'Invite a friend', the join link and Copy, and nothing else", has and text(page, "#acct .acct-invite").startswith("Invite a friend") and re.fullmatch(r"https?://[^/]+/setup/join/\S+", val) is not None and text(page, "#acct .acct-invite .btn") == "Copy")
-        page.click("#invite-copy"); page.wait_for_timeout(200)
-        clip = page.evaluate("navigator.clipboard.readText()")
-        check(f"invite {w}: Copy puts the link on the clipboard and the button says Copied", clip == val and text(page, "#invite-copy") == "Copied")
-        sideways(page, w, f"invite {w}")
-        if out != "-":
-            page.add_style_tag(content="#invite-url{filter:blur(7px)}")   # the join code is a secret: never in a screenshot
-            page.screenshot(path=f"{out}/invite-menu-{w}-{scheme}.png", clip={"x": 0, "y": 0, "width": w, "height": 420})
-        check(f"invite {w}: no page errors", not errors, str(errors)); c.close()
-    c, page, errors = new_page(b, 1280, 900, "light")
-    page.click("#me-chip"); page.wait_for_selector("#acct:not([hidden])")
-    check("invite: in a game that has started (Ada) the account menu has no 'Invite a friend'", page.locator("#acct .acct-invite").count() == 0 and "Invite" not in text(page, "#acct"))
-    c.close()
+        check(f"invite {tag} (full): the item shows disabled with the reason: 'The game has 1 player.'", page.locator("#acct .acct-invite").count() == 1 and page.locator("#invite-copy").is_disabled() and page.locator("#invite-url").is_disabled() and text(page, "#acct .acct-invite .why") == "The game has 1 player." and page.input_value("#invite-url") == "", text(page, "#acct"))
+        sideways(page, w, f"invite {tag} (full)")
+        if out != "-": page.screenshot(path=f"{out}/invite-menu-full-{w}-{scheme}.png", clip={"x": 0, "y": 0, "width": w, "height": 420})
+        check(f"invite {tag} (full): no page errors", not errors, str(errors)); c.close()
+    # pressing Start, in the browser, as the host of "launch": the game goes to play and day 1 begins
+    c, page, errors = as_player(1280, 900, "light", "launch", lou_cookie)
+    check("start: Lou, the host of a game with 1 player, sees Start (a game can start with 1 player)", "Setting up. 1 player of 8 joined." in text(page, "#movebar") and page.locator("#start-game").count() == 1, text(page, "#movebar"))
+    page.click("#start-game"); page.wait_for_function("!document.querySelector('#start-game')"); page.wait_for_timeout(600)
+    check("start: after Start the status line and the button are gone, day 1 is shown, and the host's menu still has Invite a friend", "Setting up" not in text(page, "#movebar") and page.locator("#sday").is_visible() and "1" in text(page, "#sday"), text(page, "#movebar"))
+    shot(page, "start-pressed-1280-light", full_page=True)
+    check("start: pressing Start leaves no page errors", not errors, str(errors)); c.close()
 
     # ================= logged out, and a game still being set up =================
     c = b.new_context(viewport={"width": 1280, "height": 900}); page = c.new_page()
@@ -560,7 +591,7 @@ with sync_playwright() as pw:
     c = b.new_context(viewport={"width": 1280, "height": 900}); page = c.new_page()
     errors = []; page.on("pageerror", lambda e: errors.append(str(e))); page.on("console", lambda m: errors.append("console: " + m.text) if m.type == "error" and "401" not in m.text else None)
     page.goto(base + "/setup/"); page.wait_for_selector("#scores li"); page.wait_for_function("document.getElementById('rules').textContent.indexOf('Loading') < 0"); page.wait_for_timeout(400)
-    check("a game being set up: 'Setting up. 1 player of 8 joined.', no day strip, no lock bar", "Setting up. 1 player of 8 joined." in text(page, "#movebar") and page.locator("#sday").is_hidden() and page.locator("#lockbar").is_hidden(), text(page, "#movebar"))
+    check("a game being set up: 'Setting up. 2 players of 8 joined.', no Start button for a visitor, no day strip, no lock bar", "Setting up. 2 players of 8 joined." in text(page, "#movebar") and page.locator("#start-game").count() == 0 and page.locator("#sday").is_hidden() and page.locator("#lockbar").is_hidden(), text(page, "#movebar"))
     check("a game being set up: no page errors, no sideways scroll", not errors and page.evaluate("document.documentElement.scrollWidth") <= 1280, str(errors))
     c.close()
     b.close()

@@ -87,7 +87,7 @@
     "welcome-back": "You're logged in.",
     "link-invalid": "That link has expired or was already used. Log in again to get a new one.",
     "no-room": "Couldn't finish joining: there is no room on the map yet for a new piece to start.",
-    "join-failed": "Couldn't finish joining: that piece color was taken, the game is full, or it has started. Open the join link again to pick another color."
+    "join-failed": "Couldn't finish joining: that piece color was taken, or the game is full. Open the join link again to pick another color."
   };
   const api = async (path, body) => {
     const res = await fetch(BASE + path, body === undefined ? { cache: "no-store" } : {
@@ -118,10 +118,10 @@
 
   // ---- the header: the bell and the account chip (one panel open at a time; click-out and Esc close it) -----------------
   const BELL = '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4z M10 21h4" style="fill:none;stroke:var(--ink);stroke-width:2;stroke-linejoin:round"/></svg>';
-  // The game's join link, for a player of this game while it is in setup with a seat free (/api/invite says null otherwise).
+  // Your own invite link (rule 102.3), for a player of this game while it has room: {url}. A full game answers {url: null, reason} (the item shows disabled with the reason); a game that is over, nothing.
   async function loadInvite() {
     INVITE = null;
-    if (ME && ME.player) { const r = await api("/api/invite"); INVITE = r.ok && r.data && r.data.url ? r.data.url : null; }
+    if (ME && ME.player) { const r = await api("/api/invite"); INVITE = r.ok && r.data && (r.data.url || r.data.reason) ? { url: r.data.url || null, reason: r.data.reason || "" } : null; }
   }
   async function loadMe() {
     const me = await api("/api/me");
@@ -156,12 +156,12 @@
     const p = ME && ME.player;
     $("acct").innerHTML = ME ? `<div class="acct-me">${p ? `<span class="dot" style="background:${hexOf(p.color)};width:22px;height:22px"></span>` : ""}<span><b>${esc(ME.user.name)}</b>${p ? `<small>${esc(p.color.name)} · ${plural(p.score, "point")}</small>` : ""}</span></div>
       ${p ? `<button type="button" class="acct-link" data-pl="${esc(p.color.key)}" data-fromacct="1">Your player card</button>` : ""}
-      ${p && INVITE ? `<div class="acct-invite"><span>Invite a friend</span><span class="row"><input id="invite-url" type="text" readonly value="${esc(INVITE)}" aria-label="Invite a friend: join link"><button type="button" class="btn ghost small" id="invite-copy">Copy</button></span></div>` : ""}
+      ${p && INVITE ? `<div class="acct-invite"><span>Invite a friend</span><span class="row"><input id="invite-url" type="text" readonly value="${esc(INVITE.url || "")}"${INVITE.url ? "" : " disabled"} aria-label="Invite a friend: join link"><button type="button" class="btn ghost small" id="invite-copy"${INVITE.url ? "" : " disabled"}>Copy</button></span>${INVITE.url ? "" : `<small class="why">${esc(INVITE.reason)}</small>`}</div>` : ""}
       <button type="button" class="acct-link" id="logout">Log out</button>` : "";
     const ic = $("invite-copy");
-    if (ic) ic.onclick = async () => {
+    if (ic && INVITE && INVITE.url) ic.onclick = async () => {
       const inp = $("invite-url");
-      try { await navigator.clipboard.writeText(INVITE); } catch (e) { inp.focus(); inp.select(); try { document.execCommand("copy"); } catch (e2) {} }   // no clipboard (or not allowed): the link is selected to copy by hand
+      try { await navigator.clipboard.writeText(INVITE.url); } catch (e) { inp.focus(); inp.select(); try { document.execCommand("copy"); } catch (e2) {} }   // no clipboard (or not allowed): the link is selected to copy by hand
       inp.focus(); inp.select(); ic.textContent = "Copied";
     };
     const lo = $("logout"); if (lo) lo.onclick = async () => { await api("/api/logout", {}); location.reload(); };
@@ -466,17 +466,27 @@
     if (pend) lead = `<div class="mb"><span><b>Move to ${esc(noLevel(pend.label))}</b> · <span class="charted-note">${tilesText(newlyCharted(pend))}</span></span><button class="btn small" id="make-move" type="button">Make this move</button><button class="btn ghost small" id="undo-move" type="button">Undo</button></div>`;
     else if (DAY && DAY.you && DAY.you.moved && me) lead = `<div class="mb"><span class="ok" aria-hidden="true">✓</span><span><b>Moved to ${esc(noLevel(me.at.label))}</b> today${LASTMOVE && LASTMOVE.day === DAY.day && LASTMOVE.n != null ? ` · <span class="charted-note">${tilesText(LASTMOVE.n)}</span>` : ""}</span></div>`;
     else if (DAY && DAY.you && DAY.you.ended) lead = `<div class="mb"><span>No move today</span></div>`;
-    else if (g && g.status === "setup") lead = `<div class="mb"><span><b>Setting up.</b> ${plural((DATA.players || []).length, "player")} of ${esc(g.max_players)} joined.</span></div>`;
+    else if (g && g.status === "setup") lead = `<div class="mb"><span><b>Setting up.</b> ${plural((DATA.players || []).length, "player")} of ${esc(g.max_players)} joined.</span>${ME && ME.player && ME.player.is_host ? `<button class="btn small" id="start-game" type="button">Start the game</button>` : ""}</div>`;
     else if (DAY && DAY.locked) lead = `<div class="mb"><span class="hint">The day is being processed.</span></div>`;
     else if (!ME) lead = `<div class="mb"></div>`;
     else if (move.ok) lead = `<div class="mb"><span class="hint">You have not moved today.</span></div>`;   // a state, not an instruction: the dashed tiles say where
     else lead = `<div class="mb"><span class="hint">${esc(move.why || "")}</span></div>`;
     box.innerHTML = lead + `<span class="slot" data-slot="bar-action"></span><span class="mbr"><button class="linkbtn" id="board-toggle" type="button" aria-expanded="${BOARD_OPEN}">${BOARD_OPEN ? "Hide board" : "Show board"}</button></span>`;
     $("playtop").classList.toggle("collapsed", !BOARD_OPEN);
+    const sg = $("start-game"); if (sg) sg.onclick = () => startGame(sg);
     const mm = $("make-move"); if (mm) mm.onclick = () => makeMove(pend, mm);
     const um = $("undo-move"); if (um) um.onclick = () => select(null, null);
     $("board-toggle").onclick = () => { BOARD_OPEN = !BOARD_OPEN; drawMoveBar(); };
     if (VIEW && VIEW.setReach) VIEW.setReach(move.ok ? BOARD.tiles.filter(x => x.z === 0 && canMoveTo(x)).map(x => ({ x: x.x, y: x.y })) : []);
+  }
+  // Start (rules 102.2, 203.1): the host only. The game goes to play and day 1 begins; the page is read again.
+  async function startGame(button) {
+    button.disabled = true;
+    const r = await api("/api/start", {});
+    if (r.ok) { await refresh(); return; }
+    const text = (r.data && r.data.error) || "Something went wrong.";
+    await refresh();
+    const m = $("movebar"); const p = document.createElement("p"); p.className = "notice err"; p.setAttribute("role", "alert"); p.textContent = text; m.prepend(p);
   }
   // The move is final at once (one a day, rule 202): the existing move route, then the bar says what happened.
   async function makeMove(t, button) {

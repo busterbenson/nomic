@@ -131,8 +131,8 @@ function electorsSql(env: Env, gameId: string, n: number) {
   ).bind(gameId, n, gameId, gameId, n, gameId, n);
 }
 // A day opened without its electorate rows (by the code before migration 0007, in the minutes between the migration and
-// the deploy; or a test fixture) gets them the first time they are needed. Players can join only before day 1, so they
-// are the same players. Returns the day's elector ids.
+// the deploy; or a test fixture) gets them the first time they are needed. A day that already has electors is never
+// changed: someone who joins after it began votes from the next day (rule 102.4). Returns the day's elector ids.
 /** @rule 104.2 */
 export async function electorsOf(env: Env, gameId: string, n: number): Promise<string[]> {
   let rows = (await env.DB.prepare("SELECT player_id FROM electors WHERE game_id = ? AND day = ?").bind(gameId, n).all()).results as any[];

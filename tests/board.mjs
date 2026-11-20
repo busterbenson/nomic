@@ -482,7 +482,7 @@ try {
   console.log("  the tools");
   const init = await mcp(A, "pilot", tokMia, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } });
   check("initialize answers, naming the game and the player", init.status === 200 && init.data.result.serverInfo.name === "promptocracy-pilot" && /Pilot game as Mia/.test(init.data.result.instructions), init.text);
-  const TOOLS = ["confirm_proposal", "draft_proposal", "end_turn", "move", "my_state", "propose", "read_ballot", "read_board", "read_day", "read_proposals", "read_rules", "vote", "withdraw_proposal"];
+  const TOOLS = ["confirm_proposal", "draft_proposal", "end_turn", "move", "my_state", "propose", "read_ballot", "read_board", "read_day", "read_proposals", "read_rules", "start_game", "vote", "withdraw_proposal"];
   // The SDK's own client, as an AI app would use it: initialize, the initialized notification, list, call.
   const { Client: SdkClient } = await import("@modelcontextprotocol/sdk/client/index.js");
   const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
@@ -491,11 +491,11 @@ try {
     await sdk.connect(new StreamableHTTPClientTransport(new URL(`${A}/pilot/mcp`), { requestInit: { headers: { authorization: `Bearer ${tokMia}` } } }));
     const sdkTools = await sdk.listTools();
     const sdkState = await sdk.callTool({ name: "my_state", arguments: {} });
-    check("the SDK's own client connects with the token, lists the thirteen tools and calls one", J(sdkTools.tools.map((t) => t.name).sort()) === J(TOOLS) && JSON.parse(sdkState.content[0].text).you.name === "Mia" && sdk.getServerVersion()?.name === "promptocracy-pilot");
-  } catch (e) { check("the SDK's own client connects with the token, lists the thirteen tools and calls one", false, String(e?.stack || e)); }
+    check("the SDK's own client connects with the token, lists the fourteen tools and calls one", J(sdkTools.tools.map((t) => t.name).sort()) === J(TOOLS) && JSON.parse(sdkState.content[0].text).you.name === "Mia" && sdk.getServerVersion()?.name === "promptocracy-pilot");
+  } catch (e) { check("the SDK's own client connects with the token, lists the fourteen tools and calls one", false, String(e?.stack || e)); }
   finally { await sdk.close().catch(() => {}); }
   const list = await mcp(A, "pilot", tokMia, "tools/list", {});
-  check("the tools are read_rules, read_board, read_day, read_proposals, read_ballot, my_state, draft_proposal, confirm_proposal, withdraw_proposal, propose, vote, move, end_turn: no catch-all action yet", J(list.data.result.tools.map((t) => t.name).sort()) === J(TOOLS), list.text);
+  check("the tools are read_rules, read_board, read_day, read_proposals, read_ballot, my_state, draft_proposal, confirm_proposal, withdraw_proposal, propose, vote, move, end_turn, start_game: no catch-all action yet", J(list.data.result.tools.map((t) => t.name).sort()) === J(TOOLS), list.text);
   const annot = (n) => list.data.result.tools.find((t) => t.name === n).annotations;
   check("the read tools say they only read; the draft, confirm, withdraw, propose, vote, move and end_turn tools do not", ["read_rules", "read_board", "read_day", "read_proposals", "read_ballot", "my_state"].every((n) => annot(n).readOnlyHint === true) && ["draft_proposal", "confirm_proposal", "withdraw_proposal", "propose", "vote", "move", "end_turn"].every((n) => annot(n).readOnlyHint === false));
   const toolText = (n) => list.data.result.tools.find((t) => t.name === n).description;

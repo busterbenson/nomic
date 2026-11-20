@@ -42,6 +42,7 @@ export const get = async ({ env, request, data }: Ctx) => {
   );
 };
 
+/** @rule 102.3, 102.4, 505 */
 export const post = async (ctx: Ctx) => {
   const { env, request } = ctx;
   const game = ctx.data.game!;
@@ -97,7 +98,7 @@ export const post = async (ctx: Ctx) => {
   // The board has to exist before anyone can be placed on it.
   await ensureTiles(env, game);
   // The game's spawn rule (505 in the starter rules) picks the tile; one statement then checks "setup", "not full",
-  // picks the next turn_order AND still finds the tile charted and as occupied as the rule saw it. Two people
+  // picks the next turn_order (a game in setup or in play can take a player, rule 102.3) AND still finds the tile charted and as occupied as the rule saw it. Two people
   // verifying at once cannot take the same seat or overfill the game. If both were given the same tile, the loser's
   // insert is refused and the rule is asked again (up to 3 times). Spawning charts nothing.
   const playerId = crypto.randomUUID();
@@ -113,7 +114,7 @@ export const post = async (ctx: Ctx) => {
                 (SELECT COUNT(*) FROM players WHERE game_id = g.id),
                 (SELECT COUNT(*) = 0 FROM players WHERE game_id = g.id), ?, ?, ?, ?
          FROM games g
-         WHERE g.id = ? AND g.status = 'setup' AND (SELECT COUNT(*) FROM players WHERE game_id = g.id) < ?
+         WHERE g.id = ? AND g.status IN ('setup', 'playing') AND (SELECT COUNT(*) FROM players WHERE game_id = g.id) < ?
            AND EXISTS (SELECT 1 FROM tiles t WHERE t.game_id = g.id AND t.x = ? AND t.y = ? AND t.z = ?)
            AND (SELECT COUNT(*) FROM players o WHERE o.game_id = g.id AND o.x = ? AND o.y = ? AND o.z = ?) = ?`,
       ).bind(playerId, t.email, t.display_name, color, shape, now, x, y, z, game.id, seatLimit(game), x, y, z, x, y, z, spawn.occupants).run();
@@ -121,7 +122,7 @@ export const post = async (ctx: Ctx) => {
       if (!joined) {
         // Ask again only if the seat is still there (the game is in setup and not full): a lost race for a tile.
         const st: any = await env.DB.prepare("SELECT g.status AS status, (SELECT COUNT(*) FROM players WHERE game_id = g.id) AS n FROM games g WHERE g.id = ?").bind(game.id).first();
-        if (!st || st.status !== "setup" || st.n >= seatLimit(game)) break;
+        if (!st || st.status === "over" || st.n >= seatLimit(game)) break;
       }
     }
   } catch (e) {

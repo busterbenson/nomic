@@ -41,6 +41,10 @@ try {
   // a second game still being set up (one player, not started), seen by nobody logged in
   const open = await createGame(state, { slug: "setup", name: "Setting Up", repo: "busterbenson/chrome-game", rulesBase: stub.base });
   const dee = await join(srv.base, "setup", open.code, { email: "dee@example.com", name: "Dee", color: "marigold" });
+  const eli = await join(srv.base, "setup", open.code, { email: "eli@example.com", name: "Eli", color: "teal" });   // the second to join: not the host
+  // a game whose host presses Start in the browser (checked once, then it is in play)
+  const launch = await createGame(state, { slug: "launch", name: "Launch Day", repo: "busterbenson/chrome-game", rulesBase: stub.base });
+  const lou = await join(srv.base, "launch", launch.code, { email: "lou@example.com", name: "Lou", color: "orchid" });
   // a one-seat game that is already full
   const tiny = await createGame(state, { slug: "tiny", name: "Full House", repo: "busterbenson/chrome-game", rulesBase: stub.base, max: 1 });
   const zed = await join(srv.base, "tiny", tiny.code, { email: "zed@example.com", name: "Zed", color: "cobalt" });
@@ -53,10 +57,11 @@ try {
   const zedGet = await zed.get("/tiny/api/invite");
   await inv("invite: a logged-out viewer gets 401 and no link", noCookie.status === 401 && !(await noCookie.text()).includes("join/"));
   await inv("invite: a player of another game (Ada, in 'chrome') gets 401 on 'setup' (her session is that game's only)", adaOnSetup.status === 401);
-  await inv("invite: a player of a game in setup gets that game's join link, ending in its own join code", deeGet.status === 200 && deeGet.data.url === `${srv.base}/setup/join/${open.code}`);
-  await inv("invite: a game already playing answers url null (the page hides the item)", adaOwn.status === 200 && adaOwn.data.url === null);
-  await inv("invite: a full game in setup answers url null too", zedGet.status === 200 && zedGet.data.url === null);
-  const deeCookie = [...dee.jar].find(([k]) => k === "s|/setup")[1];
+  await inv("invite: a player of a game in setup gets their own link: the game's join link ending in its code, with their invite code", deeGet.status === 200 && deeGet.data.url.startsWith(`${srv.base}/setup/join/${open.code}?from=`));
+  await inv("invite: a game already playing, with room (Ada, 3 of 8), gives the link too (rule 102.3)", adaOwn.status === 200 && adaOwn.data.url.startsWith(`${srv.base}/chrome/join/`));
+  await inv("invite: a full game answers no link and the reason (the menu shows it disabled)", zedGet.status === 200 && zedGet.data.url === null && zedGet.data.reason === "The game has 1 player.", zedGet.text);
+  const cookieOf = (c, slug) => [...c.jar].find(([k]) => k === `s|/${slug}`)[1];
+  const deeCookie = cookieOf(dee, "setup"), eliCookie = cookieOf(eli, "setup"), louCookie = cookieOf(lou, "launch"), zedCookie = cookieOf(zed, "tiny");
   // a game where two players share a name (joining does not need unique names): one has ended their turn, the other has not
   const dup = await createGame(state, { slug: "dupes", name: "Same Names", repo: "busterbenson/chrome-game", rulesBase: stub.base });
   const sam1 = await join(srv.base, "dupes", dup.code, { email: "sam1@example.com", name: "Sam", color: "teal" });
@@ -67,7 +72,7 @@ try {
   const samCookie = [...sam1.jar].find(([k]) => k === "s|/dupes")[1];
   const cookie = [...ada.jar].find(([k]) => k === "s|/chrome")[1];
   if (process.env.CHROME_SERVE) { console.log("SERVE", srv.base, cookie); await new Promise((res) => setTimeout(res, Number(process.env.CHROME_SERVE) * 1000)); }   // for debugging: keep the fixture up
-  const r = await promisify(execFile)("/usr/local/bin/python3", [ROOT + "/tests/browser-chrome.py", srv.base, shots || "-", cookie, samCookie, deeCookie], { timeout: 240000, maxBuffer: 1 << 24 });
+  const r = await promisify(execFile)("/usr/local/bin/python3", [ROOT + "/tests/browser-chrome.py", srv.base, shots || "-", cookie, samCookie, deeCookie, eliCookie, louCookie, zedCookie], { timeout: 240000, maxBuffer: 1 << 24 });
   process.stdout.write(r.stdout);
 } catch (e) {
   failed = true;
