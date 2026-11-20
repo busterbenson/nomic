@@ -149,7 +149,7 @@ mark{background:color-mix(in srgb,var(--accent) 28%,transparent);color:inherit;b
 /* the book: tabs, then one panel (Summary, Rulebook, Catalog, History) */
 .rbwrap{padding:18px 0 48px;background:var(--sea)}
 .book{display:flex;flex-direction:column;gap:22px;min-width:0}
-.btabs{display:flex;align-items:flex-end;gap:22px;padding:0 24px;border-bottom:1.5px solid var(--line);overflow-x:auto;scrollbar-width:none}
+.btabs{display:flex;align-items:flex-end;gap:22px;padding:0 24px;border-bottom:1.5px solid var(--line);overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;touch-action:pan-x;scrollbar-width:none}
 .btabs::-webkit-scrollbar{display:none}
 .btab{flex:none;min-height:48px;padding:0 0 10px;border:0;border-bottom:3px solid transparent;margin-bottom:-1.5px;background:transparent;font-family:var(--font-display);font-weight:var(--display-weight);font-size:1.45rem;line-height:1;color:var(--ink-muted);cursor:pointer;white-space:nowrap}
 .btab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--ink);font-size:1.75rem}
