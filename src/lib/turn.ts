@@ -3,25 +3,26 @@
 // and a later change to the day changes all of them together.
 //   1. the engine's day gates (src/lib/day.ts dayGate): the game is playing and has a day, the day is not locked
 //      (rule 107.1, checked against the clock), the player has not ended their turn (rule 202.4)
-//   2. what the game's rule modules say about the action, asked with no destination (rule 202: one move a day)
+//   2. what the game's rule modules say about the action, asked with no destination (rule 202: one move a day). Voting
+//      and ending a turn are the site's own (rules 104.3, 202.4): only the day's gates apply to them.
 // There is no order of play (rule 202.1): every player has a turn every day. Returns the refusal or null.
 import { checkAction, lightContext } from "../engine/host";
 import { DayRow, DayTurn, dayGate } from "./day";
 
 export type Refusal = { status: number; error: string; processing_day?: number };
 
-/** @rule 107.1, 202.1, 202.4 */
+/** @rule 104.3, 107.1, 202.1, 202.4 */
 export function turnBlock(
   game: { status: string; phase?: string; turn: number; round: number; day?: number; slug: string; settings: string },
   day: DayRow | null,
   turn: DayTurn,
   player: { id: string },
-  kind: "propose" | "move" | "end_turn",
+  kind: "propose" | "move" | "end_turn" | "vote",
   nowMs: number,
 ): Refusal | null {
   const gate = dayGate(game, day, turn, nowMs);
   if (gate) return gate;
-  if (kind === "end_turn") return null;
+  if (kind === "end_turn" || kind === "vote") return null;
   return checkAction(game, lightContext(game, { moved: !!turn?.moved_at }), { ref: player.id }, { kind });
 }
 

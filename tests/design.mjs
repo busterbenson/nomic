@@ -43,7 +43,7 @@ const rules = read("templates/RULES.md").replace(/\s+/g, " ");
 const keep = [
   ["101", "Every player, and the moderator, must follow the rules in this file as they stand on `main`."],
   ["102", "Adding or removing a player takes a passed proposal."],
-  ["104", "A proposal that changes a core rule (1xx) passes only if every player votes yes."],
+  ["104", "Votes are counted by code, not by the moderator."],
   ["201", "A game has at most 8 players. [setting: max_players]"],
   ["202", "you move at most once a day."],
   ["301", "If more than half of all players vote to overturn it, the ruling is reversed"],
@@ -61,7 +61,7 @@ check("the renumbering is a map, not a rewrite: old 101-105 stay, 209 to 201, 20
 console.log("the day rules (step 1, PR 2)");
 check("the day model replaces the turn model: 103 is proposals (no join order), 203 Time (the 24-hour skip) is gone, and 203 Days, 202.1-202.4 and 107.1 are in, worded as approved",
   T.byNum["103"].title === "Proposals" && !/order they joined/.test(rules) && !/skipped for that round/.test(rules) && T.byNum["203"].title === "Days" &&
-  T.byNum["202"].clauses.map((c) => c.num).join() === "202.1,202.2,202.3,202.4,202.5" && T.byNum["203"].clauses.map((c) => c.num).join() === "203.1,203.2" && T.byNum["107"].clauses.map((c) => c.num).join() === "107.1" &&
+  T.byNum["202"].clauses.map((c) => c.num).join() === "202.1,202.2,202.3,202.4,202.5" && T.byNum["203"].clauses.map((c) => c.num).join() === "203.1,203.2" && T.byNum["107"].clauses.map((c) => c.num).join().startsWith("107.1") &&
   rules.includes("there is no order of play") && rules.includes("Ending is final: after it they can't move, propose or vote until the next day") && rules.includes("A day runs from midnight to midnight in the game's time zone. [setting: game.timezone]") &&
   rules.includes("A day always runs to midnight, even if every player has ended their turn.") && rules.includes("the game is locked: nobody can move, vote, propose or end their turn, on the site or through an AI client (rule 204)"));
 console.log("the proposal rules (step 1, PR 3)");
@@ -74,7 +74,15 @@ check("103 Proposals is 103.1-103.4 and 105 Votes needed is 105.1-105.5, worded 
 check("108.3 (the moderator names conflicts when drafting) and 110.1 (what no proposal can change, refused at drafting) are in, with only the parts that exist yet",
   T.byNum["108"].clauses.map((c) => c.num).join() === "108.3" && T.byNum["110"].clauses.map((c) => c.num).join() === "110.1" &&
   rules.includes("When drafting, the moderator names any other rule the proposal would conflict with, so the proposer can change that rule too.") &&
-  rules.includes("A proposal that would change them is refused when it is drafted.") && !/rule 104\.4|rule 107\.6/.test(T.byNum["110.1"].paras[0].s));
+  rules.includes("A proposal that would change them is refused when it is drafted."));
+console.log("the vote rules (step 1, PR 4)");
+check("104 Voting is 104.1-104.5 and 107 has 107.6 (the 2 am deadline) and 107.7 (not applied: back to the owner), worded as approved for what the code does; 110.1 names hidden votes, the count by code and the deadline",
+  T.byNum["104"].clauses.map((c) => c.num).join() === "104.1,104.2,104.3,104.4,104.5" && T.byNum["107"].clauses.map((c) => c.num).join() === "107.1,107.6,107.7" &&
+  rules.includes("Not voting counts as no.") && rules.includes("are the players when the day starts. A player who joins during the day votes from the next day.") &&
+  rules.includes("until midnight or until they end their turn (rule 202.4), and may change their vote until then.") &&
+  rules.includes("During the day everyone can see who has voted on a proposal, and how many have. After midnight every vote is shown.") &&
+  rules.includes("The moderator has until 2:00 am to process the day.") && rules.includes("It goes back to its proposer with the moderator's reason and a suggestion") &&
+  !/48 hours/.test(rules) && !/budget/.test(rules) && ["104.4", "104.5", "107.6"].every((n) => T.byNum["110.1"].paras[0].s.includes(`(rule ${n})`)));
 check("505 says what the spawn code does (the chart shape of rule 504.2), not a fixed '2.5 tiles'", !/2\.5 tiles/.test(rules) && rules.includes("every tile that a move onto it would chart (rule 504.2) is already charted"));
 
 console.log("one palette file, one set of pieces");

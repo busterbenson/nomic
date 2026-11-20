@@ -124,6 +124,13 @@ proposal a day (rule 103): `POST /<slug>/api/proposals` drafts it (free and repe
 kinds, a small model drafts rewording in plain words), `.../proposals/<id>/confirm` makes it the day's one proposal
 (P1, P2, ... on the next day's ballot) and `.../withdraw` takes it back until midnight or End turn. `POST /api/turn` is
 draft + confirm in one call.
+Each day's ballot is the proposals confirmed the day before (rule 104.3): `POST /<slug>/api/votes {proposal: "P3",
+vote: "yes"|"no"}` votes, and a second vote replaces the first, until midnight or End turn. `GET /<slug>/api/ballot`
+shows each item's threshold (its mark, of the players when the day began: rule 104.2), turnout and your own vote, and
+never anyone else's vote or a total before midnight (rule 104.4). At midnight the cron counts the ballot (rule 104.5).
+With nothing passed, the next day opens at once; with something passed, the game stays locked for the moderator until
+2:00 am in the game's time zone (rule 107.6), when anything still unapplied is not applied and goes back to its
+proposer (rule 107.7), and play resumes.
 
 **The drafting model.** Rewording in a player's own words calls a small model from the Worker (`src/lib/drafter.ts`,
 the Messages API). It needs the secret `MODEL_API_KEY` (`npx wrangler secret put MODEL_API_KEY`); `MODEL_NAME`

@@ -118,8 +118,9 @@ export function client(base) {
         headers: { ...(body !== undefined ? { "content-type": "application/json" } : {}), ...(cookie ? { cookie } : {}), ...headers },
         body: raw !== null ? raw : body !== undefined ? JSON.stringify(body) : undefined,
       });
-      // A kept-alive socket the dev server closed while the test was busy elsewhere resets on reuse: retry once.
-      const res = await send().catch((e) => (e?.cause?.code === "ECONNRESET" ? send() : Promise.reject(e)));
+      // A kept-alive socket the dev server closed while the test was busy elsewhere (a blocking d1() call) resets on
+      // reuse, or is found closed before the request goes out: retry once.
+      const res = await send().catch((e) => (["ECONNRESET", "UND_ERR_SOCKET"].includes(e?.cause?.code) ? send() : Promise.reject(e)));
       for (const sc of res.headers.getSetCookie?.() ?? []) {
         const [pair] = sc.split(";");
         const eq = pair.indexOf("=");

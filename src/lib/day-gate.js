@@ -46,6 +46,34 @@ export function startOfDate(tz, ymd) {
 /** @rule 203.1 */
 export const nextMidnight = (tz, ms) => startOfDate(tz, addDays(localDate(tz, ms), 1));
 
+// The night's deadline (rule 107.6): 2:00 am in the game's time zone on the morning after a day ends, by the wall clock,
+// so a night with a daylight-saving change is longer or shorter (2026-11-01 in Los Angeles: 1 am comes twice, so 2 am is
+// three hours after midnight; 2026-03-08: 2 am never happens, and the deadline is the moment the clocks jump, 3 am
+// PDT). The first minute from the date's start whose local time is 2:00 or later. `endsAtMs` is the day's end (its
+// midnight); the deadline is on the date that midnight begins.
+export const DEADLINE_HOUR = 2;
+const hourFmts = new Map();
+/** @rule 107.6 */
+function hourFmt(tz) {
+  let f = hourFmts.get(tz);
+  if (!f) { f = new Intl.DateTimeFormat("en-US", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23" }); hourFmts.set(tz, f); }
+  return f;
+}
+/** @rule 107.6 */
+export function deadlineAfter(tz, endsAtMs, hour = DEADLINE_HOUR) {
+  const ymd = localDate(tz, endsAtMs);
+  const start = startOfDate(tz, ymd);
+  /** @rule 107.6 */
+  const reached = (ms) => {
+    const p = Object.fromEntries(hourFmt(tz).formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+    const d = `${p.year}-${p.month}-${p.day}`;
+    return d > ymd || (d === ymd && Number(p.hour) >= hour);
+  };
+  let t = start;
+  for (let i = 0; i < (hour + 3) * 60 && !reached(t); i++) t += 60_000;
+  return t;
+}
+
 // ---- the gate ----------------------------------------------------------------------------------------------------
 /** @rule 107.1 */
 export const lockMessage = (n) => `Chalant is processing day ${n}. Play resumes when it's done.`;
