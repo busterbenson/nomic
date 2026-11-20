@@ -1,0 +1,136 @@
+// The Worker's side of the moderator's night (rules 107.2-107.8, 401, 402): the moderator's routes (pending, claim)
+// with their bearer token, the claim refused after the deadline, the unlock when the deployed bundle is the claimed
+// commit (enacted, revision, points by rule 401, the win by rule 402), a deploy that never goes live (the fallback ends
+// the lock), the not-applied notification and the drafter-audit note. Runner side: moderator/test.mjs.
+// Run: npm test. Real `wrangler dev`, LOCAL D1 only; the clock and the deployed sha are dev_controls rows.
+import { createHash } from "node:crypto";
+import { client, createGame, d1, join, migrate, newState, startRulesStub, startServer } from "./lib.mjs";
+import { DEADLINE_REASON, DEPLOY_REASON } from "../src/lib/votes.js";
+
+let pass = 0, fail = 0;
+const check = (name, ok, detail = "") => {
+  if (ok) { pass++; console.log(`  ok    ${name}`); } else { fail++; console.log(`  FAIL  ${name}${detail ? "  -> " + detail : ""}`); }
+};
+const J = JSON.stringify;
+const SITE = "http://localhost:8771";
+const TOKEN = "mod-token-0123456789abcdefghij";
+const SHA1 = "a".repeat(40), SHA2 = "b".repeat(40), SHA3 = "c".repeat(40), SHA4 = "d".repeat(40);
+let srv = null, stub = null;
+const state = newState();
+try {
+  migrate(state);
+  stub = await startRulesStub(8772, { "/busterbenson/mod/main/RULES.md": "# Rules\n" });
+  const g = await createGame(state, { slug: "mod", name: "Mod", max: 6, rulesBase: stub.base, repo: "busterbenson/mod" });
+  d1(state, "CREATE TABLE IF NOT EXISTS dev_controls (key TEXT PRIMARY KEY, value TEXT)");
+  const dev = (k, v) => d1(state, `INSERT INTO dev_controls (key, value) VALUES ('${k}', '${v}') ON CONFLICT (key) DO UPDATE SET value = excluded.value`);
+  dev("clock", "2026-11-10T19:00:00.000Z");
+  srv = await startServer(state, 8771, ["DEV_MODE=1", `SITE_URL=${SITE}`, `RULES_BASE_URL=${stub.base}`]);
+  const A = srv.base;
+  const gid = d1(state, "SELECT id FROM games WHERE slug = 'mod'")[0].id;
+  const names = ["Ana", "Bo", "Cy"];
+  for (let i = 0; i < 3; i++) await join(A, "mod", g.code, { email: `${names[i].toLowerCase()}@example.com`, name: names[i], color: ["teal", "cobalt", "jade"][i] });
+  const id = Object.fromEntries(names.map((n) => [n, d1(state, `SELECT id FROM players WHERE game_id = '${gid}' AND display_name = '${n}'`)[0].id]));
+  const score = (n) => d1(state, `SELECT score FROM players WHERE id = '${id[n]}'`)[0].score;
+  const cron = async () => { const r = await fetch(`${A}/__scheduled?cron=*/5+*+*+*+*`, { signal: AbortSignal.timeout(20000) }); await r.text(); return r.status; };
+  const day = (n) => d1(state, `SELECT n, status, ends_at, deadline_at, commit_sha, tag, last_error FROM days WHERE game_id = '${gid}' AND n = ${n}`)[0];
+  const game = () => d1(state, `SELECT status, day, phase, rules_day FROM games WHERE id = '${gid}'`)[0];
+  const prop = (n) => d1(state, `SELECT number, status, rev, commit_sha, not_applied_reason, budget_minutes, budget_effort FROM proposals WHERE game_id = '${gid}' AND number = ${n}`)[0];
+  const notes = (who) => d1(state, `SELECT id, kind, body FROM notifications WHERE game_id = '${gid}' AND player_id = '${id[who]}' AND kind IN ('not_applied', 'moderator_note') ORDER BY created_at, id`);
+  const plus = (iso, min) => new Date(Date.parse(iso) + min * 60_000).toISOString();
+  const mod = (method, path, body, token = TOKEN) => fetch(`${A}/mod/api/moderator/${path}`, { method, headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(body ? { "content-type": "application/json" } : {}) }, body: body ? J(body) : undefined, signal: AbortSignal.timeout(20000) }).then(async (r) => ({ status: r.status, data: await r.json().catch(() => null) }));
+  // A proposal on day n's ballot (proposed the day before) with everyone voting `vote`.
+  let num = 0;
+  const ballot = (n, who, target, vote = "yes") => {
+    const pid = `q${++num}`;
+    d1(state, `INSERT INTO proposals (id, game_id, number, player_id, day_proposed, day_ballot, kind, scope, target, words, title, draft_head, before_text, after_text, drafted_by, base_sha, mark, status, needed, electorate, created_at, confirmed_at)
+      VALUES ('${pid}', '${gid}', ${num}, '${id[who]}', ${n - 1}, ${n}, 'amend', 'rule', '${target}', 'words of P${num}', 'Change ${target}', 'Change ${target}', 'b', 'a', 'model', 's', 'majority', 'on_ballot', 2, 3, 'x', 'x')`);
+    d1(state, names.map((v) => `INSERT INTO votes (game_id, proposal_id, player_id, day, vote, cast_at, updated_at) VALUES ('${gid}', '${pid}', '${id[v]}', ${n}, '${vote}', 'x', 'x')`).join("; "));
+    return num;
+  };
+  // Midnight of the current day, then the cron: the lock and the count.
+  const midnight = async () => { const d = day(game().day); dev("clock", plus(d.ends_at, 1)); await cron(); return day(d.n); };
+
+  // Day 1 begins; it has no ballot. Its night finalizes at once, and day 2 opens.
+  d1(state, `UPDATE games SET status = 'playing' WHERE id = '${gid}'`);
+  await client(A).get("/mod/api/day");
+  await midnight();
+  check("(day 1, with no ballot, ends without the moderator; day 2 is open)", game().day === 2 && day(1).status === "done");
+
+  console.log("the moderator's routes");
+  d1(state, `UPDATE games SET moderator_token_hash = '${createHash("sha256").update(TOKEN).digest("hex")}' WHERE id = '${gid}'`);
+  check("no token, a wrong token, or a game with no token hash: 401 with no detail", (await mod("GET", "pending", null, null)).status === 401 && (await mod("GET", "pending", null, "wrong-token-0123456789abcdef")).status === 401);
+  const idle = await mod("GET", "pending");
+  check("pending with nothing to do: job null, no not-applied proposals", idle.status === 200 && idle.data.job === null && J(idle.data.not_applied) === "[]", J(idle.data));
+  const p1 = ballot(2, "Ana", "401"), p2 = ballot(2, "Bo", "402.1"), p3 = ballot(2, "Cy", "504", "no");
+  const d2 = await midnight();
+  check("the count: P1 and P2 passed with the budget from the settings (107.5: 20 minutes, medium), P3 failed; day 2 processing", prop(p1).status === "passed" && prop(p2).status === "passed" && prop(p3).status === "failed" && prop(p1).budget_minutes === 20 && prop(p1).budget_effort === "medium" && d2.status === "processing", J([prop(p1), d2]));
+  const pend = await mod("GET", "pending");
+  check("pending: day 2's job with its passed proposals in the order rule 107 gives (P1, P2), each with its draft and budget", pend.data.job?.day === 2 && pend.data.job.status === "processing" && J(pend.data.job.passed.map((p) => p.number)) === J([p1, p2]) && pend.data.job.passed[0].words === "words of P1" && pend.data.job.passed[0].budget_minutes === 20 && pend.data.job.deadline_at === d2.deadline_at && pend.data.job.passed[0].player.name === "Ana", J(pend.data.job));
+  check("pending never shows an email or a player id", !/@example\.com/.test(J(pend.data)) && !J(pend.data).includes(id.Ana));
+  const bad1 = await mod("POST", "days/2/claim", { sha: SHA1, outcomes: [{ number: p1, applied: true, commit: SHA1 }] });
+  const bad2 = await mod("POST", "days/2/claim", { sha: "nope", outcomes: [] });
+  const bad3 = await mod("POST", "days/2/claim", { sha: SHA1, outcomes: [{ number: p1, applied: true, commit: SHA1 }, { number: p2, applied: false, reason: "" }] });
+  check("a claim must name each passed proposal once, with a 40-hex sha and a reason for each not applied: 400", bad1.status === 400 && bad2.status === 400 && bad3.status === 400 && day(2).status === "processing");
+  const ok = await mod("POST", "days/2/claim", { sha: SHA1, outcomes: [{ number: p1, applied: true, commit: SHA1 }, { number: p2, applied: false, reason: "its code and tests couldn't be made to pass after 2 fixes. Try splitting it into smaller proposals or simplifying it, and propose it again." }], notes: [{ number: p1, body: "P1: the draft you voted on may not say what you asked for. You asked for 15." }] });
+  check("the claim before the deadline: 200, the day deploying with the commit and its tag", ok.status === 200 && ok.data.status === "deploying" && day(2).status === "deploying" && day(2).commit_sha === SHA1 && day(2).tag === "day-2", J(ok));
+  check("a not-applied outcome: the proposal not_applied with the reason, and its proposer told (once) with the reason and the suggestion (107.7)", prop(p2).status === "not_applied" && /couldn't be made to pass/.test(prop(p2).not_applied_reason) && notes("Bo").length === 1 && /^P2 passed but was not applied: its code and tests couldn't be made to pass/.test(notes("Bo")[0].body) && /It gave no points/.test(notes("Bo")[0].body), J(notes("Bo")));
+  check("the drafter audit's note goes to the proposer as an in-app note", notes("Ana").length === 1 && notes("Ana")[0].kind === "moderator_note" && /You asked for 15/.test(notes("Ana")[0].body));
+  const again = await mod("POST", "days/2/claim", { sha: SHA1, outcomes: [{ number: p1, applied: true, commit: SHA1 }] });
+  const other = await mod("POST", "days/2/claim", { sha: SHA2, outcomes: [{ number: p1, applied: true, commit: SHA2 }] });
+  check("the same claim again is a 200 (the runner restarted); a claim with another sha is refused (409)", again.status === 200 && again.data.repeat === true && other.status === 409 && day(2).commit_sha === SHA1 && notes("Bo").length === 1);
+  await cron();
+  check("deploying, not yet live: the lock stays, no points", day(2).status === "deploying" && game().phase === "locked" && score("Ana") === 0);
+
+  console.log("the unlock: the deployed rules are the claimed commit");
+  dev("bundle_sha:mod", SHA1);
+  await cron();
+  check("P1 enacted, revision 1 of its rule (107.2); P2 stays not applied", prop(p1).status === "enacted" && prop(p1).rev === 1 && prop(p2).status === "not_applied", J([prop(p1), prop(p2)]));
+  check("401: Ana gets 10 points, nobody else does; the night log has the points", score("Ana") === 10 && score("Bo") === 0 && score("Cy") === 0 && d1(state, `SELECT COUNT(*) AS n FROM events WHERE game_id = '${gid}' AND kind = 'points' AND day = 2`)[0].n === 1);
+  check("day 2 done, the rules of day 2 live (rules_day), day 3 open and the game unlocked", day(2).status === "done" && game().rules_day === 2 && game().day === 3 && game().phase === "open" && day(3).status === "open", J([day(2), game()]));
+  await cron();
+  check("the cron again changes nothing: no points twice", score("Ana") === 10 && game().day === 3);
+
+  console.log("a deploy that never goes live");
+  const p4 = ballot(3, "Cy", "401");
+  const d3 = await midnight();
+  const c3 = await mod("POST", "days/3/claim", { sha: SHA2, outcomes: [{ number: p4, applied: true, commit: SHA2 }] });
+  dev("clock", plus(d3.deadline_at, 10));
+  await cron();
+  check("past 2 am but within the 30 minutes the deploy gets: still waiting, locked", c3.status === 200 && day(3).status === "deploying" && game().phase === "locked");
+  dev("clock", plus(d3.deadline_at, 31));
+  await cron();
+  check("30 minutes past the deadline and never live: not applied (the reason says so), no points, the lock ends (timed_out)", prop(p4).status === "not_applied" && prop(p4).not_applied_reason === DEPLOY_REASON && score("Cy") === 0 && day(3).status === "timed_out" && game().phase === "open" && game().day === 4 && game().rules_day === 2, J([prop(p4), day(3), game()]));
+  check("Cy is told, with the reason", notes("Cy").some((x) => x.body.includes(DEPLOY_REASON)));
+  const recon = await mod("GET", "pending");
+  check("pending lists the not-applied proposals for the moderator to reconcile", J(recon.data.not_applied.map((x) => x.number)) === J([p2, p4]) && recon.data.job === null);
+
+  console.log("a claim after the deadline");
+  const p5 = ballot(4, "Bo", "402.1");
+  const d4 = await midnight();
+  dev("clock", plus(d4.deadline_at, 1));
+  const late = await mod("POST", "days/4/claim", { sha: SHA3, outcomes: [{ number: p5, applied: true, commit: SHA3 }] });
+  check("is refused (409, rule 107.6) and writes nothing", late.status === 409 && /deadline/.test(late.data.error) && day(4).status === "processing" && !day(4).commit_sha, J(late));
+  await cron();
+  check("then the 2 am fallback ends the lock: not applied with the deadline reason", prop(p5).status === "not_applied" && prop(p5).not_applied_reason === DEADLINE_REASON && day(4).status === "timed_out" && game().day === 5);
+
+  console.log("winning (rule 402)");
+  d1(state, `UPDATE players SET score = 95 WHERE id = '${id.Ana}'; UPDATE players SET score = 98 WHERE id = '${id.Bo}'`);
+  const p6 = ballot(5, "Ana", "401"), p7 = ballot(5, "Bo", "402.1");
+  await midnight();
+  await mod("POST", "days/5/claim", { sha: SHA4, outcomes: [{ number: p6, applied: true, commit: SHA4 }, { number: p7, applied: true, commit: SHA4 }] });
+  dev("bundle_sha:mod", SHA4);
+  await cron();
+  const won = d1(state, `SELECT player_id, text FROM events WHERE game_id = '${gid}' AND kind = 'won'`);
+  check("two pass 100 the same night: the first given points wins (402.2: P6 is applied first, so Ana); the game is over (402.3)", score("Ana") === 105 && score("Bo") === 108 && won.length === 1 && won[0].player_id === id.Ana && game().status === "over", J([won, game()]));
+  check("rule 401's revisions: P6 is the second change to rule 401 (rev 2)", prop(p6).rev === 2 && prop(p6).status === "enacted");
+  const over = await client(A).get("/mod/api/day");
+  check("the game over: the day status still reads (the board, rules and history stay readable)", over.status === 200);
+} catch (e) {
+  fail++; console.log("  FAIL  harness:", e?.stack || e);
+  if (srv) console.log(srv.log().slice(-3000));
+} finally {
+  if (srv) await srv.stop();
+  if (stub) await stub.stop();
+}
+console.log(`${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);

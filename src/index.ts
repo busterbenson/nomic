@@ -29,6 +29,7 @@ import * as apiDay from "./routes/api-day";
 import * as apiEndTurn from "./routes/api-end-turn";
 import * as apiVotes from "./routes/api-votes";
 import * as apiBallot from "./routes/api-ballot";
+import * as apiModerator from "./routes/api-moderator";
 import { clockNow, runMidnight } from "./lib/day";
 import * as apiNotifications from "./routes/api-notifications";
 import * as apiNotificationsRead from "./routes/api-notifications-read";
@@ -148,6 +149,12 @@ async function route(request: Request, env: Env, execCtx: ExecutionContext): Pro
   if (sub === ".well-known" && segs.length === 3 && segs[2] === "oauth-authorization-server") return method === "OPTIONS" ? preflight() : run({ get: oauthMeta.authorizationServer }, method, ctx);
   if (sub === "api" && segs.length === 3) return run(API[segs[2]] && Object.hasOwn(API, segs[2]) ? API[segs[2]] : undefined, method, ctx);
   if (sub === "api" && segs.length === 4 && segs[2] === "notifications" && segs[3] === "read") return run(apiNotificationsRead, method, ctx);
+  // The moderator's routes (bearer token; src/routes/api-moderator.ts)
+  if (sub === "api" && segs.length === 4 && segs[2] === "moderator" && segs[3] === "pending") return run({ get: apiModerator.pending }, method, ctx);
+  if (sub === "api" && segs.length === 6 && segs[2] === "moderator" && segs[3] === "days" && segs[5] === "claim" && /^\d{1,6}$/.test(segs[4])) {
+    ctx.params.n = segs[4];
+    return run({ post: apiModerator.claim }, method, ctx);
+  }
   // /api/proposals/<id>/confirm and /withdraw (rule 103)
   if (sub === "api" && segs.length === 5 && segs[2] === "proposals" && (segs[4] === "confirm" || segs[4] === "withdraw")) {
     ctx.params.id = segs[3];

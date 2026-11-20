@@ -31,9 +31,9 @@ export const HOOKS = Object.freeze({
   voteMark: { mode: "decide", wired: false },
   electorate: { mode: "decide", wired: false },
   tally: { mode: "decide", wired: false },
-  applyOrder: { mode: "decide", wired: false },
-  onEnacted: { mode: "sequence", wired: false },
-  dayEnd: { mode: "sequence", wired: false },
+  applyOrder: { mode: "decide", wired: true },
+  onEnacted: { mode: "sequence", wired: true },
+  dayEnd: { mode: "sequence", wired: true },
 });
 
 export const ACTION_KINDS = Object.freeze(["move", "propose", "vote", "end_turn"]);
@@ -150,6 +150,9 @@ const isInt = (n) => Number.isSafeInteger(n);
 const isStr = (s, max = 400) => typeof s === "string" && s.length > 0 && s.length <= max;
 export const EFFECT_TYPES = Object.freeze(["chart", "points", "log", "win"]);
 export const APPLIED_EFFECTS = Object.freeze(["chart"]);
+// What the night's hooks may return, and the engine applies at the unlock (src/lib/day.ts): points when a change takes
+// effect (rule 401) and a win at the end of the night (rule 402).
+export const NIGHT_EFFECTS = Object.freeze(["points", "win"]);
 
 /** @rule 101 */
 export function validateEffect(e) {
@@ -238,6 +241,17 @@ export function assembleRules(modules, { label = "rules" } = {}) {
   const call = (m, hook, args) => {
     try { return m[hook](...args); } catch (e) { throw new RuleError(m.rule, hook, e); }
   };
+  /** @rule 401, 402 */
+  const nightEffects = (hook, args) => {
+    const out = [];
+    for (const m of implementers(hook)) {
+      const r = call(m, hook, args) ?? [];
+      const bad = validateEffects(r) ?? r.map((e) => (NIGHT_EFFECTS.includes(e.type) ? null : `the ${e.type} effect can't be used at night`)).find(Boolean);
+      if (bad) throw new RuleError(m.rule, hook, new Error(bad));
+      out.push(...r.map((e) => ({ ...e, rule: m.rule })));
+    }
+    return out;
+  };
   return Object.freeze({
     modules: Object.freeze(sorted.map((m) => m.rule)),
     /** @rule 101 */
@@ -266,6 +280,30 @@ export function assembleRules(modules, { label = "rules" } = {}) {
         out.push(...r);
       }
       return out;
+    },
+    // The order passed proposals are applied in (rule 107.2), from the one rule that decides it. `passed` is a list of
+    // plain proposals ({number, target, ...}); the answer must be the same proposals, each once, in a new order.
+    /** @rule 107.2 */
+    applyOrder(ctx, passed) {
+      const m = implementers("applyOrder")[0];
+      const list = deepFreeze(passed.map((p) => ({ ...p })));
+      const r = call(m, "applyOrder", [ctx, list]);
+      /** @rule 107.2 */
+      const nums = (x) => x.map((p) => p?.number).sort((a, b) => a - b).join(",");
+      if (!Array.isArray(r) || r.length !== passed.length || nums(r) !== nums(passed) || new Set(r.map((p) => p?.number)).size !== r.length) {
+        throw new RuleError(m.rule, "applyOrder", new Error("must return the same proposals, each once"));
+      }
+      return r.map((p) => passed.find((q) => q.number === p.number));
+    },
+    // Effects when a passed proposal takes effect (rule 401), every rule's, joined in rule order. Only points and win.
+    /** @rule 401 */
+    onEnacted(ctx, proposal) {
+      return nightEffects("onEnacted", [ctx, deepFreeze({ ...proposal })]);
+    },
+    // Effects at the end of the night, after every onEnacted (rule 402): `results` is {enacted: [...], scores: {ref: n}}.
+    /** @rule 402 */
+    dayEnd(ctx, results) {
+      return nightEffects("dayEnd", [ctx, deepFreeze(JSON.parse(JSON.stringify(results)))]);
     },
     // the one spawn rule: a tile from `candidates`, or null when there is room nowhere.
     /** @rule 505 */

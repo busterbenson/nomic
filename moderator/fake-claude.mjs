@@ -1,0 +1,66 @@
+#!/usr/bin/env node
+// A scripted stand-in for `claude -p`, for moderator/test.mjs only. It reads the prompt on stdin, finds the proposal's
+// number in the fenced data, and does what the scenario file next to it (fake-claude.scenario.json, written by the test)
+// says for that number. Every call is appended to fake-claude.calls.jsonl beside it.
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+
+const here = process.env.FAKE_CLAUDE_DIR || dirname(new URL(import.meta.url).pathname);
+const scenario = JSON.parse(readFileSync(join(here, "fake-claude.scenario.json"), "utf8"));
+let prompt = "";
+for await (const c of process.stdin) prompt += c;
+const data = JSON.parse(/<proposal-data>\n([\s\S]*?)\n<\/proposal-data>/.exec(prompt)[1]);
+const audit = /drafter audit/.test(prompt);
+const fix = /Your last attempt failed the checks/.test(prompt);
+const args = process.argv.slice(2);
+appendFileSync(join(here, "fake-claude.calls.jsonl"), JSON.stringify({ number: data.number, audit, fix, redraft_onto: data.redraft_onto ?? null, effort: args[args.indexOf("--effort") + 1], restricted: args.includes("--restricted"), tools: args[args.indexOf("--tools") + 1], env: Object.keys(process.env).sort() }) + "\n");
+
+if (audit) {
+  const a = scenario.audit?.[data.number] ?? { material: false, reading: "as drafted", gap: "" };
+  process.stdout.write(JSON.stringify({ type: "result", result: JSON.stringify(a) }));
+  process.exit(0);
+}
+const step = scenario.apply[data.number];
+const cwd = process.cwd();
+const edit = (f, from, to) => { const p = join(cwd, f); writeFileSync(p, readFileSync(p, "utf8").split(from).join(to)); };
+const result = (r) => writeFileSync(join(cwd, "MODERATOR-RESULT.json"), JSON.stringify(r));
+
+switch (step.action) {
+  case "points": { // 401: N points instead of the current number (read from the text)
+    const cur = /gets (\d+) points when it is applied/.exec(readFileSync(join(cwd, "RULES.md"), "utf8"))[1];
+    edit("RULES.md", `gets ${cur} points when it is applied`, `gets ${step.to} points when it is applied`);
+    edit("rules/401.ts", `proposal.player, ${cur},`, `proposal.player, ${step.to},`);
+    if (!step.breakTest) edit("rules/401.test.ts", `delta: ${cur},`, `delta: ${step.to},`);
+    result({ outcome: "applied" });
+    break;
+  }
+  case "win": { // 402.1: win at N
+    edit("RULES.md", "The first player to reach 100 points wins.", `The first player to reach ${step.to} points wins.`);
+    edit("rules/402.ts", ">= 100", `>= ${step.to}`);
+    writeFileSync(join(cwd, "rules/402.test.ts"), `import { test } from "node:test";
+import assert from "node:assert/strict";
+import { makeCtx } from "promptocracy/engine/testing";
+import rule from "./402.ts";
+test("402.1: reaching ${step.to} wins", () => {
+  assert.equal(rule.dayEnd!(makeCtx(), { before: { a: ${step.to - 10} }, given: [{ player: "a", delta: 10 }] } as any).length, 1);
+});
+`);
+    if (step.conflict) result({ outcome: "applied", conflict: step.conflict });
+    else result({ outcome: "applied" });
+    break;
+  }
+  case "outside": // writes where the night may not
+    mkdirSync(join(cwd, "src"), { recursive: true });
+    writeFileSync(join(cwd, "src", "evil.js"), "export const x = 1;\n");
+    edit("RULES.md", "A player whose proposal passes", "A player whose proposal passes");
+    result({ outcome: "applied" });
+    break;
+  case "sleep":
+    await new Promise((r) => setTimeout(r, step.ms));
+    break;
+  case "nonsense":
+    result({ outcome: "not_applied", reason: "it no longer makes sense on the new text of rule 401" });
+    break;
+  default:
+    throw new Error(`no scenario for P${data.number}`);
+}

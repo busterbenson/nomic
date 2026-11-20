@@ -7,15 +7,15 @@ Every function that carries out the game should say which rule it implements, wi
 `src/` is only reported for now: these functions have no claim yet. Site plumbing such as sign-in and email goes
 under rule 101 or 102; a follow-up change claims them and moves `src/` into the strict set.
 
-130 of 215 functions outside `src/engine/` are unclaimed.
+133 of 233 functions outside `src/engine/` are unclaimed.
 
 ## src/index.ts (5)
 
-- line 54: `secure`
-- line 64: `notFound`
-- line 70: `run`
-- line 75: `route`
-- line 160: `fetch`
+- line 55: `secure`
+- line 65: `notFound`
+- line 71: `run`
+- line 76: `route`
+- line 167: `fetch`
 
 ## src/lib/auth.ts (6)
 
@@ -91,26 +91,28 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 - line 13: `page`
 
-## src/lib/proposals.js (3)
+## src/lib/proposals.js (5)
 
-- line 137: `own`
-- line 138: `cites`
-- line 251: `own`
+- line 140: `own`
+- line 141: `cites`
+- line 203: `obj`
+- line 318: `refuse`
+- line 320: `own`
 
 ## src/lib/settings.js (12)
 
-- line 36: `validTimeZone`
-- line 41: `isInt`
-- line 42: `isObj`
-- line 43: `evenInt`
-- line 47: `max_players`
-- line 51: `mcp_enabled`
-- line 54: `exactly`
-- line 63: `spawnSpots`
-- line 64: `inside`
-- line 72: `validateSettings`
-- line 92: `getSettings`
-- line 106: `settingsForSize`
+- line 41: `validTimeZone`
+- line 46: `isInt`
+- line 47: `isObj`
+- line 48: `evenInt`
+- line 52: `max_players`
+- line 56: `mcp_enabled`
+- line 61: `exactly`
+- line 70: `spawnSpots`
+- line 71: `inside`
+- line 79: `validateSettings`
+- line 99: `getSettings`
+- line 113: `settingsForSize`
 
 ## src/lib/util.ts (27)
 
@@ -165,6 +167,10 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 ## src/routes/api-me.ts (1)
 
 - line 4: `get`
+
+## src/routes/api-moderator.ts (1)
+
+- line 32: `unauthorized`
 
 ## src/routes/api-notifications-read.ts (1)
 
