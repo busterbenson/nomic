@@ -13,7 +13,7 @@
 import { bundleFor } from "../engine/host";
 import { getPlayer } from "../lib/auth";
 import { clockNow, dayOpenBinds, loadToday } from "../lib/day";
-import { DrafterError, draftRewording } from "../lib/drafter";
+import { DrafterError, draftRewording, drafterReady } from "../lib/drafter";
 import { notify } from "../lib/notify";
 import { CONFIRM_SQL, DRAFT_INSERT_SQL, WITHDRAW_SQL, conflictSentence, draftOf, fixedRefusal, markFor, needsModel, neededOf, parseBook, readRequest } from "../lib/proposals.js";
 import { refusalBody, turnBlock } from "../lib/turn";
@@ -86,8 +86,15 @@ export async function draft(ctx: Ctx, player: any, body: any, nowMs: number): Pr
      ON CONFLICT (game_id, player_id, day) DO UPDATE SET n = n + 1 WHERE n < ?`,
   ).bind(game.id, player.id, game.day, DRAFTS_PER_DAY).run();
   if (!(slot?.meta?.changes > 0)) return out({ error: `That's ${DRAFTS_PER_DAY} drafts today, the most for one day. Try again tomorrow.` }, 429);
-  let after: string | null = null, settings: Record<string, unknown> = {}, modelConflicts: string[] = [];
+  let after: string | null = null, settings: Record<string, unknown> = {}, modelConflicts: string[] = [], asked = false;
+  if (req.kind === "amend" && req.prefilled && drafterReady(env)) {
+    // Exact wording is kept as written; the model only names the other rules it would conflict with (rule 108.3). If
+    // the model is down, the exact text still drafts, with no conflicts named.
+    asked = true;
+    try { modelConflicts = (await draftRewording(env, book, md, req)).conflicts; } catch (e: any) { if (!(e instanceof DrafterError)) throw e; }
+  }
   if (needsModel(req)) {
+    asked = true;
     try {
       const a = await draftRewording(env, book, md, req);
       after = a.after_text; settings = a.settings; modelConflicts = a.conflicts;
@@ -98,7 +105,7 @@ export async function draft(ctx: Ctx, player: any, body: any, nowMs: number): Pr
   }
   // The model may take a while: the write is timed when its answer is in, so a draft that finishes after midnight
   // meets the lock (rule 107.1).
-  if (after !== null) {
+  if (asked) {
     nowMs = await clockNow(env);
     const late = turnBlock(game, day, turn, player, "propose", nowMs);
     if (late) return out(refusalBody(late), late.status);

@@ -196,14 +196,25 @@ try {
   check("...and its answer becomes the draft: 'Amend rule 401 (Points) to read:', the new text, drafted by the model, with the conflict it named (rule 108.3)",
     dm.data.proposal.head === "Amend rule 401 (Points) to read:" && dm.data.proposal.after_text === "A player whose proposal passes gets 15 points." && dm.data.proposal.drafted_by === "model" &&
     J(dm.data.proposal.conflicts) === J(["402"]) && /rule 402 \(rule 108\.3\)/.test(dm.data.proposal.conflict_note), dm.text);
+  const callsPre = model.calls.length;
+  model.next = { status: 200, text: '{"after_text": "IGNORED", "conflicts": ["202.2"], "settings": {}}' };
+  const pre = await ana.post(P, { kind: "reword", target: "401", words: "Every player must move twice every day.", prefilled: true });
+  model.next = null;
+  check("an exact rewording (prefilled) keeps the player's text word for word, and the model still names the conflicts (rule 108.3): 202.2",
+    pre.status === 200 && pre.data.proposal.after_text === "Every player must move twice every day." && J(pre.data.proposal.conflicts) === J(["202.2"]) && model.calls.length === callsPre + 1 &&
+    model.calls.at(-1).body.messages[0].content.includes("Only name the conflicts"), pre.text);
+  model.next = { status: 500 };
+  const preDown = await ana.post(P, { kind: "reword", target: "401", words: "Every player gets 12 points.", prefilled: true });
+  model.next = null;
+  check("...and if the model is down, the exact text still drafts (no conflicts named)", preDown.status === 200 && J(preDown.data.proposal.conflicts) === J([]), preDown.text);
   model.next = { status: 200, text: "I think the rule should say 15." };
   const bad = await ana.post(P, { kind: "reword", target: "401", words: "15 points" });
   model.next = { status: 500 };
   const down = await ana.post(P, { kind: "reword", target: "401", words: "15 points" });
   model.next = null;
-  check("a malformed model answer and a failing model both answer 502 with a plain reason, and store nothing", bad.status === 502 && bad.data.drafting === "malformed" && down.status === 502 && down.data.drafting === "failed" && rows().length === 2, bad.text + down.text);
+  check("a malformed model answer and a failing model both answer 502 with a plain reason, and store nothing", bad.status === 502 && bad.data.drafting === "malformed" && down.status === 502 && down.data.drafting === "failed" && rows().length === 4, bad.text + down.text);
   const fx = await ana.post(P, { kind: "repeal", target: "107" });
-  check("a proposal that would change a fixed part is refused when it is drafted (422, rule 110.1), and stores nothing", fx.status === 422 && fx.data.rule === "110.1" && /rule 107\.1/.test(fx.data.error) && rows().length === 2, fx.text);
+  check("a proposal that would change a fixed part is refused when it is drafted (422, rule 110.1), and stores nothing", fx.status === 422 && fx.data.rule === "110.1" && /rule 107\.1/.test(fx.data.error) && rows().length === 4, fx.text);
   const cf = await ana.post(P, { kind: "repeal", target: "504" });
   check("a repeal names the rules it would leave pointing at nothing (505 cites 504.2)", cf.status === 200 && cf.data.proposal.conflicts.includes("505") && /rule 505/.test(cf.data.proposal.conflict_note), cf.text);
 
