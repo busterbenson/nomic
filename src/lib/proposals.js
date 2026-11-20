@@ -113,6 +113,7 @@ export function fixedParts(book) {
 export function fixedTouched(book, num) {
   const n = book.byNum[num];
   return fixedParts(book).filter((p) => {
+    if (!has(book, p)) return false;   // the site's floor names parts a game's own text may lack (104.4, 104.5 in day-0.2): a change can't touch text that isn't there
     if (p === num || p.startsWith(num + ".") || num.startsWith(p + ".")) return true;
     return n?.kind === "block" && String(Math.floor(parseInt(p, 10) / 100) * 100) === num;
   });
@@ -152,6 +153,61 @@ export function referencesTo(book, num) {
 }
 /** @rule 108.3 */
 export const conflictSentence = (nums) => (nums.length ? `This would conflict with ${nums.map((n) => `rule ${n}`).join(", ")} (rule 108.3). You can change ${nums.length > 1 ? "them" : "it"} too.` : null);
+
+// ---- conflict candidates, from code (rule 108.3) ------------------------------------------------------------------
+// Before the model is asked, code lists the parts a change to `target` could collide with, so the model judges a short list
+// instead of finding them by reading the whole rulebook. A candidate is only a place to look: the model decides, and only
+// what it names in `conflicts` is a conflict. In order: parts that cite the target (they point at text that is changing),
+// parts the target cites (they rely on it), parts sharing a [setting: key] with it, then parts in the target's own block that
+// talk about the same things (votes, points, moves, the turn, the day, players, ...), rarest shared word first.
+/** @rule 108.3 */
+const NOUNS = [["votes", /\bvot(?:e|es|ed|ing)\b/], ["points", /\bpoints?\b/], ["moves", /\bmov(?:e|es|ed|ing)\b/], ["turn", /\bturns?\b/], ["day", /\bdays?\b/],
+  ["players", /\bplayers?\b/], ["proposals", /\bproposals?\b/], ["ballot", /\bballots?\b/], ["marks", /\bmarks?\b|\bunanimous\b|\bmajority\b/], ["tiles", /\btiles?\b/],
+  ["pieces", /\bpieces?\b/], ["rulings", /\brulings?\b/]];
+/** @rule 108.3 */
+const nounsIn = (text) => NOUNS.filter(([, re]) => re.test(String(text).toLowerCase())).map(([n]) => n);
+/** @rule 108.3 */
+const settingKeysIn = (text) => [...String(text).matchAll(/\[setting:\s*([\w.]+)\s*\]/g)].map((m) => m[1]);
+/** @rule 108.3 */
+export const CANDIDATE_LIMIT = 8;
+// Returns [{num, why}], at most CANDIDATE_LIMIT, never the target, its clauses or its rule. `words` is the player's words.
+/** @rule 108.3 */
+export function conflictCandidates(book, target, words = "") {
+  const node = book.byNum[target];
+  if (!node || node.kind === "block") return [];
+  const own = (k) => k === target || k.startsWith(target + ".") || target.startsWith(k + ".");
+  const targetRaw = node.kind === "clause" ? node.paras.map(paraTxt).join(" ") : [...node.paras.map(paraTxt), ...node.clauses.flatMap((c) => c.paras.map(paraTxt))].join(" ");
+  const out = new Map();   // num -> why (the first reason wins)
+  const add = (num, why) => { if (!out.has(num) && has(book, num) && !own(num)) out.set(num, why); };
+  for (const n of referencesTo(book, target)) add(n, `cites ${target}`);
+  for (const n of citedIn(`${targetRaw} ${words}`)) add(n, `the text cites it`);
+  const keys = new Set(settingKeysIn(targetRaw));
+  const blockNum = String(Math.floor(parseInt(target, 10) / 100) * 100);
+  // The parts of the book as units of text. Another rule is one unit (all its text); the target's own rule is split into its
+  // clauses, since a sibling clause is the likeliest thing a clause can contradict.
+  const units = [];
+  for (const sec of book.sections) for (const r of sec.rules) {
+    const heads = r.paras.map(paraTxt).join(" "), all = [heads, ...r.clauses.map((c) => c.paras.map(paraTxt).join(" "))].join(" ");
+    if (node.kind === "clause" && ruleOf(node) === r) {
+      if (heads.trim()) units.push({ num: r.num, block: sec.num, raw: heads });
+      for (const c of r.clauses) units.push({ num: c.num, block: sec.num, raw: c.paras.map(paraTxt).join(" ") });
+    } else units.push({ num: r.num, block: sec.num, raw: all });
+  }
+  if (keys.size) for (const u of units) { const k = settingKeysIn(u.raw).find((x) => keys.has(x)); if (k) add(u.num, `same setting ${k}`); }
+  // The same subject, inside the target's own block. A word that few parts of the block use says more than a common one.
+  const inBlock = units.filter((u) => u.block === blockNum && !own(u.num));
+  const wanted = new Set(nounsIn(`${textOf(node)} ${words}`));
+  const df = {};
+  for (const u of inBlock) for (const n of new Set(nounsIn(plainTxt(u.raw)))) df[n] = (df[n] || 0) + 1;
+  const scored = inBlock.map((u) => {
+    const shared = nounsIn(plainTxt(u.raw)).filter((n) => wanted.has(n));
+    return { u, shared, score: shared.reduce((t, n) => t + 1 / df[n], 0) };
+  }).filter((x) => x.shared.length).sort((a, b) => b.score - a.score || (a.u.num < b.u.num ? -1 : 1));
+  for (const x of scored.slice(0, 6)) add(x.u.num, `same subject: ${x.shared.join(", ")}`);
+  return [...out].slice(0, CANDIDATE_LIMIT).map(([num, why]) => ({ num, why }));
+}
+/** @rule 108.3 */
+export const candidateLines = (cands) => cands.map((c) => `${c.num} (${c.why})`).join("; ");
 
 // ---- staying inside the target (rule 103.1) -----------------------------------------------------------------------
 // A draft changes the target and nothing else. The parts of a text that point outside it are a heading (a whole new rule or
@@ -323,11 +379,14 @@ export function readModelAnswer(book, req, raw) {
   const refuse = (reason, message) => ({ error: "refused", reason, message: String(message).slice(0, 300) });
   if (a.conflicts !== undefined && !Array.isArray(a.conflicts)) return { error: "malformed" };
   const own = (k) => k === req.target || k.startsWith(req.target + ".") || req.target.startsWith(k + ".");
-  const conflicts = [...new Set((a.conflicts || []).map(String).filter((n) => /^\d{3}(\.\d+)?$/.test(n) && has(book, n) && !own(n)))];
+  // The model's own conflicts, and the candidates (conflictCandidates) it checked and found colliding.
+  const checked = Array.isArray(a.checked) ? a.checked.filter((x) => x && x.collides === true).map((x) => x.num) : [];
+  const conflicts = [...new Set([...(a.conflicts || []), ...checked].map(String).filter((n) => /^\d{3}(\.\d+)?$/.test(n) && has(book, n) && !own(n)))];
   // An edit in place is the player's exact text: the route reads only the conflicts from this answer, so name them all,
   // whatever else the model said.
   if (req.prefilled) return { after_text: String(req.words), conflicts, settings: {} };
-  if (a.refuse !== undefined) {
+  // A blank "refuse" beside a draft is no refusal (structured output fills every field it can).
+  if (a.refuse !== undefined && !(a.refuse === "" && typeof a.after_text === "string" && a.after_text.trim())) {
     const why = typeof a.refuse === "string" ? a.refuse.replace(/\s+/g, " ").trim().slice(0, 300) : "";
     return why ? refuse("declined", why) : { error: "malformed" };
   }
@@ -356,13 +415,20 @@ export function readModelAnswer(book, req, raw) {
 
 // What the model is asked (rewording only). The rulebook goes in so it can name conflicts by number.
 /** @rule 103.1, 108.3 */
-export function modelPrompt(book, rulesMd, req) {
+export function modelPrompt(book, rulesMd, req, opts = {}) {
   const node = book.byNum[req.target];
   const what = node.kind === "clause" ? `clause ${node.num} of rule ${node.rule.num} (${node.rule.title})` : `rule ${node.num} (${node.title})`;
   const protectedText = fixedParts(book).filter((p) => book.byNum[p]?.kind === "clause").map((p) => `${p}: ${clauseText(book.byNum[p])}`).join("\n");
   const shapes = Object.entries(DEFAULT_SETTINGS).map(([k, v]) => `${k} (e.g. ${JSON.stringify(v)})`).join(", ");
   let words = String(req.words), prev;
   do { prev = words; words = words.replace(/<\s*\/?\s*words[^>]*>/gi, ""); } while (words !== prev);
+  const rulebook = `The rulebook:\n\n${rulesMd}`;
+  // Parts the code found that this change could collide with: for the model to judge, never for it to copy.
+  const cands = opts.candidates ? conflictCandidates(book, req.target, words) : [];
+  const candidates = cands.length ? `\n\nParts the code found that this change could collide with: ${candidateLines(cands)}. Answer for each one in \"checked\": [{\"num\": \"105\", \"collides\": true}, ...], one entry per part listed. collides is true if it and the new text would now say different things, or it cites the text you changed, and false if they still fit together; a part with collides true counts as a conflict. The list can miss some, so still look through the rulebook and name any others in conflicts.` : "";
+  const rest = req.prefilled
+    ? `\n\nThe player has written the exact new text of ${what}. It is final: return it unchanged as after_text, and settings {}. Only name the conflicts. Its current text:\n\n${textOf(node)}${candidates}\n\nThe new text:\n\n<words>\n${words}\n</words>`
+    : `\n\nThe player wants to reword ${what}. Its current text:\n\n${textOf(node)}${candidates}\n\nThe player's words:\n\n<words>\n${words}\n</words>`;
   return {
     system: [
       "You are the moderator of a self-amending game. A player asks, in plain words, to reword one rule or clause: the target.",
@@ -377,9 +443,34 @@ export function modelPrompt(book, rulesMd, req) {
       "Write the sentences you change or add in the rules voice; sentences you keep stay as they are. 1. Talk to the player: \"you\", present tense (\"You can move one tile a day.\"; a sentence that tells players what they can do or get is written to \"you\"). 2. One idea per sentence: what you can do first, then the limit. 3. Everyday words: \"can\", not \"may\" or \"shall\"; no hereby, pursuant to, in the event that, aforementioned, notwithstanding. 4. Keep the game's own terms, the same every time: moderator, proposal, draft, ballot, block, mark, clause, turn, day, tile, piece. 5. Digits for numbers (3, not three); cite rules by number in parentheses (202.4) or as \"rule 202.4\", never as a bare number in a sentence. 6. The player's own words stay when they are clear, fit the game's terms and say exactly what they mean: reword only to make it exact, to match a game term or to fix the grammar. 7. Nothing in a rule that isn't a rule: no flavor text, no asides, no \"note that\".",
       "Example. Before: \"The proposer may withdraw a confirmed proposal until it goes on the ballot, unless they have ended their turn (rule 202.4). A withdrawn proposal doesn't use up the day's proposal.\" After: \"You can withdraw your proposal until midnight, unless you've ended your turn (202.4). Withdrawing frees up your proposal for the day.\"",
     ].join("\n\n"),
-    user: req.prefilled
-      ? `The rulebook:\n\n${rulesMd}\n\nThe player has written the exact new text of ${what}. It is final: return it unchanged as after_text, and settings {}. Only name the conflicts. Its current text:\n\n${textOf(node)}\n\nThe new text:\n\n<words>\n${words}\n</words>`
-      : `The rulebook:\n\n${rulesMd}\n\nThe player wants to reword ${what}. Its current text:\n\n${textOf(node)}\n\nThe player's words:\n\n<words>\n${words}\n</words>`,
+    user: rulebook + rest,
+    rulebook,   // the part every request of a game shares, then the part that is this player's: a cache breakpoint goes between
+    rest,
+  };
+}
+
+// The JSON schema of the model's answer, for the Messages API's structured outputs (`output_config.format`): the same object the
+// prompt describes, so the answer always parses. Every property is optional because an answer is either a draft
+// (after_text, conflicts, settings) or a refusal (refuse). settings may name only the settings the game has, so a key the game
+// doesn't have can't be sent; the values are checked afterwards as before (readModelAnswer). Objects need additionalProperties:
+// false there, which is why settings is spelled out from DEFAULT_SETTINGS instead of being a free object.
+/** @rule 103.1 */
+export function answerSchema() {
+  const typeOf = (v) => (typeof v === "number" ? "number" : typeof v === "boolean" ? "boolean" : "string");
+  const settings = Object.fromEntries(Object.entries(DEFAULT_SETTINGS).map(([k, v]) => [k, v !== null && typeof v === "object"
+    ? { type: "object", properties: Object.fromEntries(Object.entries(v).map(([kk, vv]) => [kk, { type: typeOf(vv) }])), additionalProperties: false }
+    : { type: typeOf(v) }]));
+  return {
+    type: "object",
+    properties: {
+      after_text: { type: "string" },
+      conflicts: { type: "array", items: { type: "string" } },
+      settings: { type: "object", properties: settings, additionalProperties: false },
+      refuse: { type: "string" },
+      // The candidates the model checked (only asked for when the prompt lists some): the ones with collides true join conflicts.
+      checked: { type: "array", items: { type: "object", properties: { num: { type: "string" }, collides: { type: "boolean" } }, required: ["num", "collides"], additionalProperties: false } },
+    },
+    additionalProperties: false,
   };
 }
 
