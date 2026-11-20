@@ -1,5 +1,5 @@
 // Seeds two local games (one in play with two players, one open for joining) and
-// takes screenshots with playwright (python). Rules come from templates/RULES.md
+// takes screenshots of the landing and join pages with playwright (python); the game page's checks are tests/chrome.mjs. Rules come from templates/RULES.md
 // through a local stub, never GitHub. Usage: node tests/seed-demo.mjs <outdir>
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";

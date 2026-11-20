@@ -17,6 +17,7 @@ with sync_playwright() as p:
     except Exception:
         pass
     page.wait_for_function("document.getElementById('rules').textContent.indexOf('Loading') < 0")
+    page.click("#tab-rules")   # the Rulebook is one of the book's tabs; Summary shows first
     got_title = page.inner_text("#title")
     rules_text = page.inner_text("#rules")
     no_repo_link = page.locator("a[href*='github.com']").count() == 0

@@ -96,7 +96,9 @@ check("the display face is Kyrios first, then Grenze Gotisch", /--font-display: 
 check("every color token has a dark value (the page is never half dark)", ["--sea", "--surface", "--line", "--ink", "--ink-muted", "--accent", "--on-accent", "--land", "--outline"].every((t) => new RegExp(t + ":").test(dark)));
 check("the board's size rule applies to the board svg only, not to the svg each piece is drawn in (a piece keeps its own width and height)", /\.board-wrap>svg\s*\{[^}]*width:100%/.test(read("public/site.css")) && !/\.board-wrap\s+svg\s*\{/.test(read("public/site.css")));
 const sizing = read("public/site.css");
-check("no size rule reaches an svg through a descendant selector (each piece is an svg nested in the board, the preview, a thumbnail or a scoreboard icon, and keeps its own width and height)", !/\.(pv|players li|opt \.face|board-wrap) svg\s*\{/.test(sizing) && /\.pv>svg\s*\{/.test(sizing) && /\.opt \.thumb>svg\s*\{/.test(sizing) && /\.players li>svg\s*\{/.test(sizing));
+check("no size rule reaches an svg through a descendant selector (each piece is an svg nested in the board, the preview, a thumbnail or a players-list icon, and keeps its own width and height)", !/\.(pv|prow|opt \.face|board-wrap) svg\s*\{/.test(sizing) && /\.pv>svg\s*\{/.test(sizing) && /\.opt \.thumb>svg\s*\{/.test(sizing) && /\.prow>svg\s*\{/.test(sizing));
+check("a recently changed rule's warm sand is a token with a dark value too (no color lives outside theme.css)", /--warm1:/.test(css.slice(0, css.indexOf("@media"))) && /--warm1:/.test(dark) && !/#F2DFB4|#4C4023/i.test(read("public/site.css")));
+check("the page has no sticky or fixed elements except the card layer (S1-SUM-07)", !/position:\s*sticky/.test(read("public/site.css")) && (read("public/site.css").match(/position:\s*fixed/g) || []).length === 2);
 check("the pages no longer ship the WebGL board: no three.js in public/ or the Worker's routes", !readdirSync(pjoin(ROOT, "public")).includes("vendor") && !/three/i.test(read("src/index.ts")));
 
 console.log(`\n${pass} passed, ${fail} failed`);

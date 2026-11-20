@@ -707,7 +707,7 @@ try {
   console.log("static files");
   const js = await client(A).get("/js/board.js");
   check("the board's script is served as JavaScript", js.status === 200 && /javascript/.test(js.headers.get("content-type")), js.status + " " + js.headers.get("content-type"));
-  for (const f of ["/js/pieces.js", "/js/pieces-data.js", "/js/rulebook.js", "/js/landing.js", "/theme.css"]) check(`${f} is served`, (await client(A).get(f)).status === 200);
+  for (const f of ["/js/pieces.js", "/js/pieces-data.js", "/js/rulebook.js", "/js/cards.js", "/js/people.js", "/js/propose.js", "/js/landing.js", "/theme.css"]) check(`${f} is served`, (await client(A).get(f)).status === 200);
   check("nothing else in public/ is reachable (the old WebGL files and three.js are gone), and no path tricks", (await client(A).get("/vendor/three.module.js")).status === 404 && (await client(A).get("/js/board-gl.js")).status === 404 && (await client(A).get("/js/theme.js")).status === 404 && (await client(A).get("/js/nope.js")).status === 404 && (await client(A).get("/js/%2e%2e/board.html")).status === 404 && (await client(A).get("/board.html")).status === 404);
 } catch (e) {
   fail++;

@@ -17,6 +17,7 @@
     <h3>Notifications</h3>
     <ul class="notes" id="notes"></ul>
   </div>
+  <div class="notif acct" id="acct" hidden></div>
 </header>
 <div class="banner" id="notice" hidden></div>
 <div class="loginbar" id="login-panel" hidden>
@@ -27,12 +28,14 @@
   </form>
 </div>
 
-<section id="today" class="day" hidden></section>
+<!-- the midnight lock: one line over the board while the moderator processes the day (rule 107.1) -->
+<section id="lockbar" class="banner locked" role="status" hidden></section>
 
-<div class="playtop">
+<!-- the board is a band in the page flow (420 px, 290 on a phone), with the move bar under it and the players beside it -->
+<div class="playtop" id="playtop">
   <div class="boardcol">
     <div class="board-wrap" id="board-wrap"><noscript>The board needs JavaScript. The tiles are listed below.</noscript></div>
-    <div class="dock" id="dock" aria-live="polite"></div>
+    <div class="movebar" id="movebar" aria-live="polite"></div>
   </div>
   <aside class="side" aria-label="Players">
     <h3 class="sideh">Players</h3>
@@ -42,20 +45,34 @@
 <h2 class="sr-only">Tiles</h2>
 <ul class="sr-only" id="tile-list"></ul>
 
-<section class="rbwrap" id="rules" aria-label="Rulebook">Loading&hellip;</section>
-
-<section class="log-sec">
-  <h2>What happened</h2>
-  <ul class="log" id="log"></ul>
+<!-- the book: Summary, Rulebook, Catalog, History -->
+<section class="rbwrap" id="book" aria-label="Summary, rulebook, catalog and history">
+  <div class="book">
+    <div class="btabs" id="btabs" role="tablist" aria-label="Book"></div>
+    <div id="bpanel">
+      <div id="p-summary" role="tabpanel" aria-labelledby="tab-summary"></div>
+      <div id="p-rules" role="tabpanel" aria-labelledby="tab-rules" hidden><section class="rbwrap" id="rules" aria-label="Rulebook">Loading&hellip;</section></div>
+      <div id="p-catalog" role="tabpanel" aria-labelledby="tab-catalog" hidden></div>
+      <div id="p-history" role="tabpanel" aria-labelledby="tab-history" hidden></div>
+    </div>
+  </div>
 </section>
+
+<!-- the card over a dim backdrop (a rule, a player) -->
+<div class="mroot" id="mroot" hidden></div>
 
 <script type="module">
   // One page for every game. The slug is the first path segment; every call goes to /<slug>/api/...
   // The board is drawn from /api/board, the players and the log from /api/game, the rulebook from /api/rules
-  // (the game's own repo, fetched by the server). /api/me and /api/notifications say who is looking.
-  import { ensureDefs, pieceSVG } from "/js/pieces.js";
+  // (the game's own repo, fetched by the server). /api/me, /api/day and /api/notifications say who is looking and what they may do.
+  // The page is: header (bell, account chip) - the board band, its move bar and the players - the book (tabs).
+  // Slots other work fills carry data-slot="...": moon, recap, ballot-count, ballot-vote, rule-action, recent-days,
+  // history-days, catalog-entries, player-today, bar-action. They are empty containers here; the CSS hides them while empty.
+  import { ensureDefs } from "/js/pieces.js";
   import { mountRulebook } from "/js/rulebook.js";
-  import { createProposer } from "/js/propose.js";
+  import { createProposer, diffOf } from "/js/propose.js";
+  import { createCards } from "/js/cards.js";
+  import { mini, playerPill, hexOf } from "/js/people.js";
   const SLUG = location.pathname.split("/")[1] || "";
   const BASE = "/" + SLUG;
 
@@ -78,13 +95,18 @@
   };
   let ME = null, DATA = null;   // who is looking, and the last /api/game
   let DAY = null, END_ASK = false, DAY_AT = 0, DAY_TIMER = 0, DAY_TICK = 0;   // the last /api/day, the End turn confirm, when it was fetched
-  let PROP = null;   // the proposal controller (propose.js), made once the page's state is known
+  let PROP = null, BOOK = null, CARDS = null;   // the proposal controller (propose.js), the mounted rulebook, the card host
   let BOARD = null, SEL = null, VIEW = null;   // the last /api/board, the selected tile {x,y}, the drawn board
-  const hex = c => (c && /^#[0-9a-f]{6}$/i.test(c.hex) ? c.hex : "#888");
-  const who = (name, c) => `${name} (${c ? c.name : "?"})`;
-  const when = iso => String(iso || "").slice(0, 10);
+  let TAB = "summary", BOARD_OPEN = true, LASTMOVE = null, NOTES = { list: [], unread: 0 }, RULES_OK = false;
   ensureDefs();
-  const mini = p => `<svg viewBox="-22 -46 44 50" aria-hidden="true">${pieceSVG({ shape: p.shape, color: p.color, scale: 1, clip: false })}</svg>`;
+
+  const myKey = () => (ME && ME.player ? ME.player.color.key : null);
+  const players = () => (DATA && DATA.players) || [];
+  const shapeOf = c => { const p = players().find(q => q.color.key === c.key); return p ? p.shape : "pawn"; };
+  const pill = (by, mine) => playerPill(by, { you: !!mine || (!!ME && !!ME.player && by.color.key === myKey()), shapeOf });
+  const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+  const noLevel = l => String(l || "").replace(/ 1U$/, "");   // the ground level is the only one in use: "3N 2E", not "3N 2E 1U"
+  const pieceName = k => String(k || "pawn").replace(/[-_]/g, " ").replace(/^./, c => c.toUpperCase());
 
   function showNotice() {
     const n = new URLSearchParams(location.search).get("notice");
@@ -92,40 +114,82 @@
     if (n) history.replaceState(null, "", BASE + "/");
   }
 
+  // ---- the header: the bell and the account chip (one panel open at a time; click-out and Esc close it) -----------------
+  const BELL = '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4z M10 21h4" style="fill:none;stroke:var(--ink);stroke-width:2;stroke-linejoin:round"/></svg>';
   async function loadMe() {
     const me = await api("/api/me");
-    const who_ = $("who");
     ME = me.ok ? me.data : null;
-    drawDock();
     if (PROP) PROP.redraw();
     if (VIEW && ME && ME.player) VIEW.setMe(ME.player.color.key);
-    if (!me.ok) {
-      who_.innerHTML = '<button class="btn ghost small" id="login-btn" type="button">Log in</button>';
+    drawWho();
+    drawMoveBar();
+    if (!me.ok) return;
+    await loadNotes();
+  }
+  function drawWho() {
+    const w = $("who");
+    if (!ME) {
+      w.innerHTML = '<button class="btn ghost small" id="login-btn" type="button">Log in</button>';
       $("login-btn").onclick = () => { $("login-panel").hidden = !$("login-panel").hidden; };
       return;
     }
-    const p = me.data.player;
-    who_.innerHTML = `<button class="iconbtn" id="bell" type="button" aria-label="Notifications"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4z M10 21h4" style="fill:none;stroke:var(--ink);stroke-width:2;stroke-linejoin:round"/></svg><span class="badge" id="badge" hidden>0</span></button>
-      <span class="me">${p ? `<span class="dot" style="background:${hex(p.color)}"></span>` : ""}<span class="nm">${esc(me.data.user.name)}</span></span>
-      <button class="btn ghost small" id="logout" type="button">Log out</button>`;
-    $("logout").onclick = async () => { await api("/api/logout", {}); location.reload(); };
-    $("bell").onclick = toggleNotes;
-    await loadNotes(false);
+    const p = ME.player, shown = !$("notes-panel").hidden, open = !$("acct").hidden;
+    const unread = NOTES.unread;
+    w.innerHTML = `<button class="iconbtn" id="bell" type="button" aria-label="${unread ? `Notifications, ${unread} new` : "Notifications"}" aria-expanded="${shown}" aria-controls="notes-panel">${BELL}<span class="badge" id="badge"${unread && !shown ? "" : " hidden"}>${unread}</span></button>
+      <button class="me" id="me-chip" type="button" aria-haspopup="true" aria-expanded="${open}" aria-controls="acct" aria-label="Your account">${p ? `<span class="dot" style="background:${hexOf(p.color)};width:20px;height:20px"></span>` : ""}<span class="nm">${esc(ME.user.name)}</span><span class="cv" aria-hidden="true">▾</span></button>`;
+    $("bell").onclick = () => toggle("notes");
+    $("me-chip").onclick = () => toggle("acct");
+    drawAcct();
   }
+  function drawAcct() {
+    const p = ME && ME.player;
+    $("acct").innerHTML = ME ? `<div class="acct-me">${p ? `<span class="dot" style="background:${hexOf(p.color)};width:22px;height:22px"></span>` : ""}<span><b>${esc(ME.user.name)}</b>${p ? `<small>${esc(p.color.name)} · ${plural(p.score, "point")}</small>` : ""}</span></div>
+      ${p ? `<button type="button" class="acct-link" data-pl="${esc(p.color.key)}" data-fromacct="1">Your player card</button>` : ""}
+      <button type="button" class="acct-link" id="logout">Log out</button>` : "";
+    const lo = $("logout"); if (lo) lo.onclick = async () => { await api("/api/logout", {}); location.reload(); };
+  }
+  // Opening one closes the other; closing the bell marks what it showed as read (the badge clears when it opens, the tint stays while it is open).
+  function toggle(which) {
+    const notes = $("notes-panel"), acct = $("acct");
+    if (which === "notes") {
+      if (!notes.hidden) return closePanels();
+      acct.hidden = true; notes.hidden = false;
+      drawNotes(); drawWho();
+    } else {
+      if (!acct.hidden) return closePanels();
+      closePanels(); acct.hidden = false; drawWho();
+    }
+  }
+  async function closePanels(focus) {
+    const wasNotes = !$("notes-panel").hidden, wasAcct = !$("acct").hidden;
+    if (!wasNotes && !wasAcct) return;
+    $("notes-panel").hidden = true; $("acct").hidden = true;
+    if (wasNotes && NOTES.unread) { NOTES.unread = 0; await api("/api/notifications/read", { all: true }); NOTES.list = NOTES.list.map(n => ({ ...n, read_at: n.read_at || "read" })); }
+    drawWho();
+    if (focus) { const b = $(wasNotes ? "bell" : "me-chip"); if (b) b.focus(); }
+  }
+  document.addEventListener("click", e => { if (e.target.isConnected && !e.target.closest(".gamehead")) closePanels(); });   // (a panel button redraws the header, so its own click target may already be gone)
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && (!$("notes-panel").hidden || !$("acct").hidden) && !(CARDS && CARDS.isOpen()) && !document.getElementById("rprev")) closePanels(true); });
 
-  async function loadNotes(open) {
+  // "12:00 am" today, "yesterday", else the date: in the game's time zone, from the event's own time
+  function whenText(iso) {
+    const t = Date.parse(iso); if (!Number.isFinite(t)) return "";
+    const tz = DAY && DAY.timezone;
+    const day = d => { try { return new Intl.DateTimeFormat("en-CA", { timeZone: tz || undefined }).format(d); } catch (e) { return new Intl.DateTimeFormat("en-CA").format(d); } };
+    const now = new Date(DAY && DAY.now ? Date.parse(DAY.now) : Date.now()), then = new Date(t);
+    const a = day(then), b = day(now);
+    if (a === b) { try { return new Intl.DateTimeFormat("en-US", { timeZone: tz || undefined, hour: "numeric", minute: "2-digit" }).format(then).toLowerCase(); } catch (e) { return ""; } }
+    return a === day(new Date(now.getTime() - 86400000)) ? "yesterday" : a;
+  }
+  async function loadNotes() {
     const r = await api("/api/notifications");
     if (!r.ok) return;
-    const list = r.data.notifications, unread = r.data.unread;
-    $("badge").textContent = unread; $("badge").hidden = !unread;
-    $("notes").innerHTML = list.length ? list.map(n => `<li class="${n.read_at ? "" : "unread"}">${esc(n.body)}
-      <small>${esc(when(n.created_at))}</small></li>`).join("") : "<li>Nothing yet.</li>";
-    if (open && unread) { await api("/api/notifications/read", { all: true }); $("badge").hidden = true; }
+    NOTES = { list: r.data.notifications, unread: $("notes-panel").hidden ? r.data.unread : NOTES.unread };
+    if (!$("notes-panel").hidden) NOTES.list = r.data.notifications.map(n => n);
+    drawNotes(); drawWho();
   }
-  async function toggleNotes() {
-    const panel = $("notes-panel");
-    panel.hidden = !panel.hidden;
-    if (!panel.hidden) await loadNotes(true);
+  function drawNotes() {
+    $("notes").innerHTML = NOTES.list.length ? NOTES.list.map(n => `<li class="${n.read_at ? "" : "unread"}"><span class="dot" style="background:var(--accent);margin-top:5px"></span><span>${esc(n.body)}<small>${esc(whenText(n.created_at))}</small></span></li>`).join("") : "<li>Nothing yet.</li>";
   }
 
   $("login-form").addEventListener("submit", async e => {
@@ -142,34 +206,89 @@
     }
   });
 
+  // ---- loading ----------------------------------------------------------------------------------------------------
   async function load() {
     showNotice();
-    PROP = createProposer({ api, me: () => ME, day: () => DAY, refresh: async () => { await refresh(); loadNotes(false); } });
+    CARDS = createCards({ root: $("mroot"), describe, onClose: () => { if (PROP) PROP.cancelFlow(); if (PROP) PROP.redraw(); } });
+    PROP = createProposer({ api, me: () => ME, day: () => DAY, pill, refresh: async () => { await refresh(); loadNotes(); } });
+    drawTabs(); drawBook();
     loadMe();
     const [g] = await Promise.all([api("/api/game"), loadDay()]);
-    if (!g.ok) $("dock").innerHTML = '<span class="err">No game has been set up yet.</span>';
+    if (!g.ok) $("movebar").innerHTML = '<span class="err">No game has been set up yet.</span>';
     else drawGame(g.data);
     // the rulebook shows each rule's settings, so it waits for the board's reply (which carries them)
     const [rules] = await Promise.all([fetch(BASE + "/api/rules").then(async r => { if (!r.ok) throw new Error("rules " + r.status); return r.text(); }).catch(() => null), boardLoaded]);
     if (rules === null) { $("rules").innerHTML = '<p class="err" style="padding:20px 28px">Rules unavailable right now.</p>'; return; }
     await PROP.load();
-    mountRulebook($("rules"), rules, { settings: (BOARD && BOARD.settings) || {}, proposer: PROP });
+    BOOK = mountRulebook($("rules"), rules, { settings: (BOARD && BOARD.settings) || {}, proposer: PROP, cards: CARDS, action: ruleAction });
+    BOOK.onCount(() => { drawTabs(); drawBook(); });
+    RULES_OK = true;
+    drawTabs(); drawBook();
+    if (location.hash.startsWith("#r-")) { setTab("rules"); BOOK.fromHash(); }
   }
 
-  // The dock under the board: where the game stands. Proposing is in the rulebook (propose.js); what you may do
-  // comes from /api/day (you.can): the same answers the write routes give.
-  const LOCKED = () => !!(DAY && DAY.locked);
-  function drawDock() {
-    const box = $("dock");
-    if (!DATA) return;
-    const { game, players } = DATA;
-    document.title = game.name || "Promptocracy";
-    $("title").textContent = game.name || "Promptocracy";
-    box.innerHTML = (game.status === "setup" ? `<p><strong>Setting up.</strong> ${players.length} of ${game.max_players} players joined.</p>` : "") + '<div id="tile-panel"></div>';
-    drawPanel();
+  // ---- the book: tabs, and what each shows --------------------------------------------------------------------------
+  const TABS = () => [["summary", "Summary", ""], ["rules", "Rulebook", BOOK && BOOK.count() ? plural(BOOK.count(), "rule") : ""], ["catalog", "Catalog", "0 entries"],
+    ["history", "History", DAY && DAY.day ? plural(DAY.day, "day") : ""]];
+  function drawTabs() {
+    $("btabs").innerHTML = TABS().map(([k, n, c]) => `<button type="button" class="btab" role="tab" id="tab-${k}" aria-selected="${TAB === k}" aria-controls="p-${k}" tabindex="${TAB === k ? 0 : -1}" data-tab="${k}">${n}${c ? `<span class="cnt">${esc(c)}</span>` : ""}</button>`).join("")
+      + (TAB === "summary" || !DAY || !DAY.day ? "" : `<span class="bday">Day ${esc(DAY.day)}</span>`);
+  }
+  function setTab(k, scroll) {
+    TAB = k;
+    for (const t of ["summary", "rules", "catalog", "history"]) $("p-" + t).hidden = t !== k;
+    drawTabs(); drawBook();
+    if (scroll) $("book").scrollIntoView({ block: "start", behavior: reduced() ? "auto" : "smooth" });
+  }
+  $("btabs").addEventListener("keydown", e => {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    const ks = TABS().map(t => t[0]), i = ks.indexOf(TAB), n = ks[(i + (e.key === "ArrowRight" ? 1 : ks.length - 1)) % ks.length];
+    e.preventDefault(); setTab(n); $("tab-" + n).focus();
+  });
+  const reduced = () => window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // The one proposal's wording: "proposed a change to rule 402" and so on, and what it needs.
+  function sentence(p) {
+    const r = n => PROP.rpill(String(n));
+    const k = p.kind, t = String(p.target);
+    const what = k === "amend" ? `a change to ${t.includes(".") ? "clause" : "rule"} ${r(t)}` : k === "addclause" ? `a new clause for rule ${r(t.split(".")[0])}` : k === "add" ? `a new rule${p.new_num ? " " + r(p.new_num) : ""}` : k === "repeal" ? `to repeal ${t.includes(".") ? "clause" : "rule"} ${r(t)}` : k === "move" ? `to move rule ${r(t)}` : k === "mark" ? `a change to how ${BOOK && BOOK.rulebook.byNum[t] && BOOK.rulebook.byNum[t].kind === "block" ? "block" : "rule"} ${r(t)} is changed` : "a change";
+    const need = p.needs ? (p.needs.mark === "unanimous" ? `It needs all ${p.needs.of} votes to pass.` : `It needs ${p.needs.needed} of ${p.needs.of} votes to pass.`) : "";
+    return `proposed ${what}. ${need}`;
+  }
+  const ballotList = () => (PROP ? PROP.onBallot() : []);
+  const votedCount = () => 0;   // votes come with PR 4 (the ballot-vote slots); until then none can be cast
+  const pointsFor = () => { const r = BOOK && BOOK.rulebook.byNum["401"]; const m = r && /gets (\d+) points?/.exec(JSON.stringify(r.paras.concat(...r.clauses.map(c => c.paras)))); return m ? Number(m[1]) : null; };
+
+  function proposeCard() {
+    const mine = PROP && PROP.mine(), c = PROP ? PROP.canPropose() : { allowed: false, reason: "" };
+    const win = pointsFor() ? `<span class="pwin">+${pointsFor()} if it passes</span>` : "";
+    const active = !!(ME && ME.player && DAY && DAY.you);
+    if (mine) return `<section class="sw pro" id="spropose" aria-label="Your proposal"><div class="swh"><h2>Your proposal, 1 of 1 today</h2></div>${PROP.chgFor(mine)}</section>`;
+    const ended = !!(DAY && DAY.you && DAY.you.ended);
+    if (ended || (DAY && DAY.locked)) return `<section class="sw pro" id="spropose" aria-label="No proposal today"><div class="swh"><h2>No proposal today</h2><span class="m">0 of 1 today</span></div></section>`;
+    const off = active && c.allowed ? "" : ` disabled title="${esc(active ? c.reason : "Log in to propose.")}"`;
+    return `<section class="sw pro" id="spropose" aria-label="Propose a change"><div class="swh"><h2>Propose a change</h2><span class="m">0 of 1 today</span>${win}</div>
+      <div class="ptiles"><button type="button" class="ptile" data-tab="rules"${off}><span class="pt2">Rulebook</span><span class="pm2">${BOOK && BOOK.count() ? plural(BOOK.count(), "rule") : ""}</span><span class="pa2">+ Change or add a rule</span></button>
+      <button type="button" class="ptile" data-tab="catalog" disabled title="Things you can make arrive in a later step."><span class="pt2">Catalog</span><span class="pm2">0 entries</span><span class="pa2">+ Propose a thing</span></button></div>${!active || c.allowed ? "" : `<p class="mnote">${esc(c.reason)}</p>`}</section>`;
+  }
+  function summaryHTML() {
+    const bl = ballotList();
+    const ballot = `<section class="sw" id="sballot" aria-label="Today's ballot"><div class="swh"><h2>Today's ballot</h2><span class="m" data-slot="ballot-count">${bl.length ? plural(bl.length, "proposal") : ""}</span></div>
+      ${bl.length ? `<ul class="sl">${bl.map(p => `<li id="sb-${esc(p.n)}"><p class="sbs">${PROP.pPill(p)} ${pill(p.by, p.mine)} ${sentence(p)}</p>
+        <div class="sdiff">${p.title ? `<p class="sdh">${esc(p.title)}</p>` : ""}<p class="mono head">${esc(p.head || "")}</p><p>${diffOf(p)}</p></div><div class="vrow slot" data-slot="ballot-vote" data-pn="${esc(p.n)}"></div></li>`).join("")}</ul>` : `<p class="mnote">Nothing is on today's ballot.</p>`}</section>`;
+    const cat = `<section class="sw cat" aria-label="Catalog"><div class="swh"><h2>Catalog</h2><button type="button" class="linkbtn" data-tab="catalog">Open the catalog →</button></div><p class="mnote" data-slot="catalog-entries">No entries yet.</p></section>`;
+    return `<div class="sgrid"><section class="sw day" id="sday" aria-label="Today"></section>
+      <div class="slot recapw" data-slot="recap"></div>
+      <div class="scol">${ballot}${cat}</div>
+      <div class="scol">${proposeCard()}<div class="slot" data-slot="recent-days"></div><button type="button" class="linkbtn" data-tab="history">Full history →</button></div></div>`;
+  }
+  function drawBook() {
+    if (TAB === "summary") { $("p-summary").innerHTML = summaryHTML(); drawDay(); }
+    else if (TAB === "catalog") $("p-catalog").innerHTML = `<div class="cbox"><h2 class="crow-h">Catalog</h2><p class="mnote" data-slot="catalog-entries">No entries yet.</p></div>`;
+    else if (TAB === "history") $("p-history").innerHTML = `<div class="hdays"><div class="slot" data-slot="history-days"></div><ul class="log" id="log">${((DATA && DATA.events) || []).map(e => `<li><b>${esc(whenText(e.created_at) || String(e.created_at || "").slice(0, 10))}</b> · ${esc(e.text)}</li>`).join("")}</ul></div>`;
   }
 
-  // ---- the day: status row at the top of the play area ------------------------------------------------------
+  // ---- the day: the strip at the top of the Summary --------------------------------------------------------------------
   const LOCKSVG = '<svg width="11" height="12" viewBox="0 0 16 18" aria-hidden="true"><rect x="2" y="8" width="12" height="9" rx="2" fill="currentColor"/><path d="M5 8V5.5a3 3 0 0 1 6 0V8" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
   const nowMs = () => Date.now() + (DAY && DAY.now ? Date.parse(DAY.now) - DAY_AT : 0);
   function zoneAbbr() {
@@ -184,29 +303,33 @@
     return `${h ? h + " h " : ""}${m} m to midnight ${zoneAbbr()}`;
   }
   function drawDay() {
-    const box = $("today");
     clearTimeout(DAY_TIMER); clearInterval(DAY_TICK);
-    if (!DAY || !DAY.day || DAY.status !== "playing") { box.hidden = true; box.innerHTML = ""; return; }
-    box.hidden = false;
-    const you = DAY.you;
+    const bar = $("lockbar"), box = $("sday");
+    bar.hidden = true; bar.textContent = "";
+    if (!DAY || !DAY.day || DAY.status !== "playing") { if (box) { box.hidden = true; box.innerHTML = ""; } return; }
     if (DAY.locked) {
-      box.className = "day banner locked";
-      box.setAttribute("role", "status");
-      box.textContent = DAY.message || "";
-    } else {
-      box.className = "day";
-      box.removeAttribute("role");
-      const step = (done, jump, label, doneLabel) => `<li><button type="button" class="dstep${done ? " done" : ended ? " skip" : ""}" data-jump="${jump}"><span class="ck" aria-hidden="true">${done ? "✓" : ended ? "–" : ""}</span><span class="dt"><span class="dn2">${done ? doneLabel : label}</span></span></button></li>`;
-      const ended = !!(you && you.ended);
-      let html = `<div class="dhead"><h2>Day ${esc(DAY.day)}</h2></div>`;
-      if (you) html += `<ul class="dsteps">${step(you.moved, "board", ended ? "No move" : "Move", "Moved")}${step(you.proposed, "propose", ended ? "No proposal" : "Propose", "Proposed")}</ul>`;
+      bar.hidden = false; bar.textContent = DAY.message || "";
+      if (box) { box.hidden = true; box.innerHTML = ""; }
+    } else if (box) {
+      box.hidden = false;
+      const you = DAY.you, ended = !!(you && you.ended);
+      const mineP = PROP && PROP.mine();
+      const bl = ballotList();
+      // End turn is the one filled button on the page once your move, your votes and your proposal are all in; before that it is ghost (OPEN-06 (3): lean yes)
+      const allDone = !!(you && you.moved && you.proposed && votedCount() === bl.length);
+      const step = (done, jump, label, doneLabel, detail) => `<li><button type="button" class="dstep${done ? " done" : ended ? " skip" : ""}" data-jump="${jump}"><span class="ck" aria-hidden="true">${done ? "✓" : ended ? "–" : ""}</span><span class="dt"><span class="dn2">${done ? doneLabel : label}</span>${detail ? `<span class="ds">${esc(detail)}</span>` : ""}</span></button></li>`;
+      const myPos = BOARD && ME && ME.player ? BOARD.pieces.find(p => p.color.key === myKey()) : null;
+      let html = `<div class="dhead"><h2>Day ${esc(DAY.day)}</h2><span class="moon" data-slot="moon"></span></div>`;
+      if (you) html += `<ul class="dsteps">${step(you.moved, "board", ended ? "No move" : "Move", "Moved", you.moved && myPos ? noLevel(myPos.at.label) : "")}${step(bl.length > 0 && votedCount() === bl.length, "ballot", ended ? "No votes" : "Vote", "Voted", bl.length ? `${votedCount()} of ${bl.length}` : "")}${step(you.proposed, "propose", ended ? "No proposal" : "Propose", "Proposed", you.proposed && mineP ? mineP.n : "")}</ul>`;
       html += `<div class="dend">${ended ? `<span class="clock done">${LOCKSVG}Turn ended</span>`
-        : `<span class="clock" id="clock">${esc(clockText())}</span>${you && !END_ASK ? `<button type="button" class="btn ghost small" data-endturn="ask"${you.can.end_turn.allowed ? "" : ` disabled title="${esc(you.can.end_turn.reason || "")}"`}>End turn</button>` : ""}`}</div>`;
+        : `<span class="clock" id="clock">${esc(clockText())}</span>${you && !END_ASK ? `<button type="button" class="btn small${allDone ? "" : " ghost"}" data-endturn="ask"${you.can.end_turn.allowed ? "" : ` disabled title="${esc(you.can.end_turn.reason || "")}"`}>End turn</button>` : ""}`}</div>`;
       if (you && END_ASK && !ended) {
         const left = [];
         if (!you.moved) left.push("your move");
+        if (votedCount() < bl.length) left.push(plural(bl.length - votedCount(), "vote"));
         if (!you.proposed) left.push("your proposal");
-        html += `<div class="dask" role="group" aria-label="End turn"><span>${left.length ? `You skip ${left.join(" and ")}. ` : ""}Ending your turn locks day ${esc(DAY.day)} now. It is final.</span><span class="row"><button type="button" class="btn small" data-endturn="yes">End turn</button><button type="button" class="linkbtn" data-endturn="no">Keep playing</button></span></div><div id="day-msg" role="status"></div>`;
+        const skips = left.join(", ").replace(/, ([^,]*)$/, " and $1");
+        html += `<div class="dask" role="group" aria-label="End turn"><span>${left.length ? `You skip ${skips}. ` : ""}Ending your turn locks day ${esc(DAY.day)} now. It is final.</span><span class="row"><button type="button" class="btn small" data-endturn="yes">End turn</button><button type="button" class="linkbtn" data-endturn="no">Keep playing</button></span></div><div id="day-msg" role="status"></div>`;
       } else html += '<div id="day-msg" role="status"></div>';
       box.innerHTML = html;
     }
@@ -215,49 +338,69 @@
     DAY_TIMER = setTimeout(loadDay, Math.min(wait, 2147483000));
     DAY_TICK = setInterval(() => { const c = $("clock"); if (c && DAY) c.textContent = clockText(); }, 20000);
   }
-  $("today").addEventListener("click", async e => {
-    const j = e.target.closest("[data-jump]");
-    if (j) {
-      const quiet = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
-      const el = j.dataset.jump === "board" ? $("board-wrap") : ($("rb-banner") || $("rules"));
-      el.scrollIntoView({ behavior: quiet ? "auto" : "smooth", block: j.dataset.jump === "board" ? "center" : "start" });
-      return;
-    }
-    const b = e.target.closest("[data-endturn]");
-    if (!b) return;
-    if (b.dataset.endturn !== "yes") { END_ASK = b.dataset.endturn === "ask"; drawDay(); if (END_ASK) { const y = document.querySelector('[data-endturn="yes"]'); if (y) y.focus(); } return; }
-    b.disabled = true;
-    const r = await api("/api/end-turn", {});
-    if (r.ok) { END_ASK = false; await refresh(); loadNotes(false); return; }
-    const text = (r.data && r.data.error) || "Something went wrong.";
-    END_ASK = false; await refresh();
-    const m = $("day-msg"); if (m) { m.className = "notice err"; m.textContent = text; }
-  });
+  function jumpTo(what) {
+    const go = el => { if (el) el.scrollIntoView({ behavior: reduced() ? "auto" : "smooth", block: what === "board" ? "center" : "start" }); };
+    if (what === "board") { if (!BOARD_OPEN) { BOARD_OPEN = true; drawMoveBar(); } go($(BOARD_OPEN ? "movebar" : "playtop")); const b = $("movebar").querySelector("button"); if (b) b.focus({ preventScroll: true }); return; }
+    if (TAB !== "summary") setTab("summary");
+    const first = what === "ballot" ? ($("sballot").querySelector("li") || $("sballot")) : $("spropose");
+    go(first); first.classList.add("ring"); setTimeout(() => first.classList.remove("ring"), 1700);
+  }
   async function loadDay() {
     const r = await api("/api/day");
     const prev = DAY;
     if (!r.ok) { DAY = null; drawDay(); DAY_TIMER = setTimeout(loadDay, 60000); return; }
     DAY = r.data; DAY_AT = Date.now();
     const changed = prev && (prev.day !== DAY.day || prev.locked !== DAY.locked);
-    drawDay(); if (DATA) drawGame(DATA);
+    drawTabs(); drawDay(); if (DATA) drawGame(DATA); drawMoveBar();
     if (changed) refresh();
   }
 
+  // ---- players: the list, and a player's card ---------------------------------------------------------------------------
   function drawGame(data) {
     DATA = data;
-    const game = data.game, players = data.players || [];
+    const game = data.game, ps = data.players || [];
+    document.title = game.name || "Promptocracy";
+    $("title").textContent = game.name || "Promptocracy";
     const endedBy = new Set(((DAY && DAY.players) || []).filter(p => p.ended).map(p => p.name));
-    // Scoreboard, highest first; ties keep turn order.
-    const ranked = players.map((p, i) => ({ ...p, i })).sort((a, b) => (b.score - a.score) || (a.i - b.i));
+    // Highest points first; ties keep join order.
+    const ranked = ps.map((p, i) => ({ ...p, i })).sort((a, b) => (b.score - a.score) || (a.i - b.i));
     $("scores").innerHTML = ranked.map(p => {
-      return `<li>${mini(p)}<span>${esc(p.name)}${ME && ME.player && ME.player.color.key === p.color.key ? " (you)" : ""}<span class="st">${esc(p.color.name)}</span>${endedBy.has(p.name) ? '<span class="st ended">turn ended</span>' : ""}</span><b>${esc(p.score)}</b></li>`;
+      const me = ME && ME.player && ME.player.color.key === p.color.key;
+      return `<li class="${me ? "mine" : ""}"><button type="button" class="prow" data-pl="${esc(p.color.key)}" aria-label="${esc(p.name)}${me ? " (you)" : ""}: open player card">${mini(p, "pz")}<span>${esc(p.name)}${me ? ' <span class="muted you">(you)</span>' : ""}<span class="st" data-slot="player-today">${endedBy.has(p.name) ? "turn ended" : ""}</span></span><b>${esc(p.score)}</b></button></li>`;
     }).join("");
-    // The API sends the newest first.
-    $("log").innerHTML = (data.events || []).map(e => `<li><b>${esc(when(e.created_at))}</b> · ${esc(e.text)}</li>`).join("");
-    drawDock();
+    drawAcct();
+    if (TAB === "history") drawBook();
+    if (CARDS && CARDS.isOpen()) CARDS.redraw();
+  }
+  function playerCard(spec) {
+    const p = players().find(q => q.color.key === spec.key);
+    if (!p) return null;
+    const me = !!(ME && ME.player && ME.player.color.key === p.color.key);
+    const board = BOARD && BOARD.pieces.find(q => q.color.key === p.color.key);
+    const R = (BOARD && BOARD.rules) || {}, S = (BOARD && BOARD.settings) || {};
+    const chip = (num, label) => `<button type="button" class="rref" data-seecard="${num}" data-clause="${label || num}" aria-haspopup="dialog" aria-label="Preview rule ${label || num}">${label || num}</button>`;
+    const row = (k, v, refs, text, slot) => `<div class="cs"><dt>${k}</dt><dd>${v}</dd><span class="rr">${refs}</span>${text ? `<p>${text}</p>` : ""}${slot ? `<div class="ca slot" data-slot="${slot}"></div>` : ""}</div>`;
+    const ended = ((DAY && DAY.players) || []).find(q => q.name === p.name);
+    const today = ended ? (ended.ended ? "Turn ended" : [ended.moved ? "moved" : "", ended.proposed ? "proposed" : ""].filter(Boolean).join(" · ") || "Nothing yet") : "";
+    const rows = [row("Points", esc(p.score), chip("401") + chip("402"), "", "points-text"),
+      row("Today", esc(today), chip("202"), "", "player-today"),
+      row("Piece", esc(pieceName(p.shape)), chip("504"), board ? `At ${esc(noLevel(board.at.label))}. Moves ${R.move_distance === 1 ? "one space" : (R.move_distance || 1) + " spaces"} a day${R.diagonal_moves ? ", diagonals included" : ""}, and charts the tiles within ${S["board.chart_radius"] || 2}.` : "")];
+    return { cls: "crit", label: p.name, backLabel: p.name,
+      html: `<div class="mtop"><div class="cart">${mini(p, "cartico")}</div><h2>${esc(p.name)}${me ? ' <span class="you">(you)</span>' : ""}</h2><span class="mmeta">${esc(p.color.name)} · player</span><span class="mpill">Living</span></div><dl class="cstats">${rows.join("")}</dl>` };
+  }
+  function describe(spec) { return spec.kind === "player" ? playerCard(spec) : BOOK ? BOOK.describe(spec) : null; }
+  const openPlayer = (key, push) => CARDS.open({ kind: "player", key }, { push: !!push });
+
+  // 504's card carries its own action: move your piece (it takes you to the board).
+  function ruleAction(r) {
+    if (r.num !== "504" || !ME || !ME.player) return "";
+    const m = myMove();
+    if (m.ok) return `<button type="button" class="pbtn fill" data-muse="move">Move your piece</button>`;
+    const why = DAY && DAY.you && DAY.you.moved ? "Moved today" : DAY && DAY.you && DAY.you.ended ? "Turn ended" : "Move your piece";
+    return `<button type="button" class="pbtn" disabled>${why}</button>${m.reason ? `<span class="mnote">${esc(m.reason)}</span>` : ""}`;
   }
 
-  // ---- the board ------------------------------------------------------------
+  // ---- the board and the move bar ---------------------------------------------------------------------------------------
   // Tiles are blank: charted or not. Coordinates are not shown here; the board shows them on hover,
   // right-click and long-press. (The screen reader list names every tile.)
   const tileAt = (q, r) => BOARD && BOARD.tiles.find(t => t.x === q && t.y === r && t.z === 0);
@@ -271,6 +414,14 @@
     if (steps < 1 || steps > R.move_distance) return false;
     return R.shared_tiles || !piecesAt(t).length;
   }
+  // What a move would chart (rule 504.2): the tiles within the chart radius of the landing tile (the square of that half-width with its
+  // corners cut: centres within radius + 0.5) that are not charted yet.
+  function newlyCharted(t) {
+    const r = Number(BOARD && BOARD.settings && BOARD.settings["board.chart_radius"]) || 2, have = new Set(BOARD.tiles.filter(q => q.z === t.z).map(q => q.x + "," + q.y));
+    let n = 0;
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (dx * dx + dy * dy <= (r + .5) ** 2 && !have.has((t.x + dx) + "," + (t.y + dy))) n++;
+    return n;
+  }
   // What can the person looking do right now? One move a day, none after End turn or during the lock (/api/day says).
   function myMove() {
     if (!ME || !ME.player || !DATA) return { ok: false, why: ME ? "" : "Log in to play." };
@@ -280,51 +431,57 @@
     const c = DAY.you.can.move;
     return c.allowed ? { ok: true } : { ok: false, disabled: true, why: DAY.locked ? "" : c.reason || "", reason: c.reason || "" };
   }
-
-  function drawPanel() {
-    const box = $("tile-panel");
+  const tilesText = n => (n ? `+${plural(n, "tile")}` : "no new tiles");
+  // The move bar under the board: one line of context and at most one action, chosen by priority. (0) a pending move: "Make this move" and
+  // Undo, everything else hidden. The other actions (give a heart, a drawing, pick up) come with their rules and take the
+  // bar-action slot, with a "+N more" link to your card. Nothing to do: one line, no button.
+  function drawMoveBar() {
+    const box = $("movebar");
     if (!box) return;
-    const t = SEL && tileAt(SEL.x, SEL.y);
-    if (!t) { box.innerHTML = ""; return; }
-    const here = piecesAt(t);
-    const move = myMove();
-    let html = `<h3>A charted tile</h3>
-      <p>${here.length ? here.map(p => `<span class="dot" style="background:${hex(p.color)}"></span> ${esc(who(p.name, p.color))} is here`).join("<br>") : '<span class="muted">Nobody is here.</span>'}</p>`;
-    if ((move.ok || move.disabled) && canMoveTo(t)) {
-      html += `<div><button class="btn" id="move-btn" type="button"${move.ok ? "" : ` disabled title="${esc(move.reason)}"`}>Move here</button></div>${move.why ? `<p class="muted">${esc(move.why)}</p>` : ""}<div id="act-msg" role="status"></div>`;
-    } else if (!move.ok && move.why) {
-      html += `<p class="muted">${esc(move.why)}</p>`;
-    }
-    box.innerHTML = html;
-    const mv = $("move-btn");
-    if (mv && move.ok) mv.onclick = () => act({ kind: "move", x: t.x, y: t.y, z: t.z }, mv);
+    const move = myMove(), t = SEL && tileAt(SEL.x, SEL.y), pend = t && move.ok && canMoveTo(t) ? t : null;
+    const me = myPiece(), g = DATA && DATA.game;
+    let lead = "";
+    if (pend) lead = `<div class="mb"><span><b>Move to ${esc(noLevel(pend.label))}</b> · <span class="charted-note">${tilesText(newlyCharted(pend))}</span></span><button class="btn small" id="make-move" type="button">Make this move</button><button class="btn ghost small" id="undo-move" type="button">Undo</button></div>`;
+    else if (DAY && DAY.you && DAY.you.moved && me) lead = `<div class="mb"><span class="ok" aria-hidden="true">✓</span><span><b>Moved to ${esc(noLevel(me.at.label))}</b> today${LASTMOVE && LASTMOVE.day === DAY.day && LASTMOVE.n != null ? ` · <span class="charted-note">${tilesText(LASTMOVE.n)}</span>` : ""}</span></div>`;
+    else if (DAY && DAY.you && DAY.you.ended) lead = `<div class="mb"><span>No move today</span></div>`;
+    else if (g && g.status === "setup") lead = `<div class="mb"><span><b>Setting up.</b> ${plural((DATA.players || []).length, "player")} of ${esc(g.max_players)} joined.</span></div>`;
+    else if (DAY && DAY.locked) lead = `<div class="mb"><span class="hint">The day is being processed.</span></div>`;
+    else if (!ME) lead = `<div class="mb"><span class="hint">Log in to play.</span></div>`;
+    else if (move.ok) lead = `<div class="mb"><span class="hint">Pick a highlighted tile to move, or open <button type="button" class="linkbtn inl" data-pl="${esc(myKey() || "")}">your card</button>.</span></div>`;
+    else lead = `<div class="mb"><span class="hint">${esc(move.why || "")}</span></div>`;
+    box.innerHTML = lead + `<span class="slot" data-slot="bar-action"></span><span class="mbr"><button class="linkbtn" id="board-toggle" type="button" aria-expanded="${BOARD_OPEN}">${BOARD_OPEN ? "Hide board" : "Show board"}</button></span>`;
+    $("playtop").classList.toggle("collapsed", !BOARD_OPEN);
+    const mm = $("make-move"); if (mm) mm.onclick = () => makeMove(pend, mm);
+    const um = $("undo-move"); if (um) um.onclick = () => select(null, null);
+    $("board-toggle").onclick = () => { BOARD_OPEN = !BOARD_OPEN; drawMoveBar(); };
+    if (VIEW && VIEW.setReach) VIEW.setReach(move.ok ? BOARD.tiles.filter(x => x.z === 0 && canMoveTo(x)).map(x => ({ x: x.x, y: x.y })) : []);
   }
-
-  async function act(body, button) {
-    const msg = $("act-msg");
-    button.disabled = true; msg.className = ""; msg.textContent = "Sending…";
-    const r = await api("/api/action", body);
-    if (r.ok) {
-      await refresh();
-      return;
-    }
-    msg.className = "notice err";
-    msg.textContent = (r.data && r.data.error) || "Something went wrong.";
-    button.disabled = false;
-    if (r.status === 409 || r.status === 403 || r.status === 423) { const t = msg.textContent; await refresh(); const m = $("act-msg"); if (m) { m.className = "notice err"; m.textContent = t; } }
+  // The move is final at once (one a day, rule 202): the existing move route, then the bar says what happened.
+  async function makeMove(t, button) {
+    const n = newlyCharted(t);
+    button.disabled = true;
+    const r = await api("/api/action", { kind: "move", x: t.x, y: t.y, z: t.z });
+    if (r.ok) { LASTMOVE = { day: DAY && DAY.day, n }; SEL = null; if (VIEW) VIEW.select(null, null); await refresh(); if (VIEW) VIEW.recenter(myKey()); return; }
+    const text = (r.data && r.data.error) || "Something went wrong.";
+    SEL = null; if (VIEW) VIEW.select(null, null);
+    await refresh();
+    const m = $("movebar"); const p = document.createElement("p"); p.className = "notice err"; p.setAttribute("role", "alert"); p.textContent = text; m.prepend(p);
   }
-
   function select(q, r) {
     SEL = q == null ? null : { x: q, y: r };
     if (VIEW) VIEW.select(q, r);
-    drawPanel();
+    drawMoveBar();
+    // a piece's tile opens that player's card (S1-PLY-03); a bare tile just highlights
+    const t = SEL && tileAt(SEL.x, SEL.y), here = t ? piecesAt(t) : [];
+    if (here.length) { const p = here[0]; SEL = null; if (VIEW) VIEW.select(null, null); drawMoveBar(); openPlayer(p.color.key); }
   }
 
   function drawBoard(b) {
     BOARD = b;
-    if (VIEW) VIEW.setData(b, ME && ME.player ? ME.player.color.key : null);
-    $("tile-list").innerHTML = b.tiles.filter(t => t.z === 0).map(t => `<li><button type="button" data-x="${t.x}" data-y="${t.y}">${esc("Tile " + t.label + (piecesAt(t).length ? ", " + piecesAt(t).map(p => who(p.name, p.color)).join(", ") : ""))}</button></li>`).join("");
-    drawPanel();
+    if (VIEW) VIEW.setData(b, myKey());
+    $("tile-list").innerHTML = b.tiles.filter(t => t.z === 0).map(t => `<li><button type="button" data-x="${t.x}" data-y="${t.y}">${esc("Tile " + t.label + (piecesAt(t).length ? ", " + piecesAt(t).map(p => `${p.name} (${p.color.name})`).join(", ") : ""))}</button></li>`).join("");
+    drawMoveBar();
+    if (TAB === "summary") drawBook();
   }
   $("tile-list").addEventListener("click", e => {
     const b = e.target.closest("button[data-x]");
@@ -333,11 +490,14 @@
 
   async function refresh() {
     const [g, b, me, d] = await Promise.all([api("/api/game"), api("/api/board"), api("/api/me"), api("/api/day")]);
-    if (me.ok) ME = me.data;
-    if (d.ok) { DAY = d.data; DAY_AT = Date.now(); drawDay(); }
-    if (g.ok) drawGame(g.data);
-    if (b.ok) drawBoard(b.data);
-    if (PROP) { await PROP.load(); PROP.redraw(); }
+    if (me.ok) ME = me.data; else ME = null;
+    if (d.ok) { DAY = d.data; DAY_AT = Date.now(); }
+    if (g.ok) { DATA = g.data; }
+    if (b.ok) { BOARD = b.data; if (VIEW) VIEW.setData(b.data, myKey()); }
+    if (PROP) await PROP.load();
+    drawWho(); if (g.ok) drawGame(g.data); if (b.ok) drawBoard(b.data); drawTabs(); drawBook(); drawMoveBar();
+    if (BOOK) BOOK.redraw();
+    if (CARDS && CARDS.isOpen()) CARDS.redraw();
   }
 
   async function initBoard() {
@@ -346,14 +506,48 @@
       const { createBoard } = await import("/js/board.js");
       VIEW = await createBoard(wrap, { onSelect: select });
       window.__board = VIEW;   // handle for the browser tests
-      if (BOARD) VIEW.setData(BOARD, ME && ME.player ? ME.player.color.key : null);
+      if (BOARD) VIEW.setData(BOARD, myKey());
       if (SEL) VIEW.select(SEL.x, SEL.y);
+      drawMoveBar();
     } catch (e) {
       console.error(e);
       wrap.innerHTML = '<p class="muted" style="padding:12px">The board could not be drawn. The tiles are listed below.</p>';
     }
   }
   const boardLoaded = api("/api/board").then(b => { if (b.ok) drawBoard(b.data); });
+
+  // ---- clicks: tabs, jumps, End turn, pills, players, withdraw ---------------------------------------------------------
+  document.addEventListener("click", async e => {
+    const t = e.target;
+    const tab = t.closest("[data-tab]");
+    if (tab && !tab.disabled) { setTab(tab.dataset.tab, !tab.closest(".btabs")); return; }
+    const j = t.closest("[data-jump]");
+    if (j) { jumpTo(j.dataset.jump); return; }
+    const inCard = !!t.closest("#mroot");
+    const see = t.closest("[data-seecard]");
+    if (see && BOOK) {
+      if (see.matches(".rpill,.xref,.rref") && !see.dataset.fromprev) { BOOK.preview(see, see.dataset.seecard, see.dataset.clause); return; }
+      CARDS.hidePreview();
+      BOOK.openRule(see.dataset.seecard, { push: inCard });
+      return;
+    }
+    const pl = t.closest("[data-pl]");
+    if (pl && DATA) { CARDS.hidePreview(); if (pl.dataset.fromacct) await closePanels(); openPlayer(pl.dataset.pl, inCard); return; }
+    const use = t.closest("[data-muse]");
+    if (use) { CARDS.close(); jumpTo("board"); return; }
+    const pe = t.closest("#p-summary [data-p]");
+    if (pe && PROP && !pe.disabled) { PROP.click(pe); return; }
+    const b = t.closest("[data-endturn]");
+    if (!b) return;
+    if (b.dataset.endturn !== "yes") { END_ASK = b.dataset.endturn === "ask"; drawDay(); if (END_ASK) { const y = document.querySelector('[data-endturn="yes"]'); if (y) y.focus(); } return; }
+    b.disabled = true;
+    const r = await api("/api/end-turn", {});
+    if (r.ok) { END_ASK = false; await refresh(); loadNotes(); return; }
+    const text = (r.data && r.data.error) || "Something went wrong.";
+    END_ASK = false; await refresh();
+    const m = $("day-msg"); if (m) { m.className = "notice err"; m.textContent = text; }
+  });
+
   initBoard();
   load();
 </script>

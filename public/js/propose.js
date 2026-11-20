@@ -1,10 +1,11 @@
 // Proposing a change from the rulebook (rule 103): a player writes plain words, the moderator drafts the exact change,
 // the player puts it on tomorrow's ballot, changes their words, or cancels. mountRulebook (rulebook.js) asks this
 // controller for the pieces it draws inside each rule and block, and hands every click and keystroke back to it.
-//   const P = createProposer({ api, me, day, refresh })
+//   const P = createProposer({ api, me, day, refresh, pill })
 //     api(path, body?)   the page's fetch helper -> { ok, status, data }
 //     me() / day()       the last /api/me and /api/day (day().you.can.propose says whether proposing is allowed, and why not)
 //     refresh()          reload the page's state after a confirm or a withdraw (it calls P.load() and P.redraw())
+//     pill(by, mine)     the page's player pill (piece + name) for a proposer {name, color}; optional
 //   P.load()             fetch GET /api/proposals
 //   P.attach({ RB, redraw, reveal })   rulebook.js: the parsed rules, a redraw, and "open this rule's card"
 // Drafting is free and repeatable; only confirming counts. Nothing here decides what is allowed: the server's answers
@@ -69,8 +70,8 @@ const settingsHTML = (p) => {
 /** @rule 105.1 */
 const needText = (p) => (p.needs ? `${p.needs.mark} · needs ${p.needs.needed} of ${p.needs.of}` : p.mark || "");
 
-export function createProposer({ api, me, day, refresh }) {
-  const S = { list: [], today: null, ui: null, RB: null, redraw: () => {}, reveal: () => {} };
+export function createProposer({ api, me, day, refresh, pill }) {
+  const S = { list: [], today: null, ui: null, RB: null, redraw: () => {}, reveal: () => {}, openAdd: () => {}, openPick: () => {}, closeAdd: () => {} };
 
   /** @rule 103.2 */
   async function load() {
@@ -95,13 +96,16 @@ export function createProposer({ api, me, day, refresh }) {
   const ghosts = (sec) => [...onBallot(), ...S.list.filter((p) => p.mine && p.status === "confirmed")].filter((p, i, a) => p.kind === "add" && p.target === sec.num && a.indexOf(p) === i);
 
   /** @rule 103.1 */
-  const rpill = (n) => (S.RB && S.RB.byNum[n] ? `<a class="rpill" href="#${idOf(n)}" data-goto="${esc(n)}">${esc(n)}</a>` : esc(n));
+  const rpill = (n) => (S.RB && S.RB.byNum[n] ? `<button type="button" class="rpill" data-seecard="${esc(n)}" data-clause="${esc(n)}" aria-haspopup="dialog" aria-label="Preview ${esc(n)}">${esc(n)}</button>` : esc(n));
   /** @rule 103.1 */
   const withPills = (s) => esc(s).replace(/\b(rules?) (\d{3}(?:\.\d+)?)\b/g, (m, w, n) => `${w} ${rpill(n)}`);
   /** @rule 103.2 */
-  const playerPill = (p) => (p.by ? `<span class="plpill"><span class="dot" style="background:${/^#[0-9a-f]{6}$/i.test(p.by.color && p.by.color.hex) ? p.by.color.hex : "#888"}"></span>${p.mine ? "You" : esc(p.by.name)}</span>` : "");
+  const playerPill = (p) => (p.by ? (pill ? pill(p.by, p.mine) : `<span class="plpill"><span class="dot" style="background:${/^#[0-9a-f]{6}$/i.test(p.by.color && p.by.color.hex) ? p.by.color.hex : "#888"}"></span>${esc(p.by.name)}${p.mine ? " (you)" : ""}</span>`) : "");
   /** @rule 103.2 */
-  const pPill = (p) => (p.n ? `<span class="ppill">${esc(p.n)}</span>` : "");
+  /** The card a proposal opens: a new rule's own (ghost) card, else the rule it changes. A change to a block has no card. */
+  const cardKey = (p) => (p.kind === "add" ? p.new_num || p.n : p.kind === "mark" && S.RB && S.RB.byNum[p.target] && S.RB.byNum[p.target].kind === "block" ? null : String(p.target).split(".")[0]);
+  /** @rule 103.2 */
+  const pPill = (p) => (p.n ? (cardKey(p) ? `<button type="button" class="ppill" data-seecard="${esc(cardKey(p))}" data-keeptab="1" aria-label="Open proposal ${esc(p.n)}">${esc(p.n)}</button>` : `<span class="ppill">${esc(p.n)}</span>`) : "");
 
   // A proposal drawn as a tracked change on its rule: today's ballot (no voting yet), or yours, waiting for tomorrow.
   /** @rule 103.2, 103.3 */
@@ -110,7 +114,7 @@ export function createProposer({ api, me, day, refresh }) {
     const w = waiting && p.mine && canWithdraw() ? `<button class="linkbtn" type="button" data-p="withdraw" data-id="${esc(p.id)}">Withdraw</button>` : "";
     const err = S.ui && S.ui.wErr && S.ui.wId === p.id ? `<p class="notice err" role="alert">${esc(S.ui.wErr)}</p>` : "";
     return `<div class="chg${waiting ? " mine" : ""}" data-pn="${esc(p.n || "")}"><div class="ch">${pPill(p)}${playerPill(p)}<span class="pill ${waiting ? "drafting" : "bal"}">${waiting ? "On tomorrow's ballot" : "On today's ballot"}</span>${w}</div>
-<p class="mono head">${esc(p.head || "")}</p><p class="cdiff">${diffOf(p)}</p>${settingsHTML(p)}${p.conflict_note ? `<p class="cnote">${withPills(p.conflict_note)}</p>` : ""}<p class="needline mono">${esc(needText(p))}</p>${err}</div>`;
+<p class="mono head">${esc(p.head || "")}</p><p class="cdiff">${diffOf(p)}</p>${settingsHTML(p)}${p.conflict_note ? `<p class="cnote">${withPills(p.conflict_note)}</p>` : ""}<p class="needline mono">${esc(needText(p))}</p>${waiting ? "" : `<div class="slot" data-slot="ballot-vote" data-pn="${esc(p.n || "")}"></div>`}${err}</div>`;
   }
 
   // ---- what a rule's card gets -------------------------------------------------------------------------------
@@ -197,40 +201,49 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
     return `<div class="proposeact"><button class="btn ghost small" type="button" data-p="open" data-n="${esc(rule.num)}" aria-expanded="${!!open}"${c.allowed ? "" : ` disabled title="${esc(c.reason || "")}"`}>Propose a change</button>${here ? (open ? menuHTML(rule) : flowHTML()) : ""}</div>`;
   }
 
-  // The end of a block: the new rules on the ballot or waiting (ghost rows), and "+ Add a rule".
+  // A block's own row: a change to the block itself (its mark, rule 105.3), on the ballot or yours and waiting for tomorrow.
   /** @rule 103.1, 103.2 */
-  function blockFootHTML(sec) {
-    // A change to the block itself (its mark, rule 105.3): on the ballot, or yours, waiting for tomorrow.
-    const marks = [...onBallot(), ...S.list.filter((p) => p.mine && p.status === "confirmed")].filter((p, i, a) => p.kind === "mark" && p.target === sec.num && a.indexOf(p) === i).map(chgHTML).join("");
-    const g = ghosts(sec).map((p) => {
-      const w = p.status === "confirmed";
-      const title = p.title || String(p.after_text || "").split(/\s+/).slice(0, 6).join(" ");
-      return `<div class="rule ghost" data-bal="1" data-pn="${esc(p.n || "")}"><div class="rh"><div class="gh"><span class="rn">new</span><span class="rt">${esc(title)}</span><span class="chips">${w ? `<span class="onb"><span class="bdot"></span>${esc(p.n)} · yours, tomorrow</span>` : `<span class="onb"><span class="bdot"></span>On the ballot · ${esc(p.n)}</span>`}</span><span class="prev">new rule, not in the book yet</span></div></div><div class="rbody">${chgHTML(p)}</div></div>`;
-    }).join("");
-    if (!active()) return marks + g;
-    const c = can(), u = S.ui, here = u && u.rule === sec.num && u.kind === "add";
-    return marks + g + `<div class="addrule"><button class="linkbtn" type="button" data-p="add" data-n="${esc(sec.num)}"${c.allowed ? "" : ` disabled title="${esc(c.reason || "")}"`}>+ Add a rule</button>${here ? flowHTML() : ""}</div>`;
+  function blockMarksHTML(sec) {
+    return [...onBallot(), ...S.list.filter((p) => p.mine && p.status === "confirmed")].filter((p, i, a) => p.kind === "mark" && p.target === sec.num && a.indexOf(p) === i).map(chgHTML).join("");
+  }
+  // The "+ Add a rule" card at the end of a block's row: disabled, with the reason, when proposing is not open to you.
+  /** @rule 103.1 */
+  function addCardHTML(sec) {
+    if (!active()) return "";
+    const c = can();
+    return `<button type="button" class="bcard add" data-p="add" data-n="${esc(sec.num)}"${c.allowed ? "" : ` disabled title="${esc(c.reason || "")}"`}><span class="pl">+</span><span class="al">Add a rule</span></button>`;
+  }
+  // The card for adding a rule to a block: your words, the moderator's slip, or what is true if you can't.
+  /** @rule 103.1, 103.2 */
+  function addFlowHTML(sec) {
+    const m = mine(), c = can(), u = S.ui;
+    if (m && m.kind === "add" && m.target === sec.num) return chgHTML(m);
+    if (m) return `<p class="mnote">You have already proposed today (${esc(m.n)}). One proposal a day.</p>`;
+    if (!c.allowed) return `<p class="mnote">${esc(c.reason || "You can't propose right now.")}</p>`;
+    return u && u.kind === "add" && u.rule === sec.num ? flowHTML() : "";
+  }
+  // Which block a new rule goes in: the choice the banner's button opens.
+  /** @rule 103.1 */
+  function pickHTML() {
+    return `<div class="pmenu" role="menu">${S.RB.sections.map((s) => `<button type="button" role="menuitem" class="pmi" data-p="add" data-n="${esc(s.num)}"><span class="l"><b>${esc(s.num)} · ${esc(s.title)}</b><small>${s.rules.length} rule${s.rules.length === 1 ? "" : "s"} · ${s.change === "unanimous" ? "needs everyone to agree" : "majority"}</small></span><span aria-hidden="true" class="mnote">→</span></button>`).join("")}</div>`;
   }
 
   // The banner at the top of the rulebook: one proposal a day, said once.
   /** @rule 103.2 */
   function bannerHTML() {
     if (!active()) return "";
-    const m = mine(), c = can(), u = S.ui;
+    const m = mine(), c = can();
     let html;
-    if (m) html = `<p>You proposed <a class="ppill" href="#${idOf(m.target)}" data-goto="${esc(m.target)}">${esc(m.n)}</a> today. It is on tomorrow's ballot (rule ${rpill("103.2")}).</p>`;
+    if (m) html = `<p>You proposed ${pPill(m)} today. It is on tomorrow's ballot (rule ${rpill("103.2")}).</p>`;
     else if (!c.allowed) html = `<p>${esc(c.reason || "You can't propose right now.")}</p>`;
-    else html = `<p><b>You haven't proposed a change today.</b> Pick a rule to change, or propose a new one.</p><button type="button" class="btn ghost small" data-p="pickblock">Propose a new rule</button>`;
-    const pick = u && u.step === "pick" && !m && c.allowed
-      ? `<div class="pmenu" role="menu"><p class="pmhead">Which block?</p>${S.RB.sections.map((s) => `<button type="button" role="menuitem" class="pmi" data-p="add" data-n="${esc(s.num)}"><span class="l"><b>${esc(s.num)} · ${esc(s.title)}</b><small>${s.rules.length} rule${s.rules.length === 1 ? "" : "s"} · ${s.change === "unanimous" ? "needs everyone to agree" : "majority"}</small></span><span aria-hidden="true" class="mnote">→</span></button>`).join("")}</div>` : "";
-    return `<div class="rbanner${m || !c.allowed ? " done" : ""}" id="rb-banner">${html}${pick}</div>`;
+    else html = `<p><b>You haven't proposed a change today.</b> Pick a rule to change, or propose a new one.</p><button type="button" class="btn small" data-p="pickblock">Propose a new rule</button>`;
+    return `<div class="rbanner${m || !c.allowed ? " done" : ""}" id="rb-banner">${html}</div>`;
   }
 
   // ---- the clicks -----------------------------------------------------------------------------------------------
   /** @rule 103.1 */
   function startAdd(block) {
     S.ui = { rule: block, step: "write", kind: "add", target: block, words: "", prefilled: false, err: "" };
-    S.reveal(block);
   }
 
   /** @rule 103.1, 110.1 */
@@ -299,8 +312,9 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
     else if (a === "confirm") return confirm();
     else if (a === "cancel") S.ui = null;
     else if (a === "withdraw") return withdraw(el.dataset.id);
-    else if (a === "pickblock") S.ui = u && u.step === "pick" ? null : { step: "pick" };
-    else if (a === "add") { startAdd(el.dataset.n); S.redraw(); const f = document.getElementById("pfWords"); if (f) { f.scrollIntoView({ block: "center" }); f.focus({ preventScroll: true }); } return; }
+    else if (a === "pickblock") { S.openPick(); return; }
+    else if (a === "add") { startAdd(el.dataset.n); S.openAdd(el.dataset.n); S.redraw(); const f = document.getElementById("pfWords"); if (f) f.focus({ preventScroll: true }); return; }
+    if (a === "cancel") S.closeAdd();
     S.redraw();
   }
 
@@ -312,12 +326,17 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
   }
   /** @rule 103.1 */
   function escape() { if (S.ui && !S.ui.busy) { S.ui = null; S.redraw(); return true; } return false; }
+  /** @rule 103.1 */
+  const cancelFlow = () => { if (S.ui && !S.ui.busy) S.ui = null; };
+  /** @rule 103.2 */
+  const mineTouches = (rule) => { const p = S.list.find((q) => q.mine && q.status === "confirmed" && touches(q, rule.num)); return p ? p.n : null; };
 
   return {
-    load, click, input, escape, bannerHTML, proposeHTML, blockFootHTML, boxHTML, ageChip, onBallotRule,
-    flowRule: () => (S.ui && S.ui.rule) || null,
+    load, click, input, escape, cancelFlow, mineTouches, bannerHTML, proposeHTML, blockMarksHTML, addCardHTML, addFlowHTML, pickHTML, boxHTML, ageChip, onBallotRule,
+    chgFor: chgHTML, cardKey, rpill, pPill, mine, onBallot: () => onBallot(), canPropose: () => can(),
+    ghostsOf: (sec) => ghosts(sec),
     ghostCount: () => (S.RB ? S.RB.sections.reduce((n, s) => n + ghosts(s).length, 0) : 0),
-    attach({ RB, redraw, reveal }) { S.RB = RB; S.redraw = redraw; S.reveal = reveal; },
+    attach({ RB, redraw, reveal, openAdd, openPick, closeAdd }) { S.RB = RB; S.redraw = redraw; S.reveal = reveal || S.reveal; S.openAdd = openAdd || S.openAdd; S.openPick = openPick || S.openPick; S.closeAdd = closeAdd || S.closeAdd; },
     redraw: () => S.redraw(),
   };
 }
