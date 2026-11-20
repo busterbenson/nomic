@@ -7,9 +7,12 @@ Spec for Buster's OK (2026-11-20). Nothing here is built. It replaces the larger
 - Features are built only into a game's own repo and exist only for that game's players. Players can't propose changes to the platform.
 - Everything new (a creature, a tile, an item, a feature like a forum) comes in as a **commission**. Plain rule changes (reword, add, repeal, move, mark) stay ordinary proposals.
 - A commission creates a **ticket** that tracks everything about it: a brief, the catalog entries and rules it makes, an estimate, a cost, a log of tasks and progress, and a discussion.
-- The Workshop lives on the **Catalog tab**.
+- **The Catalog tab becomes the Workshop tab**, and the catalog lives inside it (the ticket list first, then the catalog groups).
 - A live helper, **Gremlin**, builds the brief with the player in real time and answers ticket discussions. He is clearly not Chalant, has a gremlin-y personality, and escalates what he isn't comfortable with to Chalant.
-- Gremlin is also **a creature in the game** by default, with his own piece.
+- **Gremlin is an NPC who lives in the Workshop tab**, not a piece on the board (to start). His chat is a sidebar window on desktop and a sheet from a button on phones, with a portrait.
+- **Chat history** with Gremlin and Starling is saved per player, per day, private to that player, and scrolls back through past days. A ticket's discussion stays public on the ticket.
+- **Starling** (a starling bird) is the Rulebook tab's chat agent, with the same sidebar window, and **she is the way you draft rule proposals** (below).
+- Gremlin's limit excuses: a list, plus one improvised excuse at the limit (below).
 - Gremlin **can charge points for a commission or offer it free**, by a generous but sometimes inconsistent logic; 0 by default for simple requests with no rules or code.
 
 ## The ticket
@@ -32,7 +35,7 @@ One page per commission, opened from the Workshop list or any pill that names it
 
 ## The flow
 
-1. **Commission.** On the Catalog tab, "Commission something" opens a draft ticket and a chat with Gremlin. The player describes it; Gremlin asks what he needs to know and fills in the brief, makes, estimate, cost and tasks as they go. Anything impossible (outside the game, against privacy, security or the law, or past the limits) is refused here, with the reason.
+1. **Commission.** On the Workshop tab, "Commission something" opens a draft ticket and a chat with Gremlin. The player describes it; Gremlin asks what he needs to know and fills in the brief, makes, estimate, cost and tasks as they go. Anything impossible (outside the game, against privacy, security or the law, or past the limits) is refused here, with the reason.
 2. **Confirm.** The player confirms the ticket at Gremlin's price (they can haggle with him before confirming; the price is final once confirmed, and a player who can't afford it can't confirm). It is one of their proposals for the day (103.2) and goes on tomorrow's ballot, where the ballot row shows the brief, the estimate and the cost.
 3. **Vote.** Like any proposal, at the mark of the block it adds to (105).
 4. **Pay and queue.** A passed commission's price comes out of the requester's points (spent: it no longer counts toward winning), and the ticket is Approved and joins the queue: first approved, first built.
@@ -55,10 +58,17 @@ One page per commission, opened from the Workshop list or any pill that names it
 - His logic is generous but a bit inconsistent on purpose. He prices by feel from a loose guide (a few points per night of work), and he can be charmed, grumpy or in a mood. He always gives a one-line reason on the ticket.
 - The guide, the mood and the range are in his prompt, with a hard ceiling (a setting) so a mood can't price a ticket out of reach of every player.
 
-## Gremlin on the board
+## Gremlin at the limit
 
-- Gremlin is the first creature in every game's catalog: neutral, with his own piece in the site's piece style (small, hunched, big ears, a wrench).
-- He stays on one tile (his workshop), placed when day 1 begins. Tapping him opens the Workshop. He doesn't move, bite or block anyone until a rule says otherwise.
+When a player reaches Gremlin's daily cap, he makes one last short call to improvise an excuse from the conversation, ending with when he's back (midnight in the game's time zone). If that call fails he uses a canned one. The canned list and examples: Chalant's `artifacts/promptocracy-workshop/gremlin-limit-excuses.md` (e.g. "Wrench slipped. Down a drain. I'm going in after it. Back at midnight."). The improvised call is at most once per player per day and outside the cap.
+
+## Starling (the Rulebook's chat, and how you draft)
+
+- Lives in the Rulebook tab; same sidebar window and per-player history as Gremlin. A starling is a mimic: chirpy, quotes rules word for word with their numbers (rule pills in her replies), loves repeating your best phrase back.
+- Answers "can I...?" from the rules as they stand, and says plainly when the rules don't say.
+- **Drafting:** you talk a rule change through with her. When she has the wording she shows the draft slip (the drafter's output: text, scope, mark, conflicts) and asks "Lock it in?". **Locking = confirming** (103.2): it gets its P-number, goes on tomorrow's ballot and counts toward your proposals for the day. **"Unlock it" = withdrawing** (103.3): back to a draft you can keep talking about, until it goes on the ballot or you end your turn. She drives the existing drafter, so all its checks stay, and nothing locks without the player's yes.
+- Escalates to Chalant what she isn't sure of (a real conflict between rules, anything that needs a ruling). Own daily cap and limit excuses (improvised the same way as Gremlin's).
+- Model: Sonnet for the conversation; the drafter keeps its own model. Player text reaches her only as data; she can't change rules or confirm on a player's behalf.
 
 ## Limits from the world
 
@@ -77,8 +87,6 @@ The site sets how long Chalant can build each night, the most nights one ticket 
 **801.4** Gremlin sets each commission's price in points when it's drafted, and says why. You pay it when the commission passes; points you pay no longer count toward winning (402). You can't confirm a commission you can't pay for.
 **804.1** Anyone in the game can post in a ticket's discussion. Gremlin answers; he can't change an approved ticket, and he hands questions he can't answer to the moderator.
 
-**805.1** Gremlin is a neutral creature (C1). He stays on his tile, the workshop, and does nothing else until a rule says so.
-
 701 (catalog entries) then says a new entry comes in by commission (801).
 
 ## What's cut from the bigger design
@@ -87,8 +95,9 @@ Two benches, giving points, the points-ordered queue, plaques and ribbon-cutting
 
 ## Build plan (each a PR, in order)
 
-1. **Tickets and threads (platform, migration).** Tables for tickets, tasks, log and posts; the Workshop list at the top of the Catalog tab; the ticket page; posting in a thread; the ballot row for a commission. No Gremlin yet: the requester fills in the brief by hand.
-2. **Gremlin (platform).** The commission chat and thread replies on Sonnet, the persona, prices, escalation (with a notification to the Mac mini), the daily cap, the safety fence; his piece and his place on the board (C1).
+1. **Tickets and threads (platform, migration).** Tables for tickets, tasks, log and posts; the Catalog tab renamed the Workshop tab, with the ticket list at the top; the ticket page; posting in a thread; the ballot row for a commission. No Gremlin yet: the requester fills in the brief by hand.
+2. **Gremlin (platform).** The commission chat and thread replies on Sonnet, the persona, prices, escalation (with a notification to the Mac mini), the daily cap and limit excuses, the safety fence; the sidebar chat window (sheet on phones) and per-player history.
+2b. **Starling (platform).** The Rulebook chat in the same window component, driving the drafter, lock/unlock = confirm/withdraw, escalation, cap and excuses. Her rule text (103.1's "describe it in your words" becomes "draft it with Starling") ships with her.
 3. **The night (moderator).** Read the queue and threads, work the front ticket, tick tasks, log, answer, go live when done, the 3-failed-nights and 2x-estimate rules.
 4. **Rule text (Rickshaw).** Block 800, the 701 change, with the code each clause needs.
 
@@ -100,4 +109,3 @@ Before step 3 can build features like a forum, the platform needs general pieces
 2. **Gremlin's daily cap:** lean 30 messages per player a day.
 3. **Who can post in a thread:** lean every player in the game; Ghosts and dead players read only.
 4. **Can the requester withdraw an approved ticket before it's built?** Lean yes; it goes to Shelved, and the price isn't refunded.
-5. **Where Gremlin's tile is:** lean a charted tile next to where the first player started.
