@@ -15,6 +15,8 @@ import { BundleError, bundleGames, latestDayTag, runNode, runSandboxed } from ".
 import * as api from "../src/engine/api.js";
 import { checkFileClaims, claimMap, findFunctions, hookClaimProblems, knownNumbers, overClaimed, worksWith } from "../src/engine/claims.js";
 import { runClaimsCheck, todoDoc } from "../scripts/check-rule-claims.mjs";
+import { addDays, dayGate, isLocked, localDate, lockMessage, nextMidnight, startOfDate } from "../src/lib/day-gate.js";
+import { OPTIONAL_SETTINGS, getSettings, validTimeZone } from "../src/lib/settings.js";
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = "") => {
@@ -348,6 +350,18 @@ console.log("fetching a game: the latest day-N tag of a git remote");
   writeFileSync(manifest, J({ engine: 1, games: { "rickshaw-1": { repo: "owner/game" } } }));
   check("a tag with more than 6 digits is not a day (day-99999999999999999999999 cannot become 1e+23 and block every deploy)", (() => { g("tag", "day-99999999999999999999999"); return latestDayTag(`file://${repo}`).day === 10; })());
   check("latestDayTag picks the highest NUMBER (day-10 beats day-2), ignores day-x and other tags", latestDayTag(`file://${repo}`).tag === "day-10" && latestDayTag(`file://${repo}`).day === 10);
+  {
+    // Setup revisions: before day 1 the starter rules are edited directly and tagged day-0.K (tags never move).
+    const srepo = pjoin(base, "owner", "setup");
+    mkdirSync(srepo, { recursive: true });
+    const sg = (...a) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.test", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", ...a], { cwd: srepo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    sg("init", "-q", "-b", "main"); cpSync(FIX, srepo, { recursive: true }); sg("add", "-A"); sg("commit", "-q", "-m", "setup");
+    for (const t of ["day-0", "day-0.1", "day-0.2", "day-0.10", "day-0.01", "day-0.0", "day-00", "day-3.1", "day-0.99999"]) sg("tag", t);
+    const s1 = latestDayTag(`file://${srepo}`);
+    check("setup revisions: day-0.10 beats day-0.2 and day-0 (by number), and only day 0 has them (day-3.1, day-0.01, day-0.0, day-00 and a 5-digit revision are ignored)", s1.tag === "day-0.10" && s1.day === 0, J(s1));
+    sg("tag", "day-1");
+    check("the first real day beats every setup revision: once day 1 is tagged, day-1 is what the build fetches", latestDayTag(`file://${srepo}`).tag === "day-1" && latestDayTag(`file://${srepo}`).day === 1);
+  }
   const out = pjoin(work, "out-git");
   const e = quiet(() => bundle({ BUNDLE_OUT: out, GAMES_MANIFEST: manifest, GAMES_GIT_BASE: `file://${base}` }));
   const gen = existsSync(pjoin(out, "games.ts")) ? readFileSync(pjoin(out, "games.ts"), "utf8") : "";
@@ -365,6 +379,45 @@ console.log("fetching a game: the latest day-N tag of a git remote");
   writeFileSync(manifest, J({ engine: 2, games: {} }));
   must("a manifest for another engine version fails the build", { GAMES_MANIFEST: manifest }, /engine 2/);
 }
+console.log("the day: midnights in the game's time zone, the lock, End turn");
+{
+  const LA = "America/Los_Angeles", H = 3600_000;
+  const iso = (ms) => new Date(ms).toISOString();
+  check("an ordinary Los Angeles day is 24 h, midnight to midnight local time (PST is UTC-8)",
+    iso(startOfDate(LA, "2026-01-15")) === "2026-01-15T08:00:00.000Z" && startOfDate(LA, "2026-01-16") - startOfDate(LA, "2026-01-15") === 24 * H);
+  check("the spring-forward day (2026-03-08) is 23 h: it starts at 08:00Z (PST) and ends at 07:00Z (PDT)",
+    iso(startOfDate(LA, "2026-03-08")) === "2026-03-08T08:00:00.000Z" && iso(startOfDate(LA, "2026-03-09")) === "2026-03-09T07:00:00.000Z" && startOfDate(LA, "2026-03-09") - startOfDate(LA, "2026-03-08") === 23 * H);
+  check("the fall-back day (2026-11-01) is 25 h: it starts at 07:00Z (PDT) and ends at 08:00Z (PST)",
+    iso(startOfDate(LA, "2026-11-01")) === "2026-11-01T07:00:00.000Z" && iso(startOfDate(LA, "2026-11-02")) === "2026-11-02T08:00:00.000Z" && startOfDate(LA, "2026-11-02") - startOfDate(LA, "2026-11-01") === 25 * H);
+  check("nextMidnight: from any moment of a DST day the next midnight is that day's end; a moment exactly at midnight belongs to the new day",
+    iso(nextMidnight(LA, Date.parse("2026-03-08T12:00:00Z"))) === "2026-03-09T07:00:00.000Z" && iso(nextMidnight(LA, Date.parse("2026-11-01T23:59:00-08:00"))) === "2026-11-02T08:00:00.000Z" &&
+    iso(nextMidnight(LA, Date.parse("2026-03-09T07:00:00Z"))) === "2026-03-10T07:00:00.000Z" && iso(nextMidnight(LA, Date.parse("2026-03-09T06:59:59.999Z"))) === "2026-03-09T07:00:00.000Z");
+  check("a zone whose clocks jump AT midnight (Havana, 2026-03-08 00:00 -> 01:00): the day starts the moment the date begins, and is 23 h",
+    localDate("America/Havana", startOfDate("America/Havana", "2026-03-08")) === "2026-03-08" && localDate("America/Havana", startOfDate("America/Havana", "2026-03-08") - 60_000) === "2026-03-07" &&
+    startOfDate("America/Havana", "2026-03-09") - startOfDate("America/Havana", "2026-03-08") === 23 * H);
+  check("a zone whose clocks fall back AT midnight (Beirut, 2026-10-25 00:00 -> 23:00 the day before): Saturday is 25 h, and Sunday begins the first moment its date is reached",
+    startOfDate("Asia/Beirut", "2026-10-25") - startOfDate("Asia/Beirut", "2026-10-24") === 25 * H && localDate("Asia/Beirut", startOfDate("Asia/Beirut", "2026-10-25") - 60_000) === "2026-10-24" &&
+    (() => { const s = startOfDate("Asia/Beirut", "2026-10-25"); for (let t = s - 26 * H; t < s; t += 60_000) if (localDate("Asia/Beirut", t) >= "2026-10-25") return false; return true; })());
+  check("other zones: Tokyo (UTC+9, no DST), Kiritimati (UTC+14) and Pago Pago (UTC-11) midnights", iso(startOfDate("Asia/Tokyo", "2026-06-01")) === "2026-05-31T15:00:00.000Z" &&
+    iso(startOfDate("Pacific/Kiritimati", "2026-06-01")) === "2026-05-31T10:00:00.000Z" && iso(startOfDate("Pacific/Pago_Pago", "2026-06-01")) === "2026-06-01T11:00:00.000Z");
+  check("calendar arithmetic crosses months, years and leap days", addDays("2026-12-31", 1) === "2027-01-01" && addDays("2028-02-28", 1) === "2028-02-29" && addDays("2026-03-01", -1) === "2026-02-28");
+  const day = { n: 3, status: "open", ends_at: "2026-03-09T07:00:00.000Z" };
+  const end = Date.parse(day.ends_at), game = { status: "playing", phase: "open" };
+  check("the lock is exact: open 1 ms before midnight, locked AT midnight and 1 s after, by the clock alone (the flag still says open)",
+    dayGate(game, day, null, end - 1) === null && J(dayGate(game, day, null, end)) === J({ status: 423, error: lockMessage(3), processing_day: 3 }) && dayGate(game, day, null, end + 1000)?.status === 423);
+  check("the lock message names the day being processed", lockMessage(3) === "Chalant is processing day 3. Play resumes when it's done.");
+  check("the lock also holds by the flag: the game locked, or the day no longer open, even before midnight",
+    isLocked({ phase: "locked" }, day, end - H) && isLocked(game, { ...day, status: "locked" }, end - H) && isLocked(game, { ...day, status: "processing" }, end - H) && !isLocked(game, day, end - H));
+  check("End turn is final: an ended turn is refused (409) for the rest of the day, and the lock (423) still comes first at midnight",
+    J(dayGate(game, day, { moved_at: null, ended_at: "2026-03-08T20:00:00Z" }, end - H)) === J({ status: 409, error: "Your turn has ended for today." }) && dayGate(game, day, { ended_at: "x" }, end).status === 423);
+  check("before the game starts (setup, or no day yet) and after it is over, every write is refused (409)",
+    /not started/.test(dayGate({ status: "setup" }, null, null, 0).error) && /not started/.test(dayGate(game, null, null, 0).error) && dayGate({ status: "over" }, day, null, 0).error === "The game is over.");
+  check("game.timezone is a setting (default America/Los_Angeles), validated as a real IANA zone, and OPTIONAL: a game's settings.json tagged before it existed still validates",
+    DEFAULT_SETTINGS["game.timezone"] === LA && validTimeZone("Europe/Oslo") && !validTimeZone("Mars/Olympus") && !validTimeZone("") && !validTimeZone(5) &&
+    OPTIONAL_SETTINGS.includes("game.timezone") && (() => { const { ["game.timezone"]: _, ...old } = DEFAULT_SETTINGS; return validateSettings(old).length === 0; })() &&
+    validateSettings({ ...DEFAULT_SETTINGS, "game.timezone": "Nowhere/Land" }).length === 1 && getSettings({ "game.timezone": "Nowhere/Land" })["game.timezone"] === LA && getSettings({ "game.timezone": "Asia/Tokyo" })["game.timezone"] === "Asia/Tokyo");
+}
+
 check("the real manifest lists Rickshaw Game 1 at busterbenson/promptocracy-rickshaw", (() => {
   const mf = JSON.parse(readFileSync(pjoin(ROOT, "games.manifest.json"), "utf8"));
   return mf.engine === 1 && J(mf.games) === J({ "rickshaw-1": { repo: "busterbenson/promptocracy-rickshaw" } });

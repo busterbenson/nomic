@@ -24,6 +24,9 @@ import * as apiRules from "./routes/api-rules";
 import * as apiTurn from "./routes/api-turn";
 import * as apiBoard from "./routes/api-board";
 import * as apiAction from "./routes/api-action";
+import * as apiDay from "./routes/api-day";
+import * as apiEndTurn from "./routes/api-end-turn";
+import { clockNow, runMidnight } from "./lib/day";
 import * as apiNotifications from "./routes/api-notifications";
 import * as apiNotificationsRead from "./routes/api-notifications-read";
 import * as mcp from "./routes/mcp";
@@ -42,6 +45,7 @@ type Methods = { get?: Handler; post?: Handler };
 const API: Record<string, Methods> = {
   game: apiGame, me: apiMe, join: apiJoin, login: apiLogin, logout: apiLogout,
   turn: apiTurn, rules: apiRules, notifications: apiNotifications, board: apiBoard, action: apiAction,
+  day: apiDay, "end-turn": apiEndTurn,
 };
 
 const secure = (res: Response) => {
@@ -147,5 +151,11 @@ async function route(request: Request, env: Env, execCtx: ExecutionContext): Pro
 export default {
   async fetch(request: Request, env: Env, execCtx: ExecutionContext): Promise<Response> {
     return secure(await route(request, env, execCtx));
+  },
+  // The midnight run (wrangler.toml [triggers], every 5 minutes): lock the days that have ended, process them, open the
+  // next (src/lib/day.ts). Idempotent, so a late or doubled tick is harmless.
+  /** @rule 107.1, 203.1 */
+  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+    await runMidnight(env, await clockNow(env));
   },
 };

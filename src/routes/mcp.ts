@@ -29,7 +29,7 @@ export const handle = async (ctx: Ctx): Promise<Response> => {
 
   const server = new McpServer(
     { name: `promptocracy-${game.slug}`, version: "1.0.0" },
-    { instructions: `You are connected to the game ${game.name} as ${player.display_name}. Call my_state first to see whose turn it is. read_rules and read_board show the rules and the board.` },
+    { instructions: `You are connected to the game ${game.name} as ${player.display_name}. Call my_state first to see today's day, the midnight lock and what you may still do today. read_rules and read_board show the rules and the board.` },
   );
   registerTools(server, ctx, player);
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });

@@ -5,9 +5,10 @@ import { execFileSync } from "node:child_process";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
-import { ROOT, client, createGame, d1, finish, join as joinGame, migrate, newState, startRulesStub, startServer, COLORS } from "./lib.mjs";
+import { ROOT, client, createGame, d1, finish, join as joinGame, migrate, newState, startPlaying, startRulesStub, startServer, COLORS } from "./lib.mjs";
 
 let pass = 0, fail = 0;
+const J = JSON.stringify;
 const check = (name, ok, detail = "") => {
   if (ok) { pass++; console.log(`  ok    ${name}`); }
   else { fail++; console.log(`  FAIL  ${name}${detail ? "  -> " + detail : ""}`); }
@@ -238,29 +239,25 @@ try {
   // game 1 is still in 'setup' here
   const early = await bo.post("/one/api/turn", { prompt: "Too early." });
   check("a turn in a game that has not started is refused (409)", early.status === 409, early.text);
-  d1(state, "UPDATE games SET status = 'playing', round = 1, turn = 1 WHERE slug = 'one'");
+  startPlaying(state, "one");
   check("logged-out submit is 401", (await client(A).post("/one/api/turn", { prompt: "Hi" })).status === 401);
-  const notYours = await ada.post("/one/api/turn", { prompt: "Out of turn." });
-  check("a player who is not up is refused (403)", notYours.status === 403 && /not your turn/i.test(notYours.data.error), notYours.text);
   check("an empty prompt and a 2001-char prompt are refused",
     (await bo.post("/one/api/turn", { prompt: "   " })).status === 400 && (await bo.post("/one/api/turn", { prompt: "x".repeat(2001) })).status === 400);
   const before = (await ada.get("/one/api/notifications")).data.unread;
   const pub0 = await client(A).get("/one/api/game");
-  check("before submitting, the board says the current player is waiting", pub0.data.turn_status === "waiting" && pub0.data.turns.length === 0);
+  check("before submitting, the board shows day 1 and no prompts today", pub0.data.game.day === 1 && pub0.data.turns.length === 0, pub0.text);
   const mine = await bo.post("/one/api/turn", { prompt: "Anyone who proposes a rule about cats gets 5 points." });
-  check("the current player can submit", mine.status === 200 && mine.data.status === "submitted", mine.text);
+  check("a player can submit (there is no order of play: every player has a turn every day)", mine.status === 200 && mine.data.status === "submitted", mine.text);
   const pub1 = await client(A).get("/one/api/game");
-  check("the turn does NOT advance on submit", pub1.data.game.turn === 1 && pub1.data.game.round === 1);
-  check("/one/api/game shows the prompt and status, still no '@' or ids",
-    pub1.data.turn_status === "submitted" && pub1.data.turns[0].prompt.includes("cats") && pub1.data.turns[0].name === "Bo" && !pub1.text.includes("@") && !/user_id|"id"/.test(pub1.text), pub1.text);
-  check("the log records it", pub1.data.events[0].text.includes("Bo (Marigold) took their turn"));
+  check("/one/api/game shows the prompt, still no '@' or ids",
+    pub1.data.turns[0].prompt.includes("cats") && pub1.data.turns[0].status === "submitted" && pub1.data.turns[0].name === "Bo" && !pub1.text.includes("@") && !/user_id|"id"/.test(pub1.text), pub1.text);
+  check("the log records it", pub1.data.events[0].text.includes("Bo (Marigold) proposed a change"));
   const after = await ada.get("/one/api/notifications");
   check("the other players were notified in-game", after.data.unread === before + 1 && after.data.notifications[0].kind === "turn_submitted");
-  check("and by email, but not the submitter", (() => { const o = d1(state, "SELECT to_addr FROM outbox WHERE subject LIKE '%took their turn%'"); return o.some((r) => r.to_addr === "ada@example.com") && !o.some((r) => r.to_addr === "bo@example.com"); })());
+  check("and by email, but not the submitter", (() => { const o = d1(state, "SELECT to_addr FROM outbox WHERE subject LIKE '%proposed a change%'"); return o.some((r) => r.to_addr === "ada@example.com") && !o.some((r) => r.to_addr === "bo@example.com"); })());
   const twice = await bo.post("/one/api/turn", { prompt: "A second try." });
-  check("a second submit in the same round is refused (409)", twice.status === 409 && /already/i.test(twice.data.error), twice.text);
-  d1(state, "UPDATE games SET round = 2 WHERE slug = 'one'");
-  check("in the next round the same player can submit again", (await bo.post("/one/api/turn", { prompt: "Round two." })).status === 200);
+  check("a second submit the same day is refused (409)", twice.status === 409 && /already proposed today/i.test(twice.data.error), twice.text);
+  check("another player may submit the same day", (await ada.post("/one/api/turn", { prompt: "Ada's turn too." })).status === 200);
 
 
   console.log("two games on one site");
@@ -328,9 +325,10 @@ try {
     pubTwo.data.events.every((e) => /Quill|Zed/.test(e.text)) && pubTwo.data.turns.length === 0, pubTwo.text);
   check("/one/api/game has nothing from game two", !/Quill|Zed|Game Two/.test(pubOne.text) && pubOne.data.players.map((p) => p.name).join() === "Ada,Bo,Late,Dup");
   check("neither mentions an email or a join code", ![pubOne.text, pubTwo.text].some((t) => t.includes("@") || t.includes(game.code) || t.includes(two.code)));
-  d1(state, "UPDATE games SET status = 'playing', round = 1, turn = 0 WHERE slug = 'two'");
+  startPlaying(state, "two");
   const aUnread = (await ada.get("/one/api/notifications")).data;
   const quill = client(A); await finish(quill, (await quill.post("/two/api/login", { email: "ada@example.com" })).data.dev_link);
+  const dayOneBefore = (await client(A).get("/one/api/day")).data.players.map((p) => p.proposed);
   const qTurn = await quill.post("/two/api/turn", { prompt: "Game two prompt: a rule about owls." });
   check("a turn in game two is recorded", qTurn.status === 200, qTurn.text);
   const pubOne2 = await client(A).get("/one/api/game"), pubTwo2 = await client(A).get("/two/api/game");
@@ -341,15 +339,15 @@ try {
   check("game two's notifications mention nothing from game one",
     zedNotes.notifications.length >= 2 && zedNotes.notifications.some((n) => n.body.includes("owls") || n.body.includes("Quill")) && !JSON.stringify(zedNotes).match(/Ada|Bo |Dup|Late|cats/), JSON.stringify(zedNotes));
   check("emails for game two's turn went to game two's other player and named the game",
-    d1(state, "SELECT to_addr, subject, body FROM outbox WHERE subject LIKE 'Game Two: %took their turn%'").every((o) => o.to_addr === "zed@example.com" && o.body.includes("http://example.test/two/")) &&
-    d1(state, "SELECT COUNT(*) AS n FROM outbox WHERE subject LIKE 'Game Two: %took their turn%'")[0].n === 1);
+    d1(state, "SELECT to_addr, subject, body FROM outbox WHERE subject LIKE 'Game Two: %proposed a change%'").every((o) => o.to_addr === "zed@example.com" && o.body.includes("http://example.test/two/")) &&
+    d1(state, "SELECT COUNT(*) AS n FROM outbox WHERE subject LIKE 'Game Two: %proposed a change%'")[0].n === 1);
   check("a game one player marking 'all read' leaves game two's unread alone",
     (await ada.post("/one/api/notifications/read", { all: true })).status === 200 && (await zed.get("/two/api/notifications")).data.unread === zedNotes.unread);
   check("the database holds no cross-game row (notifications, sessions, turns point at a player of their own game)",
     ["notifications", "sessions", "turns"].every((t) => d1(state, `SELECT COUNT(*) AS n FROM ${t} x JOIN players p ON p.id = x.player_id WHERE p.game_id != x.game_id`)[0].n === 0));
   check("the database refuses a row that points at another game's player",
     (() => { try { d1(state, "INSERT INTO notifications (id, game_id, player_id, kind, body, created_at) SELECT 'x', (SELECT id FROM games WHERE slug='one'), (SELECT id FROM players WHERE display_name='Zed'), 'k', 'b', 'now'"); return false; } catch { return true; } })());
-  check("game two's turn did not touch game one's turn counter", (await client(A).get("/one/api/game")).data.game.turn === 1);
+  check("game two's turn did not touch game one's day or its players' turns today", (await client(A).get("/one/api/game")).data.game.day === 1 && J((await client(A).get("/one/api/day")).data.players.map((p) => p.proposed)) === J(dayOneBefore), J((await client(A).get("/one/api/day")).data.players));
 
   console.log("landing page and routing");
   const land = await client(A).get("/");

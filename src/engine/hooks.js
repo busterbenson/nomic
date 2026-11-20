@@ -6,7 +6,8 @@
 // game's repo, that exports a plain object { rule: <n>, <hook>(...) {...}, ... }. Hooks take plain data in and
 // give plain data out: they never see the database, the environment or the request. The engine runs them and
 // applies what they say (a refusal, or a list of effects) in the same D1 batch as the action itself.
-// The engine's own gates are not rules and a module cannot override them: logged in, game playing, whose turn it is.
+// The engine's own gates are not rules and a module cannot override them: logged in, game playing, the day open and not
+// locked (rule 107.1), the player's turn not ended (rule 202.4). They are in src/lib/day.ts (dayGate).
 //
 // ENGINE CHANGES ARE ADDITIVE ONLY: a new hook or a new optional ctx field reaches every game in a separate
 // platform change. Nothing here may change what an existing module sees.
@@ -110,14 +111,15 @@ export function cryptoRng() {
 }
 
 // ctx: everything a hook may read, as deep-frozen plain data (the tiles view and rng are functions).
-//   day        the day number, or null while the game still runs on turns (days arrive with their own change)
+//   day        the day number (rule 203.1), or null before the game's first day
 //   now        ISO time of the request
 //   settings   the game's settings (src/lib/settings.js getSettings)
 //   players    [{ref, color, score, x, y, z, living}]  (ref is the engine's stable reference to a player)
 //   tiles      has(x,y,z) / get(x,y,z) / list()
 //   rulebook   { marks }  the mark of each rule by number; empty until proposals arrive
 //   rng        () => float in [0,1)
-//   turn       { round, turn, moved }  the turn model of the games that still run on turns; goes when days arrive
+//   turn       { round, turn, moved }  moved: the acting player has moved in today's turn (rule 202.1, one turn a day).
+//              round and turn are the legacy turn-model numbers, kept because the engine is additive only
 //   judge      optional, for rules that need a ruling (none yet)
 /** @rule 101 */
 export function makeContext(o) {

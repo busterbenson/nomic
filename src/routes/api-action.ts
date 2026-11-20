@@ -1,27 +1,29 @@
 // POST /<slug>/api/action: moves the site itself carries out (no moderator).
 //   {kind:"move", x, y}   (or {kind:"move", label:"3N 2E"}; z is optional and must be the level you stand on)
-// Move your piece. The ENGINE decides that the game is 'playing' and it is the player's turn (turnBlock); the
-// game's RULE MODULES decide the rest: at most one move a turn (rule 202, games.last_move holds the 'round:turn'
-// of the last move), and a move to a CHARTED, unoccupied tile on your level within the move distance (rule 504).
-// A move is IN ADDITION to proposing a rule change: it neither ends the turn nor needs a proposal, and a
-// proposal made before or after it is unaffected. Turns still advance only when the moderator is built.
+// Move your piece. The ENGINE decides that the game is playing, the day is open and not locked (rule 107.1, checked
+// against the clock) and the player has not ended their turn (rule 202.4) (turnBlock / dayGate); the game's RULE
+// MODULES decide the rest: at most one move a day (rule 202, day_turns.moved_at), and a move to a CHARTED, unoccupied
+// tile on your level within the move distance (rule 504). There is no order of play: every player has a turn every
+// day (rule 202.1). A move is IN ADDITION to proposing a rule change: it does not end the turn.
 // After the move, the effects the modules return are applied in the same batch (rule 504 charts every tile
 // within the chart radius of the new position; charting a charted tile does nothing).
 // Everything is written in ONE D1 batch, so a move can never half-apply. The first statement doubles as
-// the guard: it only inserts the log line if the turn, the round, the last move, the piece's position,
-// the destination and its occupancy are still exactly as they were read, otherwise it violates NOT NULL
-// and the whole batch rolls back (two simultaneous requests: one wins, one gets a 409).
+// the guard: it only inserts the log line if the day is still open (and not past midnight), the player's turn is not
+// ended, their move today, the piece's position, the destination and its occupancy are still exactly as they were
+// read, otherwise it violates NOT NULL and the whole batch rolls back (two simultaneous requests: one wins, one gets a
+// 409; a move racing the midnight lock gets a 409 too, never a write after the lock).
 import { getPlayer } from "../lib/auth";
 import { RuleError, afterActionStatements, boardContext, checkAction } from "../engine/host";
 import { ensureTiles } from "../lib/board";
 import { parseLabel, tileLabel, validCoord } from "../lib/geometry.js";
-import { turnBlock } from "../lib/turn";
+import { clockNow, dayOpenBinds, dayOpenSql, loadToday } from "../lib/day";
+import { refusalBody, turnBlock } from "../lib/turn";
 import { Ctx, json, nowIso, readJson, who } from "../lib/util";
 
+/** @rule 202.2, 504.3 */
 export const post = async (ctx: Ctx) => {
   const { env, request } = ctx;
-  const game = ctx.data.game!;
-  const player = await getPlayer(env, request, game);
+  const player = await getPlayer(env, request, ctx.data.game!);
   if (!player) return json({ error: "Log in to play." }, 401);
   const body = await readJson(request);
   if (!body) return json({ error: "Send a JSON body." }, 400);
@@ -36,9 +38,13 @@ export const post = async (ctx: Ctx) => {
   } else ({ x, y, z = 0 } = body);
   if (!validCoord(x, y, z)) return json({ error: "Name a tile by its label (like 3N 2E) or by integer x and y." }, 400);
 
-  const blocked = turnBlock(game, player, "move");
-  if (blocked) return json({ error: blocked.error }, blocked.status);
-  const turnKey = `${game.round}:${game.turn}`;
+  // The write is timed now, after its body has arrived, not when the request began (a body still streaming at midnight
+  // must meet the lock).
+  const nowMs = await clockNow(env);
+  const { game, day, turn } = await loadToday(env, ctx.data.game!, nowMs, player.id);
+  const blocked = turnBlock(game, day, turn, player, "move", nowMs);
+  if (blocked) return json(refusalBody(blocked), blocked.status);
+  const movedAt = turn?.moved_at ?? null;
 
   await ensureTiles(env, game);
   const me: any = await env.DB.prepare("SELECT x, y, z, mirrored FROM players WHERE game_id = ? AND id = ?").bind(game.id, player.id).first();
@@ -46,9 +52,9 @@ export const post = async (ctx: Ctx) => {
   // The game's rules, asked with the whole board: the first refusal (in rule order) is the answer.
   const actor = { ref: player.id }, action = { kind: "move", to: { x, y, z } };
   let bctx: any, effectStmts: any[];
-  const now = nowIso();
+  const now = nowIso(nowMs);
   try {
-    bctx = await boardContext(env, game);
+    bctx = await boardContext(env, game, { moved: !!movedAt });
     const refused = checkAction(game, bctx, actor, action);
     if (refused) return json({ error: refused.error }, refused.status);
     effectStmts = afterActionStatements(env, game, bctx, actor, action, now);
@@ -67,21 +73,25 @@ export const post = async (ctx: Ctx) => {
   const text = `${who(player.display_name, player.color)} moved to ${tileLabel(x, y, z)}.`;
   const stmts = [
     env.DB.prepare(
-      `INSERT INTO events (game_id, kind, text, created_at)
-       SELECT g.id, 'piece_moved', CASE WHEN g.status = 'playing' AND g.turn = ? AND g.round = ? AND g.last_move = ?
+      `INSERT INTO events (game_id, kind, text, created_at, day, phase, player_id)
+       SELECT g.id, 'piece_moved', CASE WHEN ${dayOpenSql}
+              AND COALESCE((SELECT t.moved_at FROM day_turns t WHERE t.game_id = g.id AND t.day = g.day AND t.player_id = ?), '') = ?
               AND EXISTS (SELECT 1 FROM players p WHERE p.game_id = g.id AND p.id = ? AND p.x = ? AND p.y = ? AND p.z = ?)
               AND EXISTS (SELECT 1 FROM tiles t WHERE t.game_id = g.id AND t.x = ? AND t.y = ? AND t.z = ?)
               AND (SELECT COUNT(*) FROM players o WHERE o.game_id = g.id AND o.id != ? AND o.x = ? AND o.y = ? AND o.z = ?) = ?
-              THEN ? ELSE NULL END, ?
+              THEN ? ELSE NULL END, ?, g.day, 'day', ?
        FROM games g WHERE g.id = ?`,
     ).bind(
-      game.turn, game.round, game.last_move, player.id, at.x, at.y, at.z, x, y, z,
-      player.id, x, y, z, sharing, text, now, game.id,
+      ...dayOpenBinds(game.day, nowMs, player.id), player.id, movedAt ?? "", player.id, at.x, at.y, at.z, x, y, z,
+      player.id, x, y, z, sharing, text, now, player.id, game.id,
     ),
     // The piece turns to face the way it moved on screen: right on screen is east minus north (the board's one projection).
     env.DB.prepare("UPDATE players SET x = ?, y = ?, z = ?, mirrored = ? WHERE game_id = ? AND id = ?").bind(x, y, z, facing, game.id, player.id),
     ...effectStmts,
-    env.DB.prepare("UPDATE games SET last_move = ? WHERE id = ? AND turn = ? AND round = ? AND last_move = ?").bind(turnKey, game.id, game.turn, game.round, game.last_move),
+    env.DB.prepare(
+      `INSERT INTO day_turns (game_id, day, player_id, moved_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT (game_id, day, player_id) DO UPDATE SET moved_at = excluded.moved_at`,
+    ).bind(game.id, game.day, player.id, now),
   ];
   try {
     await env.DB.batch(stmts);
