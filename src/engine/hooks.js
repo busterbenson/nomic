@@ -153,6 +153,9 @@ export const APPLIED_EFFECTS = Object.freeze(["chart"]);
 // What the night's hooks may return, and the engine applies at the unlock (src/lib/day.ts): points when a change takes
 // effect (rule 401) and a win at the end of the night (rule 402).
 export const NIGHT_EFFECTS = Object.freeze(["points", "win"]);
+// What each night hook's enactment applies (src/engine/host.ts): points from onEnacted, a win from dayEnd. Any other
+// effect is refused, never dropped, so a rule can't pass its tests with an effect that would silently do nothing.
+export const NIGHT_HOOK_EFFECTS = Object.freeze({ onEnacted: Object.freeze(["points"]), dayEnd: Object.freeze(["win"]) });
 
 /** @rule 101 */
 export function validateEffect(e) {
@@ -246,7 +249,9 @@ export function assembleRules(modules, { label = "rules" } = {}) {
     const out = [];
     for (const m of implementers(hook)) {
       const r = call(m, hook, args) ?? [];
-      const bad = validateEffects(r) ?? r.map((e) => (NIGHT_EFFECTS.includes(e.type) ? null : `the ${e.type} effect can't be used at night`)).find(Boolean);
+      const takes = NIGHT_HOOK_EFFECTS[hook];
+      const bad = validateEffects(r) ?? r.map((e) => (!NIGHT_EFFECTS.includes(e.type) ? `the ${e.type} effect can't be used at night`
+        : takes.includes(e.type) ? null : `the ${e.type} effect can't be returned by ${hook} (it takes: ${takes.join(", ")})`)).find(Boolean);
       if (bad) throw new RuleError(m.rule, hook, new Error(bad));
       out.push(...r.map((e) => ({ ...e, rule: m.rule })));
     }

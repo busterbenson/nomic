@@ -144,7 +144,7 @@ export async function enactStatements(env: Env, game: any, n: number, nowMs: num
   const stillPassed = "EXISTS (SELECT 1 FROM proposals WHERE id = ? AND status = 'passed')";
   for (const q of ordered) {
     for (const e of rules.onEnacted(ctx, { number: q.number, player: q.player_id, target: q.target, kind: q.kind })) {
-      if (e.type !== "points" || !known.has(e.player)) continue;
+      if (!known.has(e.player)) continue; // onEnacted can only return points (hooks.js refuses anything else)
       given.push({ player: e.player, delta: e.delta, reason: e.reason, number: q.number });
       stmts.push(env.DB.prepare(`UPDATE players SET score = score + ? WHERE game_id = ? AND id = ? AND ${stillPassed}`).bind(e.delta, game.id, e.player, q.id));
       stmts.push(env.DB.prepare(
@@ -153,7 +153,7 @@ export async function enactStatements(env: Env, game: any, n: number, nowMs: num
       ).bind(game.id, `+${e.delta}: ${e.reason}`, now, n, q.number, e.delta, e.rule, e.player, game.id, n, q.id));
     }
   }
-  const win = rules.dayEnd(ctx, { before, given: given.map(({ player, delta }) => ({ player, delta })), enacted: ordered.map((q) => q.number) }).find((e: any) => e.type === "win" && known.has(e.player));
+  const win = rules.dayEnd(ctx, { before, given: given.map(({ player, delta }) => ({ player, delta })), enacted: ordered.map((q) => q.number) }).find((e: any) => known.has(e.player)); // dayEnd can only return a win
   const anyPassed = `EXISTS (SELECT 1 FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed')`;
   if (win) {
     stmts.push(env.DB.prepare(

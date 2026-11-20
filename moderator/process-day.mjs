@@ -195,8 +195,10 @@ export function scopeProblems({ beforeMd, afterMd, beforeSettings, afterSettings
     }
     out.push(`RULES.md ${k.startsWith("r") ? `rule ${n}` : k.startsWith("b") && !k.includes(":") ? `block ${n}` : "text outside any rule"} changed`);
   }
-  // A clause proposal (402.1) leaves the rule's other clauses, and the text before its first clause, as they were.
-  if (p.scope === "clause" && /^\d+\.\d+$/.test(String(p.target ?? ""))) {
+  // A clause proposal (402.1) leaves the rule's other clauses, and the text before its first clause, as they were. So
+  // does an add-clause, whether it targets the rule (402) or a clause to add after (402.2): only its new clause is new.
+  const addClause = p.kind === "addclause";
+  if ((p.scope === "clause" && /^\d+\.\d+$/.test(String(p.target ?? ""))) || addClause) {
     const n = ruleOf(p.target);
     const clauses = (t) => {
       const out = { head: "" };
@@ -209,13 +211,16 @@ export function scopeProblems({ beforeMd, afterMd, beforeSettings, afterSettings
       return out;
     };
     const ca = clauses(a[`r${n}`]), cb = clauses(b[`r${n}`]);
-    const own = new Set([String(p.target), String(p.new_num ?? "")]);
+    const own = new Set(addClause ? [String(p.new_num ?? "")] : [String(p.target), String(p.new_num ?? "")]);
     for (const k of new Set([...Object.keys(ca), ...Object.keys(cb)])) if (!own.has(k) && norm(ca[k]) !== norm(cb[k])) out.push(`RULES.md ${k === "head" ? `rule ${n}'s text outside its clauses` : `clause ${k}`} changed`);
   }
   if (p.after_text && !p.redraft && !markChange) {
     const own = plain([...rules].map((n) => b[`r${n}`] ?? "").join("\n"));
     const parts = String(p.after_text).split(/\n\s*\n/).map(plain).filter(Boolean);
     if (!parts.every((x) => own.includes(x))) out.push("the draft that was voted on is not in the rule it changes, word for word");
+    // A move only moves (and renumbers) the rule: its two sections (the rule at its new number, the forwarder) hold the
+    // voted draft and nothing else.
+    else if (p.kind === "move" && parts.reduce((rest, x) => rest.replace(x, ""), own).trim()) out.push("a move changed the rule's text beyond moving it");
   }
   for (const f of changed) {
     const m = /^rules\/(\d+)\.(test\.)?ts$/.exec(f);

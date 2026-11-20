@@ -106,6 +106,12 @@ check("onEnacted (401) and dayEnd (402): effects joined in rule order, each tagg
   const frozen = throws(() => assembleRules([one, order, m(401, { onEnacted: (c, p) => { p.player = "me"; return []; } })]).onEnacted(ctx, { number: 1, player: "a" }));
   return J(e.map((x) => [x.rule, x.player, x.delta])) === '[[401,"a",10],[403,"b",1]]' && w.length === 1 && w[0].type === "win" && w[0].rule === 402 && chart instanceof RuleError && frozen instanceof RuleError;
 })());
+check("each night hook takes only the effect its enactment applies: a win from onEnacted, or points from dayEnd, is refused with a RuleError naming the hook (never dropped)", (() => {
+  const winEnacted = throws(() => assembleRules([one, order, m(401, { onEnacted: (c, p) => [effects.win(p.player, "x")] })]).onEnacted(ctx, { number: 1, player: "a" }));
+  const pointsEnd = throws(() => assembleRules([one, order, m(402, { dayEnd: () => [effects.points("a", 5, "y")] })]).dayEnd(ctx, { before: {}, given: [] }));
+  return winEnacted instanceof RuleError && winEnacted.rule === 401 && /win effect can't be returned by onEnacted \(it takes: points\)/.test(winEnacted.message) &&
+    pointsEnd instanceof RuleError && pointsEnd.rule === 402 && /points effect can't be returned by dayEnd \(it takes: win\)/.test(pointsEnd.message);
+})(), "");
 check("a bad module is refused: unknown hook, non-function hook, rule number missing or out of range, the same rule twice", (() => {
   const p = (mods) => throws(() => assembleRules(mods))?.problems ?? [];
   return p([{ rule: 202, dance: () => 1 }, one, order]).some((x) => /unknown hook dance/.test(x)) &&
