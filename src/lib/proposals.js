@@ -13,7 +13,7 @@ export const parseBook = (md) => parseRules(md);
 /** @rule 103.1 */
 export const has = (book, num) => typeof num === "string" && Object.hasOwn(book.byNum, num);
 // Every rule or clause number a text cites: "rule 504.2", "Rule 504", "rules 202.4 and 203.1", "rules 101, 102 or 103".
-const CITE = /\b[Rr]ules? (\d{3}(?:\.\d+)?(?:(?:, | and | or |, and |, or )\d{3}(?:\.\d+)?)*)/g;
+const CITE = /\b[Rr]ules? (\d{3}(?:\.\d+)?(?![\d.]\d)(?:(?:, | and | or |, and |, or )\d{3}(?:\.\d+)?(?![\d.]\d))*)(?!\d)/g;
 /** @rule 108.3, 110.1 */
 export const citedIn = (text) => [...String(text).matchAll(CITE)].flatMap((m) => m[1].match(/\d{3}(?:\.\d+)?/g));
 

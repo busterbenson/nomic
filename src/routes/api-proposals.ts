@@ -85,7 +85,7 @@ export async function draft(ctx: Ctx, player: any, body: any, nowMs: number): Pr
     `INSERT INTO draft_attempts (game_id, player_id, day, n) VALUES (?, ?, ?, 1)
      ON CONFLICT (game_id, player_id, day) DO UPDATE SET n = n + 1 WHERE n < ?`,
   ).bind(game.id, player.id, game.day, DRAFTS_PER_DAY).run();
-  if (!(slot?.meta?.changes > 0)) return out({ error: `That's ${DRAFTS_PER_DAY} drafts today. Confirm one, or try again tomorrow.` }, 429);
+  if (!(slot?.meta?.changes > 0)) return out({ error: `That's ${DRAFTS_PER_DAY} drafts today, the most for one day. Try again tomorrow.` }, 429);
   let after: string | null = null, settings: Record<string, unknown> = {}, modelConflicts: string[] = [];
   if (needsModel(req)) {
     try {

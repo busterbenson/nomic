@@ -11,7 +11,7 @@ import { join as pjoin } from "node:path";
 import { ROOT, client, createGame, d1, join, migrate, newState, startPlaying, startRulesStub, startServer } from "./lib.mjs";
 import { dayOpenBinds } from "../src/lib/day-gate.js";
 import {
-  CONFIRM_SQL, DRAFT_INSERT_SQL, WITHDRAW_SQL, citedIn, draftOf, fixedParts, fixedRefusal, markFor, needsModel, parseBook, readModelAnswer, readRequest, referencesTo,
+  DRAFT_INSERT_SQL, WITHDRAW_SQL, citedIn, draftOf, fixedParts, fixedRefusal, markFor, needsModel, parseBook, readModelAnswer, readRequest, referencesTo,
 } from "../src/lib/proposals.js";
 
 let pass = 0, fail = 0;
@@ -51,7 +51,8 @@ console.log("the moderator's code drafts (rule 103.1), after the mockup's makeDr
     ["constructor", "__proto__", "toString", "hasOwnProperty"].every((t) => ["amend", "addclause", "add", "repeal", "move", "mark"].every((k) => /There is no rule/.test(req({ kind: k, target: t, words: "x", to: "300", prefilled: true }).error || ""))) &&
     /Say which block/.test(req({ kind: "move", target: "403", to: "constructor" }).error));
   check("citations are read in every form the text uses: 'rule 504.2', 'Rule 504', 'rules 202.4 and 203.1', 'rules 101, 102 or 103'",
-    J(citedIn("See rule 504.2. Rule 504 too, and rules 202.4 and 203.1, and rules 101, 102 or 103.")) === J(["504.2", "504", "202.4", "203.1", "101", "102", "103"]));
+    J(citedIn("See rule 504.2. Rule 504 too, and rules 202.4 and 203.1, and rules 101, 102 or 103.")) === J(["504.2", "504", "202.4", "203.1", "101", "102", "103"]) &&
+    J(citedIn("rule 4012 is not a rule number")) === J([]));
   check("no merge, split or 'change the setting' kind: they are refused as unknown kinds", ["merge", "split", "setting"].every((k) => "error" in req({ kind: k, target: "401" })));
   check("requests that can't be drafted say why: no such rule, a mark on a clause, moving a clause, a move to its own block, reword with no words",
     /no rule 999/.test(req({ kind: "repeal", target: "999" }).error) && /not a clause/.test(req({ kind: "mark", target: "202.2" }).error) && /whole rule/.test(req({ kind: "move", target: "202.2", to: "300" }).error) &&
@@ -282,7 +283,12 @@ try {
   const g30 = await cy.post(P, { kind: "reword", target: "401", words: "15" });
   check("every draft attempt counts toward the 30 a day, a garbled one too, and the cap is checked before the model is called (429, no model call)",
     g29.status === 502 && g30.status === 429 && model.calls.length === before30 && d1(state, `SELECT n FROM draft_attempts WHERE game_id = '${gid}' AND player_id = '${cyId}' AND day = 2`)[0].n === 30, g29.text + g30.text);
-  check("?rule= is matched exactly, not as a pattern: ?rule=% and ?rule=_ match nothing", (await client(A).get(`${P}?rule=%25`)).data.proposals.length === 0 && (await client(A).get(`${P}?rule=_`)).data.proposals.length === 0);
+  d1(state, `UPDATE draft_attempts SET n = 29 WHERE game_id = '${gid}' AND player_id = '${cyId}' AND day = 2`);
+  const callsPar = model.calls.length;
+  const par = await Promise.all([cy.post(P, { kind: "reword", target: "401", words: "16" }), cy.post(P, { kind: "reword", target: "401", words: "17" })]);
+  check("the cap holds under parallel drafts: at 29, two at once give exactly one draft (one model call) and one 429",
+    J(par.map((r) => r.status).sort()) === J([200, 429]) && model.calls.length === callsPar + 1, par.map((r) => r.text).join(" | "));
+  check("?rule= is matched exactly, not as a pattern: ?rule=%, _ and . match nothing", (await client(A).get(`${P}?rule=%25`)).data.proposals.length === 0 && (await client(A).get(`${P}?rule=_`)).data.proposals.length === 0 && (await client(A).get(`${P}?rule=.`)).data.proposals.length === 0);
   const lit = (x) => (x === null ? "NULL" : typeof x === "number" ? String(x) : `'${String(x).replace(/'/g, "''")}'`);
   const sqlRun = (q, binds) => { let i = 0; d1(state, q.replace(/\?/g, () => lit(binds[i++]))); };
   const ends2 = d1(state, `SELECT ends_at FROM days WHERE game_id = '${gid}' AND n = 2`)[0].ends_at;
@@ -298,7 +304,7 @@ try {
   sqlRun(WITHDRAW_SQL, [justBefore, p5id, 2, ...dayOpenBinds(2, Date.parse(justBefore), boId)]);
   check("the withdraw UPDATE's own guard: past midnight it changes nothing; 1 s before, it withdraws", w5a === "confirmed" && d1(state, `SELECT status FROM proposals WHERE id = '${p5id}'`)[0].status === "withdrawn");
   d1(state, "DELETE FROM proposals WHERE id LIKE 'qa-fixture-%'");
-  check("CONFIRM_SQL is the statement the route runs (one guard for both)", /status = 'confirmed'/.test(CONFIRM_SQL) && /d\.ends_at > \?/.test(CONFIRM_SQL));
+  // (CONFIRM_SQL's own guard is run 1 s either side of midnight in tests/day.mjs.)
 
   console.log("no key: rewording is unavailable, the rest still works");
   migrate(state2);

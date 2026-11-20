@@ -167,7 +167,7 @@ ${RB.warnings.length ? `<div class="sheet" role="alert"><b>This file has ${RB.wa
     if (keep) { const ta = document.getElementById("pfWords"); if (ta) { ta.focus({ preventScroll: true }); ta.setSelectionRange(keep[0], keep[1]); } }
     const res = $("#rb-result");
     res.hidden = !r.q;
-    if (r.q) { const n = RB.byNum[r.q]; res.innerHTML = `${r.matches} rule${r.matches === 1 ? "" : "s"} match “${esc(r.q)}”` + (n && n.kind !== "block" ? ` · <b>Enter</b> to jump to ${esc(r.q)}` : ""); }
+    if (r.q) { const n = Object.hasOwn(RB.byNum, r.q) ? RB.byNum[r.q] : null; res.innerHTML = `${r.matches} rule${r.matches === 1 ? "" : "s"} match “${esc(r.q)}”` + (n && n.kind !== "block" ? ` · <b>Enter</b> to jump to ${esc(r.q)}` : ""); }
     $("#rb-banner-slot").innerHTML = P ? P.bannerHTML() : "";
     $("#rb-count").textContent = `${allNums.length + (P ? P.ghostCount() : 0)} rules`;
     $("#rb-all").textContent = allNums.every((n) => state.open.has(n)) ? "Collapse all" : "Expand all";
