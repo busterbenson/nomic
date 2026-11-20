@@ -7,9 +7,10 @@ committed, tagged, deployed, and the day unlocks with points, before 2 am. Rules
 
 | Where | What |
 |---|---|
-| `moderator/process-day.mjs` | the runner (Mac mini, launchd every 2 min). Everything deterministic: poll, clone, order, test run, commit, tag, push, claim, deploy trigger, reconcile, notifications. |
+| `moderator/process-day.mjs` | the runner (Mac mini, launchd, every 2 min inside each game's night window). Everything deterministic: poll, clone, order, test run, commit, tag, push, claim, deploy trigger, reconcile, notifications. |
 | `moderator/APPLY.md` | the prompt for the one `claude -p` call per proposal (apply text + code + tests) |
 | `moderator/AUDIT.md` | the prompt for the drafter audit (re-read the player's words, compare with the voted draft) |
+| `moderator/schedule.mjs` | the register of games and night windows, the launchd schedule generated from it, the reload (below) |
 | `moderator/test.mjs` | the runner's tests: a temp bare git repo for the game, an in-process stand-in for the Worker's moderator API, a scripted stand-in for `claude -p` |
 | `src/routes/api-moderator.ts` | `GET /<slug>/api/moderator/pending`, `POST /<slug>/api/moderator/days/:n/claim` |
 | `src/lib/day.ts` | the night's moderator step: wait, claim -> deploying, unlock on sha match with points (401, `onEnacted`) and win (402, `dayEnd`), deploy deadline |
@@ -134,6 +135,42 @@ and doesn't stop the night.
 
 Rule ages (108.1): the day a rule's heading first appears in RULES.md, from that commit's "(day N, ..." subject; 0 for
 starter rules.
+
+## The schedule (runbook)
+
+The night's times cannot change without a rule change, so the job runs only inside each game's night window, from a register,
+not every 2 minutes all day.
+
+- **Register** (`<state dir>/register.json`, default `~/chalantbot/logs/promptocracy-moderator/`): per game that has a
+  moderator token in `~/chalantbot/.env`: its time zone (the game's `settings.json` `game.timezone` at its newest `day-N` tag,
+  which is what the Worker's bundle reads; the platform default if the file has none), and its window: opens at midnight in
+  that zone (rule 203.1), closes at the deadline plus the deploy grace (`DEADLINE_HOUR` in `src/lib/day-gate.js`, 2:00;
+  `DEPLOY_GRACE_MINUTES` in `src/lib/votes.js`, 30; both are platform constants today, not game settings). Each input is
+  recorded with where it came from.
+- **Schedule:** `moderator/schedule.mjs` turns the register into `StartCalendarInterval` entries (every 2 minutes, in the
+  Mac's own time zone) between `schedule:begin` / `schedule:end` markers in the launchd plist, replacing `StartInterval`.
+  It rewrites the plist, and reloads the job (`launchctl bootout` then `bootstrap`, from a detached helper after a short
+  wait, because the caller runs inside the job), **only when the entries changed**, and never loads a job that isn't loaded.
+  Rickshaw today (Pacific game, Pacific mini): 00:00 to 02:30.
+- **Daylight saving:** an entry is a wall-clock time, so the entries are the union of every night's real window over the
+  next 400 days, read on the Mac's clock. On a fall-back night in the game's zone the window is 3 hours + 30 minutes long
+  (1 am happens twice) and still ends by 2:30 am on the wall clock. On a spring-forward night the deadline is the moment
+  the clocks jump (3:00 am PDT) and the window closes at 3:30 am PDT, so Pacific games also get 03:00 to 03:30. A game in
+  another zone gets the nights its clock and the Mac's disagree on (a New York game: 21:00 to 23:30 Pacific, plus up to
+  00:30 on the night the East falls back before the West). On an ordinary night those extra slots are idle runs.
+- **Keeping it current:** a night that was claimed (or whose rules were re-tagged) leaves `reschedule.flag` in the state
+  dir; `run.sh` runs `schedule.mjs` after the last game's run. A passed rule that changes the time zone changes the entries
+  and the job is reloaded. Chalant also runs it at install: `node moderator/schedule.mjs` (writes
+  `~/chalantbot/launchd/com.chalant.promptocracy-moderator.plist`, which `~/Library/LaunchAgents` links to), then
+  `scripts/install-launchd.sh`. If the Mac's own time zone changes, run it again.
+- **Missed windows:** launchd runs a `StartCalendarInterval` job missed while the Mac slept once, on wake (`launchd.plist(5)`:
+  "launchd will start the job the next time the computer wakes up"; several missed events are coalesced into one). That
+  run does the whole job: the Worker's 2 am deadline has already ended an unclaimed night, and the run reconciles what
+  D1 lists as not applied.
+- **Idle runs:** inside the window, a run with no night in progress, no deploy pending, every not-applied proposal already
+  reverted and every processed day tagged ends after its one `GET pending`, before cloning. The state file records what a
+  clone-run settled (`settled`: proposal numbers reverted; `tagged`: days whose `day-N` tag exists), because the Worker lists
+  a not-applied proposal for good.
 
 ## Not in this PR
 - the stale-bundle re-lock (`GAMES[slug].day < games.rules_day`), the `code-status` route (PR 8), the recap UI (PR 6).

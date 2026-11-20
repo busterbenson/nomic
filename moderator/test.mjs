@@ -73,12 +73,13 @@ function fakeClaude(scenario) {
 const TOKEN = "test-token-0123456789abcdef";
 async function fakeWorker(state) {
   const claims = [];
+  let gets = 0;
   const server = createServer(async (req, res) => {
     let body = "";
     for await (const c of req) body += c;
     const send = (code, o) => { res.statusCode = code; res.setHeader("content-type", "application/json"); res.end(J(o)); };
     if (req.headers.authorization !== `Bearer ${TOKEN}`) return send(401, { error: "Not authorized." });
-    if (req.method === "GET" && req.url === "/g/api/moderator/pending") return send(200, { job: state.job, not_applied: state.not_applied ?? [], processed: state.processed ?? [] });
+    if (req.method === "GET" && req.url === "/g/api/moderator/pending") { gets++; return send(200, { job: state.job, not_applied: state.not_applied ?? [], processed: state.processed ?? [] }); }
     const m = /^\/g\/api\/moderator\/days\/(\d+)\/claim$/.exec(req.url);
     if (req.method === "POST" && m) {
       const b = JSON.parse(body);
@@ -92,7 +93,7 @@ async function fakeWorker(state) {
     send(404, {});
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
-  return { api: `http://127.0.0.1:${server.address().port}`, claims, stop: () => new Promise((r) => server.close(r)) };
+  return { api: `http://127.0.0.1:${server.address().port}`, claims, gets: () => gets, stop: () => new Promise((r) => server.close(r)) };
 }
 
 const P = (number, target, o = {}) => ({ number, title: `Change ${target}`, kind: "amend", scope: "rule", target, words: `change ${target}`, draft_head: `Change ${target}`, before_text: "", after_text: "", settings: {}, conflicts: [], mark: "majority", yes: 4, no: 1, needed: 3, budget_minutes: 20, budget_effort: "medium", ...o });
@@ -407,6 +408,45 @@ console.log("moderator runner");
 {
   const t = await night({ scenario: { apply: {} }, state: { job: job([P(3, "401")]) }, opts: { audit: false, repo: { base: join(TMP, "nope"), bare: join(TMP, "nope", "missing.git") } } });
   check("a failed night (the repo can't be cloned) writes a notification file and reports failed", t.r.status === "failed" && t.notes.some((f) => /night-failed/.test(f)), J(t.r));
+}
+
+// ---- idle runs stop before the clone ----------------------------------------------------------------------------------
+console.log("idle runs");
+{
+  // The runner is idle inside the night window when nothing is in progress and nothing needs reconciling. The game repo
+  // here does not exist, so a clone would make the run fail: an idle run must answer with one GET and stop.
+  const nowhere = { base: join(TMP, "nowhere"), bare: join(TMP, "nowhere", "missing.git") };
+  const t = await night({ scenario: { apply: {} }, state: { job: null, not_applied: [], processed: [] }, opts: { repo: nowhere } });
+  check("idle: no night in progress and nothing to reconcile returns before cloning (one GET, no clone, no failure)", t.r.status === "idle" && t.r.cloned === false && t.worker.gets() === 1 && t.notes.length === 0, J(t.r));
+  const tp = await night({ scenario: { apply: {} }, state: { job: null, not_applied: [], processed: [{ n: 1, status: "done", commit_sha: "a".repeat(40) }] }, opts: { repo: nowhere } });
+  check("idle: a processed day that has its commit needs no tag check, so it is idle too", tp.r.status === "idle" && tp.r.cloned === false, J(tp.r));
+}
+{
+  // A not-applied proposal is listed by the Worker forever; the clone is needed once, to revert it, then it is settled.
+  const t = await night({ scenario: { apply: { 3: { action: "points", to: 15 } } }, state: { job: job([P(3, "401")]), refuseClaim: true }, opts: { audit: false } });
+  const na = { job: null, not_applied: [{ number: 3, day: 1, reason: "Chalant did not finish processing by 2:00 am" }], processed: [{ n: 1, status: "timed_out", commit_sha: null }] };
+  const nowhere = { base: t.repo.base, bare: join(TMP, "nowhere2", "missing.git") };
+  const t0 = await night({ scenario: { apply: {} }, state: na, opts: { repo: nowhere } });
+  check("idle: a not-applied proposal not yet reconciled still needs the clone (here it fails: the repo is missing)", t0.r.status === "failed", J(t0.r));
+  const t1 = await night({ scenario: { apply: {} }, state: na, opts: { repo: t.repo } });
+  check("idle: the run that reverts it clones and reconciles", t1.r.status === "idle" && t1.r.cloned === true && t1.r.reconciled === true, J(t1.r));
+  const t2 = await night({ scenario: { apply: {} }, state: na, opts: { repo: nowhere } });
+  check("idle: afterwards the same listing (not_applied forever, the day tagged) is idle with no clone", t2.r.status === "idle" && t2.r.cloned === false && t2.worker.gets() === 1, J(t2.r));
+  const t3 = await night({ scenario: { apply: {} }, state: { ...na, not_applied: [...na.not_applied, { number: 9, day: 2, reason: "x" }] }, opts: { repo: nowhere } });
+  check("idle: a NEW not-applied proposal brings the clone back", t3.r.status === "failed", J(t3.r));
+}
+{
+  // A processed day with no commit has an empty night: it still needs its tag (rule 107.8), once.
+  const t = await night({ scenario: { apply: {} }, state: { job: null, not_applied: [], processed: [{ n: 1, status: "done", commit_sha: null }] } });
+  check("idle: an untagged empty night is tagged (it needs the clone)", t.r.status === "idle" && t.r.cloned === true && remoteTags(t.repo.bare).includes("day-1"), J(t.r));
+  const nowhere = { base: t.repo.base, bare: join(TMP, "nowhere3", "missing.git") };
+  const t2 = await night({ scenario: { apply: {} }, state: { job: null, not_applied: [], processed: [{ n: 1, status: "done", commit_sha: null }] }, opts: { repo: nowhere } });
+  check("idle: once tagged, the same listing is idle with no clone", t2.r.status === "idle" && t2.r.cloned === false, J(t2.r));
+  writeFileSync(join(t.stateDir, "g.state.json"), J({ ...(existsSync(join(t.stateDir, "g.state.json")) ? JSON.parse(readFileSync(join(t.stateDir, "g.state.json"), "utf8")) : {}), pendingDeploy: { tag: "day-1.1", day: 1, sha: "b".repeat(40) } }));
+  const t3 = await night({ scenario: { apply: {} }, state: { job: null, not_applied: [], processed: [] }, opts: { repo: nowhere } });
+  check("idle: a deploy still pending in the state file needs the clone", t3.r.status === "failed", J(t3.r));
+  const t4 = await night({ scenario: { apply: {} }, state: { job: job([]), not_applied: [], processed: [] }, opts: { repo: nowhere, stateDir: join(TMP, "fresh-state") } });
+  check("idle: a night in progress is never idle", t4.r.status === "failed", J(t4.r));
 }
 
 console.log(`${pass} passed, ${fail} failed`);

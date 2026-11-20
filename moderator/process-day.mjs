@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// THE MODERATOR'S NIGHT (rules 106, 107.2-107.8, 108). Runs on the Mac mini (launchd, every 2 minutes), one game per
-// run. Everything here is deterministic code: poll the Worker, clone the game repo, apply each passed proposal through
+// THE MODERATOR'S NIGHT (rules 106, 107.2-107.8, 108). Runs on the Mac mini (launchd, every 2 minutes inside each
+// game's night window: moderator/schedule.mjs), one game per run. Everything here is deterministic code: poll the Worker, clone the game repo, apply each passed proposal through
 // ONE model call (moderator/APPLY.md), check what the model wrote (paths, lint, claims, rulebook, tests: the bundler's own
 // checks), commit, push, claim the night, tag day-N, trigger the deploy, reconcile what D1 lists as not applied. The
 // model never runs a command, never sees a secret and never touches git. The plan: moderator/PLAN.md.
@@ -574,6 +574,17 @@ export async function runOnce(opts) {
       writeState(stateDir, slug, { ...readState(stateDir, slug), alerted: job.day });
     }
 
+    // Idle (nothing to do): no night in progress, no deploy waiting to be retried, every not-applied proposal already
+    // reverted, every processed day tagged. Then there is nothing the game repo could change, so the run ends here
+    // with its one GET (the schedule runs this every 2 minutes through the whole night window; a clone each time is
+    // what this skips). The Worker lists a not-applied proposal for good, so "already reverted" is the state file's
+    // `settled` list, written by the run that reconciled it; a processed day with no commit is "tagged" when the same
+    // run saw or made its day-N tag.
+    const settled = new Set(state.settled ?? []), taggedDays = new Set(state.tagged ?? []);
+    if (!job && !state.pendingDeploy && notApplied.every((q) => settled.has(q.number)) && processed.every((d) => d.commit_sha || taggedDays.has(d.n))) {
+      return { status: "idle", reconciled: false, cloned: false };
+    }
+
     work = mkdtempSync(join(tmpdir(), `moderator-${slug}-`));
     const dir = join(work, "game");
     git(["clone", "-q", "--branch", "main", "--", opts.repoUrl, dir], work);
@@ -652,12 +663,19 @@ export async function runOnce(opts) {
 
     if (!job) {
       // Nights that ended with nothing to apply (or timed out) still get their tag (rule 107.8).
+      const done = [];
       for (const d of [...processed].sort((a, b) => a.n - b.n)) {
-        if (tags.has(`day-${d.n}`) || d.commit_sha) continue;
-        if (!opts.dryRun) { git(["tag", `day-${d.n}`], dir); git(["push", "-q", "origin", `refs/tags/day-${d.n}`], dir); }
+        if (tags.has(`day-${d.n}`) || d.commit_sha) { done.push(d.n); continue; }
+        if (!opts.dryRun) { git(["tag", `day-${d.n}`], dir); git(["push", "-q", "origin", `refs/tags/day-${d.n}`], dir); done.push(d.n); }
         log({ event: "tagged", day: d.n, sha: git(["rev-parse", "HEAD"], dir).trim(), empty: true });
       }
-      return { status: "idle", reconciled: pushed };
+      // Everything this run was asked to reconcile or tag is done (and no deploy is pending): remember it, so the next
+      // idle run can stop before the clone.
+      if (!opts.dryRun && !readState(stateDir, slug).pendingDeploy) {
+        const st = readState(stateDir, slug);
+        writeState(stateDir, slug, { ...st, settled: [...new Set([...(st.settled ?? []), ...notApplied.map((q) => q.number)])], tagged: [...new Set([...(st.tagged ?? []), ...done])].slice(-50) });
+      }
+      return { status: "idle", reconciled: pushed, cloned: true, retagged: stale };
     }
 
     if (job.status === "deploying") {
@@ -779,6 +797,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     notifyDir: process.env.MODERATOR_NOTIFY_DIR || join(chalant, "_notifications"),
     openAuditPr: openAuditPrWith({ platformRepo: "busterbenson/promptocracy" }),
   });
+  // A night that was claimed, or whose rules were re-tagged, may have changed the game's time zone: ask run.sh to
+  // regenerate the register and the schedule (moderator/schedule.mjs) once every game's run is done.
+  if (r.status === "claimed" || r.retagged) { try { writeFileSync(join(process.env.MODERATOR_STATE_DIR || join(chalant, "logs", "promptocracy-moderator"), "reschedule.flag"), new Date().toISOString()); } catch { /* the schedule then waits for the next night */ } }
   console.log(JSON.stringify({ at: new Date().toISOString(), slug, ...r }));
   process.exit(r.status === "failed" ? 1 : 0);
 }
