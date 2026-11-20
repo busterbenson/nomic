@@ -1,9 +1,19 @@
 # One Cloudflare Worker with static assets, deployed by Workers Builds from GitHub
 # (production: `npx wrangler deploy`; pull requests: `npx wrangler preview`).
-# There is no build step.
 name = "promptocracy"
 main = "src/index.ts"
 compatibility_date = "2026-11-01"
+
+# The build step bundles every game's rule modules (see scripts/bundle-games.mjs): it fetches each game in
+# games.manifest.json at its latest day-N tag (a public repo, `git clone` over https, no secret), checks it and runs
+# its tests, and writes src/generated/ (gitignored). It runs on `wrangler dev`, `wrangler deploy` and every Workers
+# Builds build, and a failure stops the deploy. GAMES_SOURCE=dir makes it read local folders instead (the tests).
+[build]
+command = "node scripts/bundle-games.mjs"
+
+# A game's rule modules import "promptocracy/engine"; in the Worker bundle that is this repo's engine API.
+[alias]
+"promptocracy/engine" = "./src/engine/api.js"
 
 # Static files: only what is in public/ can ever be served, and only because
 # src/index.ts asks for it (run_worker_first), so a file in public/ is NOT public

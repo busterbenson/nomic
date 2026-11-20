@@ -1,0 +1,27 @@
+// Helpers for a rule module's own tests:  import { makeCtx, island } from "promptocracy/engine/testing";
+// A test builds a board, calls a hook, and checks the answer. No Worker, no database.
+import { DEFAULT_SETTINGS, getSettings } from "../lib/settings.js";
+import { islandCoords } from "../lib/geometry.js";
+import { makeContext, makeTiles, seededRng, assembleRules } from "./hooks.js";
+import { checkRulebook, parseRulesMd } from "./rulesmd.js";
+
+export { assembleRules, checkRulebook, parseRulesMd, seededRng };
+export { DEFAULT_SETTINGS };
+
+// The tiles of a width x height island centred on the origin, as [{x,y,z}].
+export const island = (width = 8, height = width) => islandCoords(width, height).map(([x, y]) => ({ x, y, z: 0 }));
+
+// A frozen ctx. `players` are {ref, x, y, z?}; `tiles` default to the 8x8 island; `settings` are overrides on the defaults.
+export function makeCtx(o = {}) {
+  return makeContext({
+    day: o.day ?? null,
+    now: o.now ?? "2026-01-01T00:00:00.000Z",
+    settings: getSettings(o.settings ?? {}),
+    players: (o.players ?? []).map((p) => ({ color: "teal", score: 0, z: 0, ...p })),
+    tiles: makeTiles(o.tiles ?? island()),
+    rulebook: o.rulebook,
+    rng: o.rng ?? seededRng(o.seed ?? "test"),
+    turn: o.turn,
+    judge: o.judge,
+  });
+}

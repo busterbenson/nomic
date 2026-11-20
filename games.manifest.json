@@ -1,0 +1,6 @@
+{
+  "engine": 1,
+  "games": {
+    "rickshaw-1": { "repo": "busterbenson/promptocracy-rickshaw" }
+  }
+}

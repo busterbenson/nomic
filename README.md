@@ -19,7 +19,9 @@ board and by email.
 - `src/routes/`, `src/lib/`: the page and API handlers, and shared code
 - `public/`: the static files: `board.html` (one board page for every game), `site.css`, `theme.css` (every color and font: palette v2, light and dark), `js/` (`board.js` draws the board as SVG, `pieces.js` and `pieces-data.js` the traced pieces, `rulebook.js` the rulebook, `landing.js` the picture on the front page)
 - `migrations/`: the D1 schema (`0001_init.sql`, `0002_island_board.sql`, `0003_mcp_oauth.sql`, `0004_piece_shape.sql`)
-- `templates/RULES.md`: the starter ruleset a new game repo begins with
+- `templates/RULES.md`: the starter ruleset a new game repo begins with; `templates/settings.json` and `templates/rules/` are its settings and rule modules, the starter pack that games with no bundle run on
+- `src/engine/`: the rule-module engine (hooks, effects, the module lint); `src/generated/` is written at build time and not committed
+- `games.manifest.json`, `scripts/bundle-games.mjs`: which games the build bundles, and the script that bundles them
 - `scripts/create-game.sh`: creates a game and prints its join link
 - `tests/`: end-to-end tests and the screenshot script
 - `DESIGN.md`: how the game works and what is still undecided
@@ -153,6 +155,41 @@ GitHub cannot be reached it answers 502 with a plain message and the board shows
 shape-checked before every fetch. `RULES_BASE_URL` replaces the host (the tests
 use it; never set it in production). The 60-second cache only works on a custom domain (the Cache API does nothing on `*.workers.dev`), so there every board load fetches from GitHub.
 
+## Rules as code: the engine and the bundle
+
+A game's rules are text **and** code. A rule that does something has a module, `rules/<n>.ts` in the game's repo,
+that exports `defineRule({ rule: n, <hook>(ctx, ...) { ... } })` from `promptocracy/engine`. Hooks take frozen plain
+data and return plain data (a refusal, a list of effects, a tile); they never see the database, the environment
+or the request. The engine runs them and applies what they say in the same D1 batch as the action. Today's hooks:
+
+| Hook | Called | Combined |
+|---|---|---|
+| `actionAllowed(ctx, actor, action)` | before a move or a proposal, after the engine's own gates (game playing, your turn) | every module, in rule order; the first refusal `{error, status?}` wins |
+| `afterAction(ctx, actor, action)` | in the move's own batch | effects of every module, joined; today only `chart` is applied |
+| `spawnTile(ctx, candidates)` | at join | exactly one module; zero or two fails the build |
+
+`voteMark`, `electorate`, `tally`, `applyOrder`, `onEnacted` and `dayEnd` have their types settled in
+`src/engine/api.d.ts` but are not called yet. The engine only ever grows by adding. The starter pack
+(`templates/rules/`: 202 one move a turn, 504 moving and charting, 505 new players) is the old hard-coded logic of
+`api-action.ts` and `verify.ts`, moved into modules; behaviour is unchanged.
+
+**The build.** `wrangler.toml` runs `node scripts/bundle-games.mjs` as its `[build]` step, which means on
+`wrangler dev`, `wrangler deploy` and every Workers Builds build (merge and pull request previews). For each game in
+`games.manifest.json` it finds the highest `day-N` tag of the game's public repo (`git ls-remote`, no token),
+fetches it (`git clone --depth 1`, over https, no token), and bundles it only if:
+`game.json` lists exactly the modules in `rules/`; every module passes the lint (it may import only
+`promptocracy/engine` and may not name `fetch`, `globalThis`, `process`, `env` ... see `src/engine/lint.js`); the
+modules load and assemble, and `RULES.md`, `settings.json` and the modules agree; and the game's own tests pass
+against this engine. Game code only runs in child processes with a scrubbed environment (no deploy token).
+Any failure stops the build, so a bad game never ships. The result is `src/generated/` (gitignored), and a game
+with a bundle is answered from it: `/<slug>/api/rules` serves the bundled `RULES.md`, so the text you read is the
+text whose code is running. A game with no bundle falls back to its repo (above) and the starter pack.
+Needs Node 22.6 or newer (it strips the modules' types; the Workers Builds image defaults to Node 24, and 22.23 is also preinstalled).
+
+`GAMES_SOURCE=dir` reads `dir/<slug>/` instead of GitHub (the tests use `tests/fixtures/games`), so
+`npm test` never touches the network; `BUNDLE_SKIP_TESTS=1` skips running the game's tests. Rule order is rule number
+order. `ctx.turn` (`{round, turn, moved}`) belongs to the turn model and goes when days arrive.
+
 ## Email
 
 One sender, chosen at runtime (`src/lib/email.ts`):
@@ -172,7 +209,10 @@ email binding (`tests/hex.mjs` fails if a `previews` block ever adds them).
 ## Deploy
 
 Deploys are done by **Workers Builds**: the Cloudflare Worker `promptocracy` is
-connected to this GitHub repo (root `/`, no build command, no build variables).
+connected to this GitHub repo (root `/`, no build variables). The build step is `wrangler.toml`'s `[build]`
+(`node scripts/bundle-games.mjs`, see "Rules as code" above): it needs `git` and outbound https to github.com on the
+build machine, and **a game in `games.manifest.json` must already have a `day-N` tag**, or the build (merge or
+preview) fails and nothing deploys.
 
 - **Merge to `main`** runs `npx wrangler deploy`: that is the production deploy.
 - **A pull request** runs the preview command, `npx wrangler preview` (the default),

@@ -1,7 +1,10 @@
-// GET /<slug>/api/rules: the game's rules, read server-side from its own public
-// GitHub repo (raw.githubusercontent.com/<repo>/<ref>/<path>) and cached 60 s.
+// GET /<slug>/api/rules: the game's rules. A game with a BUNDLE (built from its repo at its latest day-N tag,
+// scripts/bundle-games.mjs) is answered from the bundle, so the text you read is the text whose code is running.
+// Any other game is read server-side from its own public GitHub repo
+// (raw.githubusercontent.com/<repo>/<ref>/<path>) and cached 60 s.
 // Public repos only: no token is ever sent. RULES_BASE_URL overrides the host
 // (tests point it at a local stub; never set it in production).
+import { bundleFor } from "../engine/host";
 import { Ctx, validRef, validRepo, validRulesPath } from "../lib/util";
 
 const MAX_BYTES = 200_000;
@@ -10,6 +13,8 @@ const text = (body: string, status: number, extra: Record<string, string> = {}) 
 
 export const get = async ({ env, data, waitUntil }: Ctx) => {
   const g = data.game!;
+  const { bundle, bundled } = bundleFor(g);
+  if (bundled) return text(bundle.rulesMd, 200, { "cache-control": "public, max-age=60" });
   if (!validRepo(g.repo) || !validRulesPath(g.rules_path) || !validRef(g.rules_ref)) {
     return text("The rules are unavailable: this game's repo settings are invalid.", 502, { "cache-control": "no-store" });
   }

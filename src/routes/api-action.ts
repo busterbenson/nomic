@@ -1,20 +1,20 @@
 // POST /<slug>/api/action: moves the site itself carries out (no moderator).
 //   {kind:"move", x, y}   (or {kind:"move", label:"3N 2E"}; z is optional and must be the level you stand on)
-// Move your piece. Allowed only to the player whose turn it is, while the game is 'playing', at most once
-// per turn (games.last_move holds the 'round:turn' of the last move), to a CHARTED tile within the move distance (setting turn.move_distance).
+// Move your piece. The ENGINE decides that the game is 'playing' and it is the player's turn (turnBlock); the
+// game's RULE MODULES decide the rest: at most one move a turn (rule 202, games.last_move holds the 'round:turn'
+// of the last move), and a move to a CHARTED, unoccupied tile on your level within the move distance (rule 504).
 // A move is IN ADDITION to proposing a rule change: it neither ends the turn nor needs a proposal, and a
 // proposal made before or after it is unaffected. Turns still advance only when the moderator is built.
-// After the move, every tile within the chart radius of the new position is charted (chartTile, a no-op
-// for tiles already charted).
+// After the move, the effects the modules return are applied in the same batch (rule 504 charts every tile
+// within the chart radius of the new position; charting a charted tile does nothing).
 // Everything is written in ONE D1 batch, so a move can never half-apply. The first statement doubles as
 // the guard: it only inserts the log line if the turn, the round, the last move, the piece's position,
 // the destination and its occupancy are still exactly as they were read, otherwise it violates NOT NULL
 // and the whole batch rolls back (two simultaneous requests: one wins, one gets a 409).
 import { getPlayer } from "../lib/auth";
-import { chartAroundStatements, ensureTiles } from "../lib/board";
-import { SHARED_TILES } from "../lib/board-rules.js";
-import { parseLabel, tileLabel, validCoord, withinSteps } from "../lib/geometry.js";
-import { getSettings } from "../lib/settings.js";
+import { RuleError, afterActionStatements, boardContext, checkAction } from "../engine/host";
+import { ensureTiles } from "../lib/board";
+import { parseLabel, tileLabel, validCoord } from "../lib/geometry.js";
 import { turnBlock } from "../lib/turn";
 import { Ctx, json, nowIso, readJson, who } from "../lib/util";
 
@@ -43,21 +43,27 @@ export const post = async (ctx: Ctx) => {
   await ensureTiles(env, game);
   const me: any = await env.DB.prepare("SELECT x, y, z, mirrored FROM players WHERE game_id = ? AND id = ?").bind(game.id, player.id).first();
   if (!me) return json({ error: "Could not find your piece." }, 500);
-  if (z !== me.z) return json({ error: "You can only move on the level you are standing on." }, 400);
-  const S = getSettings(game.settings);
-  if (!withinSteps(me.x, me.y, x, y, S["turn.move_distance"])) {
-    return json({ error: `That is not within ${S["turn.move_distance"]} step${S["turn.move_distance"] === 1 ? "" : "s"} of you.` }, 400);
-  }
-  const dest: any = await env.DB.prepare("SELECT 1 AS ok FROM tiles WHERE game_id = ? AND x = ? AND y = ? AND z = ?").bind(game.id, x, y, z).first();
-  if (!dest) return json({ error: "That tile is not charted yet, so you cannot move there." }, 400);
-  if (!SHARED_TILES) {
-    const taken: any = await env.DB.prepare("SELECT 1 AS ok FROM players WHERE game_id = ? AND x = ? AND y = ? AND z = ? AND id != ?").bind(game.id, x, y, z, player.id).first();
-    if (taken) return json({ error: "Another piece is standing there." }, 409);
-  }
-
-  const toRight = (x - me.x) - (y - me.y); // > 0 moves right on screen, < 0 left, 0 straight up or down
-  const facing = toRight > 0 ? 1 : toRight < 0 ? 0 : me.mirrored;
+  // The game's rules, asked with the whole board: the first refusal (in rule order) is the answer.
+  const actor = { ref: player.id }, action = { kind: "move", to: { x, y, z } };
+  let bctx: any, effectStmts: any[];
   const now = nowIso();
+  try {
+    bctx = await boardContext(env, game);
+    const refused = checkAction(game, bctx, actor, action);
+    if (refused) return json({ error: refused.error }, refused.status);
+    effectStmts = afterActionStatements(env, game, bctx, actor, action, now);
+  } catch (e) {
+    if (e instanceof RuleError) { console.error(e.message); return json({ error: "A rule could not be checked. Try again later." }, 500); }
+    throw e;
+  }
+  // Where the rules saw your piece, and the pieces on the destination (none, under the no-sharing rule). The first
+  // statement below only lands if the board is still exactly this, so a move the rules approved cannot half-apply.
+  const at = bctx.players.find((p: any) => p.ref === player.id);
+  if (!at) return json({ error: "Could not find your piece." }, 500);
+  const sharing = bctx.players.filter((o: any) => o.ref !== player.id && o.x === x && o.y === y && o.z === z).length;
+
+  const toRight = (x - at.x) - (y - at.y); // > 0 moves right on screen, < 0 left, 0 straight up or down
+  const facing = toRight > 0 ? 1 : toRight < 0 ? 0 : me.mirrored;
   const text = `${who(player.display_name, player.color)} moved to ${tileLabel(x, y, z)}.`;
   const stmts = [
     env.DB.prepare(
@@ -65,16 +71,16 @@ export const post = async (ctx: Ctx) => {
        SELECT g.id, 'piece_moved', CASE WHEN g.status = 'playing' AND g.turn = ? AND g.round = ? AND g.last_move = ?
               AND EXISTS (SELECT 1 FROM players p WHERE p.game_id = g.id AND p.id = ? AND p.x = ? AND p.y = ? AND p.z = ?)
               AND EXISTS (SELECT 1 FROM tiles t WHERE t.game_id = g.id AND t.x = ? AND t.y = ? AND t.z = ?)
-              AND (? = 1 OR NOT EXISTS (SELECT 1 FROM players o WHERE o.game_id = g.id AND o.id != ? AND o.x = ? AND o.y = ? AND o.z = ?))
+              AND (SELECT COUNT(*) FROM players o WHERE o.game_id = g.id AND o.id != ? AND o.x = ? AND o.y = ? AND o.z = ?) = ?
               THEN ? ELSE NULL END, ?
        FROM games g WHERE g.id = ?`,
     ).bind(
-      game.turn, game.round, game.last_move, player.id, me.x, me.y, me.z, x, y, z,
-      SHARED_TILES ? 1 : 0, player.id, x, y, z, text, now, game.id,
+      game.turn, game.round, game.last_move, player.id, at.x, at.y, at.z, x, y, z,
+      player.id, x, y, z, sharing, text, now, game.id,
     ),
     // The piece turns to face the way it moved on screen: right on screen is east minus north (the board's one projection).
     env.DB.prepare("UPDATE players SET x = ?, y = ?, z = ?, mirrored = ? WHERE game_id = ? AND id = ?").bind(x, y, z, facing, game.id, player.id),
-    ...chartAroundStatements(env, game, x, y, z, now),
+    ...effectStmts,
     env.DB.prepare("UPDATE games SET last_move = ? WHERE id = ? AND turn = ? AND round = ? AND last_move = ?").bind(turnKey, game.id, game.turn, game.round, game.last_move),
   ];
   try {

@@ -8,8 +8,8 @@
 //       browser form post (not JSON), it is guarded by an Origin check: the Origin
 //       header must match SITE_URL (or the request's own origin when SITE_URL is unset).
 import { createSession } from "../lib/auth";
-import { ensureTiles, spawnBinds, spawnWhere } from "../lib/board";
-import { SHARED_TILES } from "../lib/board-rules.js";
+import { RuleError, chooseSpawn } from "../engine/host";
+import { ensureTiles } from "../lib/board";
 import { notify } from "../lib/notify";
 import { isConsentPath } from "../lib/oauth";
 import { expiredPage, page } from "../lib/pages";
@@ -96,33 +96,34 @@ export const post = async (ctx: Ctx) => {
 
   // The board has to exist before anyone can be placed on it.
   await ensureTiles(env, game);
-  // One statement checks "setup", "not full", picks the next turn_order AND picks the piece's tile: a random
-  // charted tile nobody stands on whose whole chart shape is already charted (spawnWhere). Two people verifying
-  // at once cannot take the same seat or the same tile, or overfill the game. Spawning charts nothing.
+  // The game's spawn rule (505 in the starter rules) picks the tile; one statement then checks "setup", "not full",
+  // picks the next turn_order AND still finds the tile charted and as occupied as the rule saw it. Two people
+  // verifying at once cannot take the same seat or overfill the game. If both were given the same tile, the loser's
+  // insert is refused and the rule is asked again (up to 3 times). Spawning charts nothing.
   const playerId = crypto.randomUUID();
-  let joined = false;
+  let joined = false, noRoom = false;
   try {
-    const r = await env.DB.prepare(
-      `INSERT INTO players (id, game_id, email, display_name, color, shape, score, turn_order, is_host, joined_at, x, y, z)
-       SELECT ?, g.id, ?, ?, ?, ?, 0,
-              (SELECT COUNT(*) FROM players WHERE game_id = g.id),
-              (SELECT COUNT(*) = 0 FROM players WHERE game_id = g.id), ?, t.x, t.y, t.z
-       FROM games g JOIN tiles t ON t.game_id = g.id AND t.z = 0
-       WHERE g.id = ? AND g.status = 'setup' AND (SELECT COUNT(*) FROM players WHERE game_id = g.id) < ?
-         ${spawnWhere("t")}
-       ORDER BY random() LIMIT 1`,
-    ).bind(playerId, t.email, t.display_name, color, shape, now, game.id, seatLimit(game), ...spawnBinds(game, SHARED_TILES)).run();
-    joined = (r.meta?.changes ?? 0) > 0;
-  } catch {
-    joined = false; // color taken in the meantime (UNIQUE constraint)
+    for (let attempt = 0; attempt < 3 && !joined && !noRoom; attempt++) {
+      const spawn = await chooseSpawn(env, game);
+      if (!spawn) { noRoom = true; break; }
+      const { x, y, z } = spawn.tile;
+      const r = await env.DB.prepare(
+        `INSERT INTO players (id, game_id, email, display_name, color, shape, score, turn_order, is_host, joined_at, x, y, z)
+         SELECT ?, g.id, ?, ?, ?, ?, 0,
+                (SELECT COUNT(*) FROM players WHERE game_id = g.id),
+                (SELECT COUNT(*) = 0 FROM players WHERE game_id = g.id), ?, ?, ?, ?
+         FROM games g
+         WHERE g.id = ? AND g.status = 'setup' AND (SELECT COUNT(*) FROM players WHERE game_id = g.id) < ?
+           AND EXISTS (SELECT 1 FROM tiles t WHERE t.game_id = g.id AND t.x = ? AND t.y = ? AND t.z = ?)
+           AND (SELECT COUNT(*) FROM players o WHERE o.game_id = g.id AND o.x = ? AND o.y = ? AND o.z = ?) = ?`,
+      ).bind(playerId, t.email, t.display_name, color, shape, now, x, y, z, game.id, seatLimit(game), x, y, z, x, y, z, spawn.occupants).run();
+      joined = (r.meta?.changes ?? 0) > 0;
+    }
+  } catch (e) {
+    joined = false; // color taken in the meantime (UNIQUE constraint), or a rule that could not be checked
+    if (e instanceof RuleError) console.error(e.message);
   }
-  if (!joined) {
-    // A seat that is open but has no qualifying tile to stand on is its own, clearer, failure.
-    const free: any = await env.DB.prepare(
-      `SELECT 1 AS ok FROM tiles t WHERE t.game_id = ? AND t.z = 0 ${spawnWhere("t")} LIMIT 1`,
-    ).bind(game.id, ...spawnBinds(game, SHARED_TILES)).first();
-    return back(game.slug, free ? "join-failed" : "no-room");
-  }
+  if (!joined) return back(game.slug, noRoom ? "no-room" : "join-failed");
 
   const name = t.display_name; // stored raw, escaped when drawn
   await env.DB.prepare("INSERT INTO events (game_id, kind, text, created_at) VALUES (?, 'player_joined', ?, ?)")
