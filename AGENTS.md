@@ -38,7 +38,14 @@ Owner: Buster Benson. He decides game design; agents build what he approved.
 - 600 (hearts + creatures) and 700 (making things) are **starter rules**, but their text enters a game's RULES.md in the step that ships their code (step 2, step 3).
 - 601.4: a player dead for 3 days becomes a **Ghost** (in their color). 601.5: heal 1 heart at the **midnight nearest the actual full moon** in the game's time zone.
 - The 29 approved additions/rewordings are in `docs/rules-parity.md` (give-a-heart limits, 501.4 adjacency = 8 neighbours, End turn vs 104.3, …). Their numbers follow the approved **reorganization** in `docs/rules-reorg.md`: block 100 = rules about rules + everything the shared site does (103 Proposals, 107 The night, 108 When rules conflict, 109 Numbers and settings, 110 What no proposal can change); blocks 200+ = what each game's own rule code does; 302 retired. Use the reorg numbers in rule text and `@rule` tags.
-- **Renumbering is free until the first game officially starts** (Buster, 2026-11-19): moving and renumbering rules for better organization needs no proposal before Rickshaw Game 1 starts. After that, renumbering is a "move" proposal like any other, and the numbers the site's code relies on (110) can't move.
+- **Renumbering is free until the first game officially starts** (Buster, 2026-11-19): moving and renumbering rules for better organization needs no proposal before Rickshaw Game 1 starts. After that, renumbering is a "move" proposal like any other.
+
+## Game design decisions (Buster, 2026-11-20)
+
+- **No untouchable rules.** Rule 110 ("What no proposal can change") retires. Its 8 items (sign-in, midnight-to-midnight days, one proposal a day, End turn, hidden votes, votes counted by code, the lock, the deadline) become ordinary rules with a **unanimous** mark, each in its own block. Each moves behind an engine hook a game rule controls, the way 107 controls the night's order. Until an item's hook ships, a proposal on it is refused at drafting with the reason "not wired yet"; it never passes and does nothing.
+- **Eras.** Winning an Era makes you Champion. The Champion names the next Era and can change one rule without a vote, a unanimous-mark rule included. The change passes **unless every other living player votes against it; not voting does not count as against** (the one place that differs from "not voting counts as no").
+- **Winning.** The ultimate win is being the only player alive. Ghosts and creatures are not alive for this. If everyone dies the same night, the order the rules ran in decides (107.2, `events.night_seq`).
+- **Action proposals: yes**, as a fixed catalog of coded action types (resurrect, grant, move...). The vote needed is the stricter of the action's own mark and the strictest rule it touches; no override; recorded in History. Core rule 103.5: an action can only do what the game's rules already allow. Adding an action type is a rule change.
 
 ## Design reference
 
