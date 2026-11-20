@@ -65,7 +65,7 @@ export function registerTools(server: McpServer, ctx: Ctx, player: Player) {
   }, async () => reply(await viaRoute(ctx, player, apiDay.get, "GET", "day")));
 
   server.registerTool("my_state", {
-    description: "Who you are in this game, where your piece stands, today's day and the midnight lock, what you have done today (moved, proposed, ended your turn, how many ballot items you voted on) and what you may do right now (move, propose, end_turn, vote).",
+    description: "Who you are in this game, where your piece stands, today's day and the midnight lock, what you have done today (moved, proposed, how many proposals you have made of the day's limit, ended your turn, how many ballot items you voted on) and what you may do right now (move, propose, end_turn, vote).",
     annotations: read,
   }, async () => {
     const [me, g, board, day] = await Promise.all([
@@ -82,7 +82,7 @@ export function registerTools(server: McpServer, ctx: Ctx, player: Player) {
       game: { name: g.data.game.name, slug: g.data.game.slug, status: d.status, winning_score: g.data.game.winning_score },
       day: { number: d.day, ends_at: d.ends_at, timezone: d.timezone },
       lock: { locked: d.locked, processing_day: d.processing_day, message: d.message },
-      today: { moved: you?.moved ?? false, proposed: you?.proposed ?? false, ended: you?.ended ?? false, voted_on: you?.voted ?? 0, ballot_items: d.ballot ?? 0 },
+      today: { moved: you?.moved ?? false, proposed: you?.proposed ?? false, proposals: you?.proposals ?? null, ended: you?.ended ?? false, voted_on: you?.voted ?? 0, ballot_items: d.ballot ?? 0 },
       you_can: you?.can ?? null,
     }) }] };
   });
@@ -114,13 +114,13 @@ export function registerTools(server: McpServer, ctx: Ctx, player: Player) {
       settingsText(p.settings) ? `Sets: ${settingsText(p.settings)}` : null,
       p.conflict_note ? `Conflicts: ${p.conflict_note}` : null,
       p.needs ? `Needs: ${p.needs.mark}, ${p.needs.needed} of ${p.needs.of} votes` : null,
-      "This is only a draft. Confirm it with confirm_proposal to make it your one proposal today (it goes on tomorrow's ballot).",
+      "This is only a draft. Confirm it with confirm_proposal to make it one of your proposals today (it goes on tomorrow's ballot). my_state shows how many you have made of the day's limit.",
     ].filter(Boolean).join("\n");
     return reply(r, text);
   });
 
   server.registerTool("confirm_proposal", {
-    description: "Confirm a draft: it becomes your one proposal of the day (P1, P2, ... in the order confirmed) and goes on tomorrow's ballot. One a day; you can withdraw it until midnight or until you end your turn (ending your turn is final). Not during the midnight lock (the lock message is returned).",
+    description: "Confirm a draft: it becomes one of your proposals of the day (P1, P2, ... in the order confirmed) and goes on tomorrow's ballot. Up to the game's daily limit (proposals.per_day; my_state shows made and limit); you can withdraw it until midnight or until you end your turn (ending your turn is final). Not during the midnight lock (the lock message is returned).",
     inputSchema: { id: z.string().describe("The draft id from draft_proposal") },
     annotations: write,
   }, async ({ id }) => {
@@ -138,7 +138,7 @@ export function registerTools(server: McpServer, ctx: Ctx, player: Player) {
   });
 
   server.registerTool("propose", {
-    description: "Propose a change today in one step: draft it and confirm it (draft_proposal, then confirm_proposal). Your words say what to change; the moderator drafts the exact text. Only the confirm counts: once a day, on tomorrow's ballot; withdraw it until midnight or until you end your turn (ending your turn is final). Not during the midnight lock (the lock message is returned). To see the draft before it counts, use draft_proposal.",
+    description: "Propose a change today in one step: draft it and confirm it (draft_proposal, then confirm_proposal). Your words say what to change; the moderator drafts the exact text. Only the confirm counts: up to the game's daily limit (my_state shows made and limit), on tomorrow's ballot; withdraw it until midnight or until you end your turn (ending your turn is final). Not during the midnight lock (the lock message is returned). To see the draft before it counts, use draft_proposal.",
     inputSchema: proposalArgs,
     annotations: write,
   }, async (args) => reply(await viaRoute(ctx, player, apiTurn.post, "POST", "turn", args)));

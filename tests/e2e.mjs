@@ -258,8 +258,9 @@ try {
   const after = await ada.get("/one/api/notifications");
   check("the other players were notified in-game", after.data.unread === before + 1 && after.data.notifications[0].kind === "turn_submitted");
   check("and by email, but not the submitter", (() => { const o = d1(state, "SELECT to_addr FROM outbox WHERE subject LIKE '%proposed a change%'"); return o.some((r) => r.to_addr === "ada@example.com") && !o.some((r) => r.to_addr === "bo@example.com"); })());
+  d1(state, `UPDATE games SET settings = json_set(settings, '$."proposals.per_day"', 1) WHERE slug = 'one'`); // this flow runs at a limit of 1 (tests/proposals-per-day.mjs covers 3)
   const twice = await bo.post("/one/api/turn", clause("A second try."));
-  check("a second submit the same day is refused (409)", twice.status === 409 && /already proposed today/i.test(twice.data.error), twice.text);
+  check("a second submit the same day is refused (409)", twice.status === 409 && twice.data.error === "You've proposed 1 today, the most a day (103.2).", twice.text);
   check("another player may submit the same day", (await ada.post("/one/api/turn", clause("Ada's turn too."))).status === 200);
 
 

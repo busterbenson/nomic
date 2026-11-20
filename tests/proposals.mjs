@@ -1,6 +1,6 @@
 // Proposals (rules 103, 105, 108.3, 110.1): the code drafts of every mechanical kind, what no proposal can change, the
 // conflicts the moderator names, the small model's answer (a stub with recorded answers: success, malformed, failing,
-// and no key at all), confirm (one a day, even when two confirms race; P-numbers in confirm order; the mark fixed at
+// and no key at all), confirm (at a limit of 1 a day, even when two confirms race; P-numbers in confirm order; the mark fixed at
 // confirm), withdraw, the lock and End turn, the roll onto the next day's ballot, that nothing about votes leaks, and
 // migration 0006 on a database with data. Run: npm test. Real `wrangler dev`, LOCAL D1 only; the model is a local stub.
 import { execFileSync } from "node:child_process";
@@ -387,7 +387,7 @@ try {
   console.log("before the game starts");
   const s0 = await ana.post(P, { kind: "repeal", target: "403" });
   check("in setup a draft is refused like every write (409, not started), and nothing is stored", s0.status === 409 && /not started/.test(s0.data.error) && rows().length === 0, s0.text);
-  d1(state, `UPDATE games SET status = 'playing' WHERE id = '${gid}'`);
+  d1(state, `UPDATE games SET status = 'playing', settings = json_set(settings, '$."proposals.per_day"', 1) WHERE id = '${gid}'`); // this flow runs at a limit of 1 a day; tests/proposals-per-day.mjs covers 3 and other limits
   await client(A).get("/prop/api/day"); // day 1 begins now
 
   console.log("drafting is free and repeatable (rule 103.1)");
@@ -432,11 +432,11 @@ try {
   const cf = await ana.post(P, { kind: "repeal", target: "504" });
   check("a repeal names the rules it would leave pointing at nothing (505 cites 504.2)", cf.status === 200 && cf.data.proposal.conflicts.includes("505") && /rule 505/.test(cf.data.proposal.conflict_note), cf.text);
 
-  console.log("confirm: one proposal a day, numbered in confirm order (rule 103.2)");
+  console.log("confirm: at a limit of 1 a day, numbered in confirm order (rule 103.2)");
   const [ca, cb] = await Promise.all([ana.post(`${P}/${v.id}/confirm`, {}), ana.post(`${P}/${dm.data.proposal.id}/confirm`, {})]);
   const okOne = [ca, cb].filter((r) => r.status === 200), noOne = [ca, cb].filter((r) => r.status === 409);
-  check("two of Ana's drafts confirmed at the same moment: exactly one lands (P1), the other is refused 'You already proposed today. One proposal a day.'",
-    okOne.length === 1 && noOne.length === 1 && noOne[0].data.error === "You already proposed today. One proposal a day." && okOne[0].data.proposal.n === "P1" && okOne[0].data.message === "P1 is on tomorrow's ballot." &&
+  check("two of Ana's drafts confirmed at the same moment: exactly one lands (P1), the other is refused with the number (limit 1)",
+    okOne.length === 1 && noOne.length === 1 && noOne[0].data.error === "You've proposed 1 today, the most a day (103.2)." && okOne[0].data.proposal.n === "P1" && okOne[0].data.message === "P1 is on tomorrow's ballot." &&
     rows().filter((r) => r.status === "confirmed").length === 1, ca.text + " | " + cb.text);
   const anaP1 = okOne[0].data.proposal;
   const anaOther = anaP1.id === v.id ? dm.data.proposal.id : v.id;

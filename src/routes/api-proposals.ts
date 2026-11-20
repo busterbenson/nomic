@@ -1,7 +1,7 @@
 // Proposals (rule 103): the player writes plain words, the moderator drafts the exact change, the player confirms,
 // changes their words or cancels.
 //   POST /<slug>/api/proposals {kind, target, words?, to?, title?, prefilled?}   draft (free, repeatable; not a proposal yet)
-//   POST /<slug>/api/proposals/<id>/confirm   the day's one proposal (rule 103.2): numbered P1, P2... in confirm order,
+//   POST /<slug>/api/proposals/<id>/confirm   one of the day's proposals (rule 103.2): numbered P1, P2... in confirm order,
 //                                             on the next day's ballot, its mark fixed now (rule 105.4)
 //   POST /<slug>/api/proposals/<id>/withdraw  until midnight or End turn (rule 103.3)
 //   GET  /<slug>/api/proposals[?rule=402]     the proposals anyone may see: every one that has reached a ballot, and your
@@ -12,17 +12,21 @@
 // words by a small model (src/lib/drafter.ts).
 import { bundleFor } from "../engine/host";
 import { getPlayer } from "../lib/auth";
-import { clockNow, dayOpenBinds, loadToday } from "../lib/day";
+import { clockNow, dayOpenBinds, loadToday, settingsOf } from "../lib/day";
 import { DrafterError, draftRewording, drafterReady } from "../lib/drafter";
 import { notify } from "../lib/notify";
-import { CONFIRM_SQL, DRAFT_INSERT_SQL, WITHDRAW_SQL, conflictSentence, draftOf, fixedRefusal, markFor, needsModel, neededOf, parseBook, readRequest } from "../lib/proposals.js";
+import { CONFIRMED_TODAY_SQL, CONFIRM_SQL, DRAFT_INSERT_SQL, WITHDRAW_SQL, conflictSentence, draftOf, fixedRefusal, markFor, needsModel, neededOf, parseBook, proposalLimitMessage, readRequest } from "../lib/proposals.js";
 import { refusalBody, turnBlock } from "../lib/turn";
 import { Ctx, colorOf, json, nowIso, readJson, sha256Hex, siteUrl, who } from "../lib/util";
 
 type Out = { status: number; body: any };
 const out = (body: any, status = 200): Out => ({ status, body });
-// Drafting is free, but each one may call a model: at most this many draft attempts a player a day (kept or not).
-export const DRAFTS_PER_DAY = 30;
+// Drafting is free, but each one may call a model: at most this many draft attempts a player a day (kept or not). It
+// scales with the day's proposal limit (proposals.per_day, rule 103.2): the 30 a day that went with one proposal, and 10
+// more for every further proposal, so 3 a day gives 50 and the most (10) gives 120. A player who drafts a few tries per
+// proposal never meets it, and the model calls a player can cost stay bounded by the setting.
+/** @rule 103.1, 103.2 */
+export const draftsPerDay = (limit: number) => 20 + 10 * limit;
 
 const books = new WeakMap<object, { md: string; book: any; sha: string }>();
 // The rules a game runs on (the bundled text, so a draft is made against the text whose code is live), parsed once.
@@ -37,9 +41,10 @@ async function bookFor(game: { slug: string }) {
 /** @rule 102 */
 const playerCount = async (env: any, gameId: string) => ((await env.DB.prepare("SELECT COUNT(*) AS n FROM players WHERE game_id = ?").bind(gameId).first()) as any)?.n ?? 0;
 /** @rule 103.2 */
-const isUnique = (e: any) => /UNIQUE constraint failed/i.test(String(e?.message || e) + String(e?.cause?.message || ""));
+const limitOf = (game: { slug: string; settings: string }): number => settingsOf(game)["proposals.per_day"];
 /** @rule 103.2 */
-const ALREADY = "You already proposed today. One proposal a day.";
+const confirmedToday = async (env: any, gameId: string, playerId: string, day: number): Promise<number> =>
+  ((await env.DB.prepare(CONFIRMED_TODAY_SQL).bind(gameId, playerId, day).first()) as any)?.n ?? 0;
 
 // The statuses a proposal has once its ballot is counted: only then are its totals shown (rule 104.4).
 export const COUNTED = ["passed", "failed", "enacted", "not_applied"];
@@ -84,20 +89,19 @@ export async function draft(ctx: Ctx, player: any, body: any, nowMs: number): Pr
   const { game, day, turn } = await loadToday(env, ctx.data.game!, nowMs, player.id);
   const blocked = turnBlock(game, day, turn, player, "propose", nowMs);
   if (blocked) return out(refusalBody(blocked), blocked.status);
-  const confirmed = (await env.DB.prepare(
-    "SELECT COUNT(*) AS n FROM proposals WHERE game_id = ? AND player_id = ? AND day_proposed = ? AND status NOT IN ('draft', 'withdrawn')",
-  ).bind(game.id, player.id, game.day).first()) as any;
-  if (confirmed?.n > 0) return out({ error: ALREADY }, 409);
+  const limit = limitOf(game), made = await confirmedToday(env, game.id, player.id, game.day);
+  if (made >= limit) return out({ error: proposalLimitMessage(made) }, 409);
 
   const { md, book, sha } = await bookFor(game);
   const req = readRequest(book, body);
   if ("error" in req) return out({ error: req.error }, 400);
+  const draftCap = draftsPerDay(limit);
   // Count the attempt BEFORE any model call, in one statement, so refused, failed and parallel drafts all count.
   const slot = await env.DB.prepare(
     `INSERT INTO draft_attempts (game_id, player_id, day, n) VALUES (?, ?, ?, 1)
      ON CONFLICT (game_id, player_id, day) DO UPDATE SET n = n + 1 WHERE n < ?`,
-  ).bind(game.id, player.id, game.day, DRAFTS_PER_DAY).run();
-  if (!(slot?.meta?.changes > 0)) return out({ error: `That's ${DRAFTS_PER_DAY} drafts today, the most for one day. Try again tomorrow.` }, 429);
+  ).bind(game.id, player.id, game.day, draftCap).run();
+  if (!(slot?.meta?.changes > 0)) return out({ error: `That's ${draftCap} drafts today, the most for one day. Try again tomorrow.` }, 429);
   let after: string | null = null, settings: Record<string, unknown> = {}, modelConflicts: string[] = [], asked = false;
   if (req.kind === "amend" && req.prefilled && drafterReady(env)) {
     // Exact wording is kept as written; the model only names the other rules it would conflict with (rule 108.3). If
@@ -141,9 +145,9 @@ export async function draft(ctx: Ctx, player: any, body: any, nowMs: number): Pr
   return out({ ok: true, proposal: view({ ...row, draft_mark: markFor(book, row) }, player.id, await playerCount(env, game.id)) });
 }
 
-// Confirm (rule 103.2): the day's one proposal. The P-number is the game's next, taken in the same statement that
-// confirms, and the one-a-day index refuses a second confirm however close the two arrive. The mark is fixed now
-// (rule 105.4).
+// Confirm (rule 103.2): one of the day's proposals, up to proposals.per_day. The P-number is the game's next, taken in
+// the same statement that confirms; the same statement counts the player's confirmed proposals and refuses past the
+// limit, so two confirms arriving together cannot both pass it. The mark is fixed now (rule 105.4).
 /** @rule 103.2, 105.4 */
 export async function confirm(ctx: Ctx, player: any, id: string, nowMs: number): Promise<Out> {
   const { env } = ctx;
@@ -157,21 +161,20 @@ export async function confirm(ctx: Ctx, player: any, id: string, nowMs: number):
   const { book, sha } = await bookFor(game);
   if (row.base_sha !== sha) return out({ error: "The rules have changed since this was drafted. Draft it again." }, 409);
   const mark = markFor(book, row);
-  const now = nowIso(nowMs);
-  try {
-    const res = await env.DB.batch([
-      env.DB.prepare(
-        CONFIRM_SQL,
-      ).bind(mark, now, id, game.day, ...dayOpenBinds(game.day, nowMs, player.id)),
-      env.DB.prepare(
-        `INSERT INTO events (game_id, kind, text, created_at, day, phase, player_id)
-         SELECT ?, 'proposal_confirmed', ?, ?, ?, 'day', ? WHERE EXISTS (SELECT 1 FROM proposals WHERE id = ? AND status = 'confirmed' AND confirmed_at = ?)`,
-      ).bind(game.id, `${who(player.display_name, player.color)} proposed a change.`, now, game.day, player.id, id, now),
-    ]);
-    if (!(res[0]?.meta?.changes > 0)) return out({ error: "The day changed under you. Reload and try again." }, 409);
-  } catch (e: any) {
-    if (isUnique(e)) return out({ error: ALREADY }, 409);
-    throw e;
+  const now = nowIso(nowMs), limit = limitOf(game);
+  const res = await env.DB.batch([
+    env.DB.prepare(
+      CONFIRM_SQL,
+    ).bind(mark, now, id, game.day, ...dayOpenBinds(game.day, nowMs, player.id), limit),
+    env.DB.prepare(
+      `INSERT INTO events (game_id, kind, text, created_at, day, phase, player_id)
+       SELECT ?, 'proposal_confirmed', ?, ?, ?, 'day', ? WHERE EXISTS (SELECT 1 FROM proposals WHERE id = ? AND status = 'confirmed' AND confirmed_at = ?)`,
+    ).bind(game.id, `${who(player.display_name, player.color)} proposed a change.`, now, game.day, player.id, id, now),
+  ]);
+  if (!(res[0]?.meta?.changes > 0)) {
+    // Nothing was confirmed: the limit (another confirm of yours landed first) or the day itself moved.
+    const made = await confirmedToday(env, game.id, player.id, game.day);
+    return out(made >= limit ? { error: proposalLimitMessage(made) } : { error: "The day changed under you. Reload and try again." }, 409);
   }
   const done = await env.DB.prepare("SELECT * FROM proposals WHERE id = ?").bind(id).first();
   try {
@@ -186,7 +189,7 @@ export async function confirm(ctx: Ctx, player: any, id: string, nowMs: number):
 }
 
 // Withdraw (rule 103.3): until midnight or End turn, and only today's confirmed proposal. It keeps its number; the
-// day's proposal is free again.
+// slot of the day is free again.
 /** @rule 103.3 */
 export async function withdraw(ctx: Ctx, player: any, id: string, nowMs: number): Promise<Out> {
   const { env } = ctx;
