@@ -10,6 +10,8 @@
   --sea: #E3ECEB; --sea-line: #C9D7D6; --foam: #F5FAF8; --surface: #F7F9F7; --surface-2: #DAE4E2;
   --line: #C3D0CF; --ink: #18202B; --ink-muted: #55616E;
   --accent: #6B50A4; --on-accent: #FFFFFF; --accent-tint: #E0D9F6;   /* lavender: moderator and UI */
+  /* the moderators' portrait circles: one look in both themes, so no dark value (Buster 2026-11-21: light circle, same image) */
+  --portrait-ground: #F7F9F7; --portrait-ink: #18202B;
   --err: #A33A26;
   --outline: #18202B;             /* ink around a piece */
   --land: #F4EEDF;                /* a charted tile: they are all the same, blank */

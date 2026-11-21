@@ -44,9 +44,9 @@ export function zoneAbbr(tz: string, ms: number): string {
 }
 /**
  * Who may use the chat, and when. Players only: no session in THIS game (a visitor, or an account signed in to another game) is a 401. Nothing is
- * played before the game starts, so before the host presses Start (day 1, rule 203.1) the chat is shut for everyone, host included: a 409 with its
+ * played before the game starts, so before the host presses Start (day 1, rules 106.7, 203.1) the chat is shut for everyone, host included: a 409 with its
  * reason and no read, no write, no model call, nothing counted. A refusal is returned before any query, so it spends nothing.
- * @rule 106.2, 106.3, 203.1
+ * @rule 106.2, 106.3, 106.7, 203.1
  */
 export const chatGate = (game: any, player: Player | null, agent: string = AGENT): Out | null =>
   !player ? out({ error: `Log in to talk to ${agent === "starling" ? "Starling" : "Gremlin"}.` }, 401)
