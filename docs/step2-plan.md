@@ -192,7 +192,7 @@ The ticket shows an "Escalated" chip while it has an open escalation; that is de
 
 ### PR 6. Starling takes over proposing (no migration, no rule text)
 
-The mockup's "What changes": the scope menu, the "+ Add a rule" cards, the Rulebook banner and the "Which block?" modal go; "Yours today" at the top of the Rulebook (lock in / unlock on the card, no chat); Summary's tiles become "Rulebook · Starling" and "Workshop · Gremlin". The API and MCP drafting routes stay as they are (AI clients, 204, and the fallback when the model is unavailable: the slip's Edit opens the old form). Split from PR 5 so the removal is reviewed on its own and can wait if Starling needs a few days of play first. Tests: the browser suite for both tabs; every removed control is gone and the propose flow still works end to end through Starling with the recorded stub.
+The mockup's "What changes": the scope menu, the "+ Add a rule" cards, the Rulebook banner and the "Which block?" modal go; "Yours today" at the top of the Rulebook (lock in / unlock on the card, no chat); Summary's tiles become "Rulebook · Starling" and "Workshop · Gremlin". The API and MCP drafting routes stay as they are (AI clients, 204). Fallback when Starling can't answer (model down, budget used up, before any slip exists): the Rulebook keeps one "Propose a change" entry that opens the old form directly, shown only while she is unavailable; with a slip, its Edit opens the same form. Split from PR 5 so the removal is reviewed on its own and can wait if Starling needs a few days of play first. Tests: the browser suite for both tabs; every removed control is gone and the propose flow still works end to end through Starling with the recorded stub.
 
 ## 2. Models, caching and cost
 
@@ -353,18 +353,11 @@ Each clause ships in the same release as its code (AGENTS.md rule 2), in Ricksha
 
 ### Before or after Start
 
-Buster may press Start before all of this lands. Until Start, each PR edits Rickshaw's `RULES.md` directly (a game in setup can have its starter rules edited, AGENTS.md "Operations"). After Start, rule text changes only by a passed proposal, so a PR that ships after Start would either wait for a vote (its code deployed and dark, which breaks "never add behaviour no rule states" the other way round) or need a standing rule. Chalant's proposal, drafted for Buster to decide, as a core rule in block 100 (110 retires, so this takes 111):
-
-**111 What the site adds** [unanimous]
-**111.1** When the site adds something every game gets, the release that builds it adds the rules that describe it to this file, without a vote. The History records each one, with the release that added it.
-**111.2** Such a change can only describe what the site now does. It can't change a rule a proposal passed, change a vote, a score or a proposal in progress, or take away anything a player has.
-**111.3** Once it's in this file it's a rule like any other: you can propose to reword, move or repeal it (103). Repealing it turns that thing off for this game where the site can; where it can't yet, the proposal is refused when it's drafted, with the reason "not wired yet".
-
-The alternatives, if Buster doesn't want 111: hold Start until PR 5 lands (about two weeks of PRs at this pace), or ship each release's text as a moderator-drafted proposal on the next ballot (the feature stays off until it passes).
+**Decided (Buster, 2026-11-20 18:05): Start waits until step 2 is in.** Every PR here edits Rickshaw's `RULES.md` directly as a setup edit, so no standing rule is needed; rule 111 is dropped. (If he later wants to start before Starling, 111 as drafted in the PR history is the way to do it.)
 
 ## 6. Questions for Buster (lean first)
 
-1. **Rule 111** (the site's own features enter the rulebook with the release that builds them, no vote, unanimous mark)? Lean yes. If no: hold Start until Starling (PR 5) is in.
+1. **Rule 111.** Decided: not needed; Start waits for step 2 (Buster, 2026-11-20).
 2. **A monthly model budget per game**, a site limit (not a setting), with a Console spend limit on the key as a backstop? Lean yes, $60/month for Rickshaw (the "busy" estimate is about $115, the "expected" about $45). Over it, both agents answer with a canned line until the 1st.
 3. **The image bake-off** before PR 4 merges: 12 prompts through FLUX.2 klein 4B, klein 9B and Nano Banana 2.1, about $0.70, pictures side by side for you? Lean yes, and klein 4B unless you pick otherwise. Nano Banana needs a Gemini key; skip it if a klein looks right.
 4. **Starling's cap:** lean 60 a day, as in the v4 mockup. She is more than half of the spend; 40 would cut the "every cap" ceiling by about $77/month.
