@@ -1,6 +1,6 @@
 // The MCP tools. A THIN ADAPTER: each tool builds a Request for the matching web route and calls that route's
 // own handler (api-rules, api-board, api-me, api-game, api-day, api-turn, api-proposals, api-action, api-end-turn, api-votes,
-// api-ballot, api-start), so validation, guards, log lines
+// api-ballot, api-start, api-tickets), so validation, guards, log lines
 // and notifications are the web's, and a change to the turn model reaches MCP with no change here.
 // The player is attached to the internal Request (actAs); no cookie or token is forged.
 // NOT here yet: a catch-all "take an action". It arrives with the moderator.
@@ -21,6 +21,7 @@ import * as apiRules from "../routes/api-rules";
 import * as apiTurn from "../routes/api-turn";
 import * as apiVotes from "../routes/api-votes";
 import * as apiBallot from "../routes/api-ballot";
+import * as apiTickets from "../routes/api-tickets";
 
 type Handler = (ctx: Ctx) => Promise<Response>;
 type Result = { status: number; text: string; data: any };
@@ -164,6 +165,39 @@ export function registerTools(server: McpServer, ctx: Ctx, player: Player) {
   }, async (args) => {
     const r = await viaRoute(ctx, player, apiVotes.post, "POST", "votes", args);
     return reply(r, r.data?.message ?? r.text);
+  });
+
+  // The Workshop (rules 801, 804): the commissions of this game, and the discussion on each.
+  server.registerTool("list_tickets", {
+    description: "List the workshop's tickets (commissions, W1, W2...): each one's title, who asked for it, its state (Draft, Proposed, Ready, Approved, Building, Done, Refused, Failed, Shelved), the nights it will take and its price in points (Ready: passed, but the requester can't pay the whole price yet, so it waits outside the queue). Your own draft is included; other players' drafts are not. Shows the live work and the 5 most recently closed. Read one ticket's brief, tasks, log and discussion with read_ticket.",
+    annotations: read,
+  }, async () => reply(await viaRoute(ctx, player, apiTickets.get, "GET", "tickets")));
+
+  server.registerTool("read_ticket", {
+    description: "Read one ticket: its brief, what it makes (catalog entries and rule numbers), the nights it will take, its price and why, its running cost, its tasks, its log, and its discussion thread.",
+    inputSchema: { ticket: z.string().describe("The ticket, like \"W3\"") },
+    annotations: read,
+  }, async ({ ticket }) => reply(await viaRoute(ctx, player, apiTickets.one, "GET", `tickets/${encodeURIComponent(ticket)}`, undefined, { n: ticket })));
+
+  server.registerTool("reopen_ticket", {
+    description: "Reopen a ticket of yours that was refused or failed: it becomes a draft again under the same number, with its log and thread kept. Nothing is refunded or charged. Confirming it again counts as one of the day's proposals. Not during the midnight lock.",
+    inputSchema: { ticket: z.string().describe("The ticket, like \"W3\"") },
+    annotations: write,
+  }, async ({ ticket }) => {
+    const r = await viaRoute(ctx, player, apiTickets.action("reopen"), "POST", `tickets/${encodeURIComponent(ticket)}/reopen`, {}, { n: ticket });
+    return reply(r, r.data?.ok ? `${String(ticket).toUpperCase().replace(/^(\d)/, "W$1")} is a draft again.` : r.text);
+  });
+
+  server.registerTool("post_to_ticket", {
+    description: "Post in a ticket's discussion (any player of the game can), up to 2000 characters. Posts are public to the game and can't be edited. Not during the midnight lock.",
+    inputSchema: {
+      ticket: z.string().describe("The ticket, like \"W3\""),
+      body: z.string().describe("What you want to say"),
+    },
+    annotations: write,
+  }, async ({ ticket, body }) => {
+    const r = await viaRoute(ctx, player, apiTickets.action("post"), "POST", `tickets/${encodeURIComponent(ticket)}/post`, { body }, { n: ticket });
+    return reply(r, r.data?.ok ? `Posted in ${String(ticket).toUpperCase().replace(/^(\d)/, "W$1")}.` : r.text);
   });
 
   server.registerTool("move", {

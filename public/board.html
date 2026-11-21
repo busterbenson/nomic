@@ -45,14 +45,14 @@
 <h2 class="sr-only">Tiles</h2>
 <ul class="sr-only" id="tile-list"></ul>
 
-<!-- the book: Summary, Rulebook, Catalog, History -->
-<section class="rbwrap" id="book" aria-label="Summary, rulebook, catalog and history">
+<!-- the book: Summary, Rulebook, Workshop (the tickets, then the catalog), History -->
+<section class="rbwrap" id="book" aria-label="Summary, rulebook, workshop and history">
   <div class="book">
     <div class="btabs" id="btabs" role="tablist" aria-label="Book"></div>
     <div id="bpanel">
       <div id="p-summary" role="tabpanel" aria-labelledby="tab-summary"></div>
       <div id="p-rules" role="tabpanel" aria-labelledby="tab-rules" hidden><section class="rbwrap" id="rules" aria-label="Rulebook">Loading&hellip;</section></div>
-      <div id="p-catalog" role="tabpanel" aria-labelledby="tab-catalog" hidden></div>
+      <div id="p-workshop" role="tabpanel" aria-labelledby="tab-workshop" hidden></div>
       <div id="p-history" role="tabpanel" aria-labelledby="tab-history" hidden></div>
     </div>
   </div>
@@ -66,7 +66,7 @@
   // The board is drawn from /api/board, the players and the log from /api/game, the rulebook from /api/rules
   // (the game's own repo, fetched by the server). /api/me, /api/day and /api/notifications say who is looking and what they may do.
   // The page is: header (bell, account chip) - the board band, its move bar and the players - the book (tabs).
-  // Slots other work fills carry data-slot="...": moon, recap, rule-action, recent-days, history-days, catalog-entries,
+  // Slots other work fills carry data-slot="...": moon, recap, rule-action, recent-days, history-days, catalog-entries (inside the Workshop tab),
   // player-today, bar-action. They are empty containers here; the CSS hides them while empty. ballot-count and ballot-vote
   // are filled by ballot.js (the Yes / No boxes, drawn in each ballot row and in a rule's card).
   import { ensureDefs } from "/js/pieces.js";
@@ -75,6 +75,8 @@
   import { createCards } from "/js/cards.js";
   import { createBallot } from "/js/ballot.js";
   import { mini, playerPill, hexOf } from "/js/people.js";
+import { createWorkshop } from "/js/workshop.js";
+ import { commissionHTML, wPill } from "/js/commission.js";
   const SLUG = location.pathname.split("/")[1] || "";
   const BASE = "/" + SLUG;
 
@@ -98,7 +100,7 @@
   };
   let ME = null, DATA = null, INVITE = null;   // who is looking, and the last /api/game
   let DAY = null, END_ASK = false, START_ASK = false, DAY_AT = 0, DAY_TIMER = 0, DAY_TICK = 0;   // the last /api/day, the End turn confirm, when it was fetched
-  let PROP = null, BAL = null, BOOK = null, CARDS = null;   // the proposal controller (propose.js), the mounted rulebook, the card host
+  let PROP = null, BAL = null, BOOK = null, CARDS = null, WS = null;   // the proposal controller (propose.js), the mounted rulebook, the card host
   let BOARD = null, SEL = null, VIEW = null;   // the last /api/board, the selected tile {x,y}, the drawn board
   let TAB = "summary", BOARD_OPEN = true, LASTMOVE = null, NOTES = { list: [], unread: 0 }, RULES_OK = false;
   ensureDefs();
@@ -230,6 +232,7 @@
     showNotice();
     CARDS = createCards({ root: $("mroot"), describe });   // closing a card keeps what you were writing: it is there when the card opens again
     BAL = createBallot({ api, pill: by => pill(by, false), refreshed: refresh, player: () => !!(ME && ME.player) });
+    WS = createWorkshop({ api, me: () => ME, pill, rpill: n => PROP.rpill(n), when: whenText, canCommission: () => PROP.canPropose(), refresh: async () => { await refresh(); loadNotes(); }, cards: CARDS });
     PROP = createProposer({ api, me: () => ME, day: () => DAY, pill, vote: n => BAL.box(n), refresh: async () => { await refresh(); loadNotes(); } });
     drawTabs(); drawBook();
     loadMe();
@@ -238,7 +241,7 @@
     else drawGame(g.data);
     // the rulebook shows each rule's settings, so it waits for the board's reply (which carries them)
     const [rules] = await Promise.all([fetch(BASE + "/api/rules").then(async r => { if (!r.ok) throw new Error("rules " + r.status); return r.text(); }).catch(() => null), boardLoaded]);
-    await Promise.all([PROP.load(), BAL.load()]);
+    await Promise.all([PROP.load(), BAL.load(), WS.load()]);
     if (rules === null) { $("rules").innerHTML = '<p class="err" style="padding:20px 28px">Rules unavailable right now.</p>'; drawBook(); return; }
     BOOK = mountRulebook($("rules"), rules, { settings: (BOARD && BOARD.settings) || {}, proposer: PROP, cards: CARDS, action: ruleAction });
     BOOK.onCount(() => { drawTabs(); drawBook(); });
@@ -248,7 +251,7 @@
   }
 
   // ---- the book: tabs, and what each shows --------------------------------------------------------------------------
-  const TABS = () => [["summary", "Summary", ""], ["rules", "Rulebook", BOOK && BOOK.count() ? plural(BOOK.count(), "rule") : ""], ["catalog", "Catalog", "0 entries"],
+  const TABS = () => [["summary", "Summary", ""], ["rules", "Rulebook", BOOK && BOOK.count() ? plural(BOOK.count(), "rule") : ""], ["workshop", "Workshop", WS && WS.count() ? plural(WS.count(), "ticket") : ""],
     ["history", "History", DAY && DAY.day ? plural(DAY.day, "day") : ""]];
   function drawTabs() {
     $("btabs").innerHTML = TABS().map(([k, n, c]) => `<button type="button" class="btab" role="tab" id="tab-${k}" aria-selected="${TAB === k}" aria-controls="p-${k}" tabindex="${TAB === k ? 0 : -1}" data-tab="${k}">${n}${c ? `<span class="cnt">${esc(c)}</span>` : ""}</button>`).join("")
@@ -256,7 +259,7 @@
   }
   function setTab(k, scroll) {
     TAB = k;
-    for (const t of ["summary", "rules", "catalog", "history"]) $("p-" + t).hidden = t !== k;
+    for (const t of ["summary", "rules", "workshop", "history"]) $("p-" + t).hidden = t !== k;
     drawTabs(); drawBook();
     if (scroll) $("book").scrollIntoView({ block: "start", behavior: reduced() ? "auto" : "smooth" });
   }
@@ -271,7 +274,7 @@
   function sentence(p) {
     const r = n => PROP.rpill(String(n));
     const k = p.kind, t = String(p.target);
-    const what = k === "amend" ? `a change to ${t.includes(".") ? "clause" : "rule"} ${r(t)}` : k === "addclause" ? `a new clause for rule ${r(t.split(".")[0])}` : k === "add" ? `a new rule${p.new_num ? " " + r(p.new_num) : ""}` : k === "repeal" ? `to repeal ${t.includes(".") ? "clause" : "rule"} ${r(t)}` : k === "move" ? `to move rule ${r(t)}` : k === "mark" ? `a change to how ${BOOK && BOOK.rulebook.byNum[t] && BOOK.rulebook.byNum[t].kind === "block" ? "block" : "rule"} ${r(t)} is changed` : "a change";
+    const what = k === "commission" ? `a commission ${p.ticket ? wPill(p.ticket.n) : ""}` : k === "amend" ? `a change to ${t.includes(".") ? "clause" : "rule"} ${r(t)}` : k === "addclause" ? `a new clause for rule ${r(t.split(".")[0])}` : k === "add" ? `a new rule${p.new_num ? " " + r(p.new_num) : ""}` : k === "repeal" ? `to repeal ${t.includes(".") ? "clause" : "rule"} ${r(t)}` : k === "move" ? `to move rule ${r(t)}` : k === "mark" ? `a change to how ${BOOK && BOOK.rulebook.byNum[t] && BOOK.rulebook.byNum[t].kind === "block" ? "block" : "rule"} ${r(t)} is changed` : "a change";
     const need = p.needs ? (p.needs.mark === "unanimous" ? `It needs all ${p.needs.of} votes to pass.` : `It needs ${p.needs.needed} of ${p.needs.of} votes to pass.`) : "";
     return `proposed ${what}. ${need}`;
   }
@@ -291,14 +294,14 @@
     const off = active && c.allowed ? "" : ` disabled title="${esc(why)}"`;
     return `<section class="sw pro" id="spropose" aria-label="Propose a change"><div class="swh">${head}</div>${mine.map(PROP.chgFor).join("")}
       <div class="ptiles"><button type="button" class="ptile" data-tab="rules"${off}><span class="pt2">Rulebook</span><span class="pm2">${BOOK && BOOK.count() ? plural(BOOK.count(), "rule") : ""}</span><span class="pa2">+ Change or add a rule</span></button>
-      <button type="button" class="ptile" data-tab="catalog" disabled><span class="pt2">Catalog</span><span class="pm2">0 entries</span><span class="pa2">+ Propose a thing</span></button></div>${active && !c.allowed ? `<p class="mnote">${esc(c.reason)}</p>` : ""}</section>`;
+      <button type="button" class="ptile" data-tab="workshop"${off}><span class="pt2">Workshop</span><span class="pm2">${WS && WS.count() ? plural(WS.count(), "ticket") : ""}</span><span class="pa2">+ Commission something</span></button></div>${active && !c.allowed ? `<p class="mnote">${esc(c.reason)}</p>` : ""}</section>`;
   }
   function summaryHTML() {
     const bl = ballotList();
     const ballot = `<section class="sw" id="sballot" aria-label="Today's ballot"><div class="swh"><h2>Today's ballot</h2><span class="m" data-slot="ballot-count">${!bl.length ? "" : BAL && BAL.hasYou() ? `${BAL.voted()} of ${BAL.total()} voted` : plural(bl.length, "proposal")}</span></div>
       ${bl.length ? `<ul class="sl">${bl.map(p => `<li id="sb-${esc(p.n)}"><p class="sbs">${PROP.pPill(p)} ${pill(p.by, p.mine)} ${sentence(p)}</p>
-        <div class="sdiff">${p.title ? `<p class="sdh">${esc(p.title)}</p>` : ""}<p class="mono head">${esc(p.head || "")}</p><p>${diffOf(p)}</p></div><div class="vrow slot" data-slot="ballot-vote" data-pn="${esc(p.n)}">${BAL ? BAL.box(p.n) : ""}</div></li>`).join("")}</ul>` : `<p class="mnote">Nothing is on today's ballot.</p>`}</section>`;
-    const cat = `<section class="sw cat" aria-label="Catalog"><div class="swh"><h2>Catalog</h2><button type="button" class="linkbtn" data-tab="catalog">Open the catalog →</button></div><p class="mnote" data-slot="catalog-entries">No entries yet.</p></section>`;
+        <div class="sdiff">${p.kind === "commission" && p.ticket ? commissionHTML(p.ticket) : `${p.title ? `<p class="sdh">${esc(p.title)}</p>` : ""}<p class="mono head">${esc(p.head || "")}</p><p>${diffOf(p)}</p>`}</div><div class="vrow slot" data-slot="ballot-vote" data-pn="${esc(p.n)}">${BAL ? BAL.box(p.n) : ""}</div></li>`).join("")}</ul>` : `<p class="mnote">Nothing is on today's ballot.</p>`}</section>`;
+    const cat = WS ? WS.summaryHTML() : "";
     return `<div class="sgrid"><section class="sw day" id="sday" aria-label="Today"></section>
       <div class="slot recapw" data-slot="recap"></div>
       <div class="scol">${ballot}${cat}</div>
@@ -306,7 +309,7 @@
   }
   function drawBook() {
     if (TAB === "summary") { $("p-summary").innerHTML = summaryHTML(); drawDay(); }
-    else if (TAB === "catalog") $("p-catalog").innerHTML = `<div class="cbox"><h2 class="crow-h">Catalog</h2><p class="mnote" data-slot="catalog-entries">No entries yet.</p></div>`;
+    else if (TAB === "workshop") $("p-workshop").innerHTML = WS ? WS.tabHTML() : "";
     else if (TAB === "history") $("p-history").innerHTML = `<div class="hdays"><div class="slot" data-slot="history-days"></div><ul class="log" id="log">${((DATA && DATA.events) || []).map(e => `<li><b>${esc(whenText(e.created_at) || String(e.created_at || "").slice(0, 10))}</b> · ${esc(e.text)}</li>`).join("")}</ul></div>`;
   }
 
@@ -410,7 +413,7 @@
     return { cls: "crit", label: p.name, backLabel: p.name,
       html: `<div class="mtop"><div class="cart">${mini(p, "cartico")}</div><h2>${esc(p.name)}${me ? ' <span class="you">(you)</span>' : ""}</h2><span class="mmeta">${esc(p.color.name)} · player</span><span class="mpill">Living</span></div><dl class="cstats">${rows.join("")}</dl>` };
   }
-  function describe(spec) { return spec.kind === "player" ? playerCard(spec) : BOOK ? BOOK.describe(spec) : null; }
+  function describe(spec) { return spec.kind === "player" ? playerCard(spec) : spec.kind === "ticket" ? WS.card(spec) : BOOK ? BOOK.describe(spec) : null; }
   const openPlayer = (key, push) => CARDS.open({ kind: "player", key }, { push: !!push });
 
   // 504's card carries its own action: move your piece (it takes you to the board).
@@ -531,7 +534,7 @@
     if (d.ok) { DAY = d.data; DAY_AT = Date.now(); }
     if (g.ok) { DATA = g.data; }
     if (b.ok) { BOARD = b.data; if (VIEW) VIEW.setData(b.data, myKey()); }
-    await Promise.all([PROP ? PROP.load() : 0, BAL ? BAL.load() : 0]);
+    await Promise.all([PROP ? PROP.load() : 0, BAL ? BAL.load() : 0, WS ? WS.load() : 0]);
     drawWho(); if (g.ok) drawGame(g.data); if (b.ok) drawBoard(b.data); drawTabs(); drawBook(); drawMoveBar();
     if (BOOK) BOOK.redraw();
     if (CARDS && CARDS.isOpen()) CARDS.redraw();
@@ -572,6 +575,10 @@
     if (pl && DATA) { CARDS.hidePreview(); if (pl.dataset.fromacct) await closePanels(); openPlayer(pl.dataset.pl, inCard); return; }
     const use = t.closest("[data-muse]");
     if (use) { CARDS.close(); jumpTo("board"); return; }
+    const tk = t.closest("[data-ticket]");
+    if (tk && WS) { CARDS.hidePreview(); WS.open(tk.dataset.ticket, inCard); return; }
+    const wb = t.closest("[data-w]");
+    if (wb && WS) { if (!wb.disabled) WS.click(wb); return; }
     const vb = t.closest("[data-vote]");
     if (vb) {
       if (vb.disabled || !BAL) return;
@@ -594,6 +601,7 @@
     const m = $("day-msg"); if (m) { m.className = "notice err"; m.textContent = text; }
   });
 
+  document.addEventListener("input", e => { if (WS) WS.input(e.target); });
   initBoard();
   load();
 </script>

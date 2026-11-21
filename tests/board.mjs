@@ -482,7 +482,7 @@ try {
   console.log("  the tools");
   const init = await mcp(A, "pilot", tokMia, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } });
   check("initialize answers, naming the game and the player", init.status === 200 && init.data.result.serverInfo.name === "promptocracy-pilot" && /Pilot game as Mia/.test(init.data.result.instructions), init.text);
-  const TOOLS = ["confirm_proposal", "draft_proposal", "end_turn", "move", "my_state", "propose", "read_ballot", "read_board", "read_day", "read_proposals", "read_rules", "start_game", "vote", "withdraw_proposal"];
+  const TOOLS = ["confirm_proposal", "draft_proposal", "end_turn", "list_tickets", "move", "my_state", "post_to_ticket", "propose", "read_ballot", "read_board", "read_day", "read_proposals", "read_rules", "read_ticket", "reopen_ticket", "start_game", "vote", "withdraw_proposal"];
   // The SDK's own client, as an AI app would use it: initialize, the initialized notification, list, call.
   const { Client: SdkClient } = await import("@modelcontextprotocol/sdk/client/index.js");
   const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
@@ -491,11 +491,11 @@ try {
     await sdk.connect(new StreamableHTTPClientTransport(new URL(`${A}/pilot/mcp`), { requestInit: { headers: { authorization: `Bearer ${tokMia}` } } }));
     const sdkTools = await sdk.listTools();
     const sdkState = await sdk.callTool({ name: "my_state", arguments: {} });
-    check("the SDK's own client connects with the token, lists the fourteen tools and calls one", J(sdkTools.tools.map((t) => t.name).sort()) === J(TOOLS) && JSON.parse(sdkState.content[0].text).you.name === "Mia" && sdk.getServerVersion()?.name === "promptocracy-pilot");
-  } catch (e) { check("the SDK's own client connects with the token, lists the fourteen tools and calls one", false, String(e?.stack || e)); }
+    check("the SDK's own client connects with the token, lists the seventeen tools and calls one", J(sdkTools.tools.map((t) => t.name).sort()) === J(TOOLS) && JSON.parse(sdkState.content[0].text).you.name === "Mia" && sdk.getServerVersion()?.name === "promptocracy-pilot");
+  } catch (e) { check("the SDK's own client connects with the token, lists the seventeen tools and calls one", false, String(e?.stack || e)); }
   finally { await sdk.close().catch(() => {}); }
   const list = await mcp(A, "pilot", tokMia, "tools/list", {});
-  check("the tools are read_rules, read_board, read_day, read_proposals, read_ballot, my_state, draft_proposal, confirm_proposal, withdraw_proposal, propose, vote, move, end_turn, start_game: no catch-all action yet", J(list.data.result.tools.map((t) => t.name).sort()) === J(TOOLS), list.text);
+  check("the tools are read_rules, read_board, read_day, read_proposals, read_ballot, my_state, draft_proposal, confirm_proposal, withdraw_proposal, propose, vote, move, end_turn, start_game, and the workshop's list_tickets, read_ticket, reopen_ticket and post_to_ticket: no catch-all action yet", J(list.data.result.tools.map((t) => t.name).sort()) === J(TOOLS), list.text);
   const annot = (n) => list.data.result.tools.find((t) => t.name === n).annotations;
   check("the read tools say they only read; the draft, confirm, withdraw, propose, vote, move and end_turn tools do not", ["read_rules", "read_board", "read_day", "read_proposals", "read_ballot", "my_state"].every((n) => annot(n).readOnlyHint === true) && ["draft_proposal", "confirm_proposal", "withdraw_proposal", "propose", "vote", "move", "end_turn"].every((n) => annot(n).readOnlyHint === false));
   const toolText = (n) => list.data.result.tools.find((t) => t.name === n).description;
@@ -598,7 +598,7 @@ try {
   check("read_day agrees: Mia shows as ended in the players list", JSON.parse((await tool(A, "pilot", tokMia, "read_day")).text).players.find((p) => p.name === "Mia")?.ended === true && JSON.parse((await tool(A, "pilot", tokMax, "read_day")).text).players.find((p) => p.name === "Mia")?.ended === true);
   // The midnight lock: the dev clock one second past the day's end, the cron NOT run. Every write answers the lock message.
   const endsAt = (await client(A).get("/pilot/api/day")).data.ends_at;
-  const lockMsg = "Chalant is processing day 1. Play resumes when it's done.";
+  const lockMsg = "The players are sleeping. Chalant is processing day 1; play resumes when it's done.";
   d1(state, "CREATE TABLE IF NOT EXISTS dev_controls (key TEXT PRIMARY KEY, value TEXT)");
   d1(state, `INSERT OR REPLACE INTO dev_controls (key, value) VALUES ('clock', '${new Date(Date.parse(endsAt) + 1000).toISOString()}')`);
   const turnsBeforeLock = propRows();

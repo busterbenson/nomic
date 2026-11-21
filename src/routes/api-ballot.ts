@@ -7,6 +7,7 @@
 import { getPlayer } from "../lib/auth";
 import { clockNow, electorsOf, isLocked, loadToday } from "../lib/day";
 import { refusalBody, turnBlock } from "../lib/turn";
+import { commissionsFor } from "../lib/ticket-view";
 import { Ctx, colorOf, json } from "../lib/util";
 import { COUNTED, view } from "./api-proposals";
 
@@ -22,7 +23,7 @@ export const get = async (ctx: Ctx) => {
   const dayRow: any = n ? await env.DB.prepare("SELECT n, status, electorate, ends_at FROM days WHERE game_id = ? AND n = ?").bind(game.id, n).first() : null;
   const rows = (await env.DB.prepare(
     `SELECT q.*, p.display_name AS name, p.color FROM proposals q JOIN players p ON p.game_id = q.game_id AND p.id = q.player_id
-     WHERE q.game_id = ? AND q.day_ballot = ? AND q.status IN ('on_ballot', 'passed', 'failed', 'enacted', 'not_applied')
+     WHERE q.game_id = ? AND q.day_ballot = ? AND q.status IN ('on_ballot', 'passed', 'failed', 'enacted', 'not_applied', 'approved')
      ORDER BY q.number`,
   ).bind(game.id, n).all()).results as any[];
   const electors = dayRow ? await electorsOf(env, game.id, n) : [];
@@ -39,6 +40,7 @@ export const get = async (ctx: Ctx) => {
     : gate ? { allowed: false, reason: refusalBody(gate).error }
     : !elector ? { allowed: false, reason: `You joined after day ${n} began, so you vote from tomorrow (rule 104.2).` }
     : { allowed: true };
+  const tickets = await commissionsFor(env, game.id, rows.filter((r) => r.kind === "commission").map((r) => r.id));
   const items = rows.map((r) => {
     const mine = votes.filter((v) => v.proposal_id === r.id);
     const voters = ordered.filter((id) => mine.some((v) => v.player_id === id));
@@ -46,6 +48,7 @@ export const get = async (ctx: Ctx) => {
     const open = r.status === "on_ballot" && isToday;
     return {
       ...view(r, player?.id, electors.length || dayRow?.electorate || undefined),
+      ticket: tickets.get(r.id),
       threshold_rule: "104.1",
       turnout: { voted: voters.length, of: electors.length, players: voters.map(pill) },
       your_vote: player ? (mine.find((v) => v.player_id === player.id)?.vote ?? null) : null,

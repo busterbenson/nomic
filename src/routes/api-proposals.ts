@@ -15,6 +15,8 @@ import { getPlayer } from "../lib/auth";
 import { clockNow, dayOpenBinds, loadToday, settingsOf } from "../lib/day";
 import { DrafterError, draftRewording, drafterReady } from "../lib/drafter";
 import { notify } from "../lib/notify";
+import { commissionsFor } from "../lib/ticket-view";
+import { COMMISSION_SNAPSHOT_SQL } from "../lib/tickets.js";
 import { CONFIRMED_TODAY_SQL, CONFIRM_SQL, DRAFT_INSERT_SQL, WITHDRAW_SQL, conflictSentence, draftOf, fixedRefusal, markFor, needsModel, neededOf, parseBook, proposalLimitMessage, readRequest } from "../lib/proposals.js";
 import { refusalBody, turnBlock } from "../lib/turn";
 import { Ctx, colorOf, json, nowIso, readJson, sha256Hex, siteUrl, who } from "../lib/util";
@@ -31,7 +33,7 @@ export const draftsPerDay = (limit: number) => 20 + 10 * limit;
 const books = new WeakMap<object, { md: string; book: any; sha: string }>();
 // The rules a game runs on (the bundled text, so a draft is made against the text whose code is live), parsed once.
 /** @rule 103.1 */
-async function bookFor(game: { slug: string }) {
+export async function bookFor(game: { slug: string }) {
   const { bundle } = bundleFor(game);
   let b = books.get(bundle);
   if (!b) { b = { md: bundle.rulesMd, book: parseBook(bundle.rulesMd), sha: await sha256Hex(bundle.rulesMd) }; books.set(bundle, b); }
@@ -47,7 +49,7 @@ const confirmedToday = async (env: any, gameId: string, playerId: string, day: n
   ((await env.DB.prepare(CONFIRMED_TODAY_SQL).bind(gameId, playerId, day).first()) as any)?.n ?? 0;
 
 // The statuses a proposal has once its ballot is counted: only then are its totals shown (rule 104.4).
-export const COUNTED = ["passed", "failed", "enacted", "not_applied"];
+export const COUNTED = ["passed", "failed", "enacted", "not_applied", "approved"];
 
 // What a proposal shows. A whitelist: the count's columns (yes, no, absent, why) are in it only once it is counted
 // (rule 104.4); before that, nothing about its votes. The votes it needs come from its ballot day's electorate once it
@@ -166,6 +168,7 @@ export async function confirm(ctx: Ctx, player: any, id: string, nowMs: number):
     env.DB.prepare(
       CONFIRM_SQL,
     ).bind(mark, now, id, game.day, ...dayOpenBinds(game.day, nowMs, player.id), limit),
+    env.DB.prepare(COMMISSION_SNAPSHOT_SQL).bind(id, id, id, now, id),
     env.DB.prepare(
       `INSERT INTO events (game_id, kind, text, created_at, day, phase, player_id)
        SELECT ?, 'proposal_confirmed', ?, ?, ?, 'day', ? WHERE EXISTS (SELECT 1 FROM proposals WHERE id = ? AND status = 'confirmed' AND confirmed_at = ?)`,
@@ -190,7 +193,7 @@ export async function confirm(ctx: Ctx, player: any, id: string, nowMs: number):
 
 // Withdraw (rule 103.3): until midnight or End turn, and only today's confirmed proposal. It keeps its number; the
 // slot of the day is free again.
-/** @rule 103.3 */
+/** @rule 103.3, 801.1 */
 export async function withdraw(ctx: Ctx, player: any, id: string, nowMs: number): Promise<Out> {
   const { env } = ctx;
   const { game, day, turn } = await loadToday(env, ctx.data.game!, nowMs, player.id);
@@ -200,6 +203,8 @@ export async function withdraw(ctx: Ctx, player: any, id: string, nowMs: number)
   if (!row || row.status === "draft") return out({ error: "There is no such proposal of yours." }, 404);
   if (row.status !== "confirmed" || row.day_proposed !== game.day) return out({ error: `P${row.number} is ${row.status === "withdrawn" ? "already withdrawn" : "on the ballot now"}, so it can't be withdrawn.` }, 409);
   const now = nowIso(nowMs);
+  // A withdrawn commission sends its ticket back to a draft in the same batch (rule 801.1): it is not a proposal any more.
+  const gone = "EXISTS (SELECT 1 FROM proposals WHERE id = ? AND status = 'withdrawn' AND withdrawn_at = ?)";
   const res = await env.DB.batch([
     env.DB.prepare(
       WITHDRAW_SQL,
@@ -208,6 +213,8 @@ export async function withdraw(ctx: Ctx, player: any, id: string, nowMs: number)
       `INSERT INTO events (game_id, kind, text, created_at, day, phase, player_id)
        SELECT ?, 'proposal_withdrawn', ?, ?, ?, 'day', ? WHERE EXISTS (SELECT 1 FROM proposals WHERE id = ? AND status = 'withdrawn' AND withdrawn_at = ?)`,
     ).bind(game.id, `${who(player.display_name, player.color)} withdrew their proposal.`, now, game.day, player.id, id, now),
+    env.DB.prepare(`INSERT INTO ticket_log (ticket_id, day, kind, text, at) SELECT id, ?, 'withdrawn', ?, ? FROM tickets WHERE proposal_id = ? AND state IN ('Proposed', 'Draft') AND ${gone}`).bind(game.day, `Withdrawn from the ballot (P${row.number}). Back to a draft.`, now, id, id, now),
+    env.DB.prepare(`UPDATE tickets SET state = 'Draft', proposal_id = NULL, proposed_at = NULL, updated_at = ? WHERE proposal_id = ? AND state IN ('Proposed', 'Draft') AND ${gone}`).bind(now, id, id, now),
   ]);
   if (!(res[0]?.meta?.changes > 0)) return out({ error: "The day changed under you. Reload and try again." }, 409);
   return out({ ok: true, withdrawn: `P${row.number}` });
@@ -246,15 +253,16 @@ export const get = async (ctx: Ctx) => {
   const rule = new URL(request.url).searchParams.get("rule");
   const rows = (await env.DB.prepare(
     `SELECT q.*, p.display_name AS name, p.color FROM proposals q JOIN players p ON p.game_id = q.game_id AND p.id = q.player_id
-     WHERE q.game_id = ? AND (q.status IN ('on_ballot', 'passed', 'failed', 'enacted', 'not_applied') OR (q.status = 'confirmed' AND q.player_id = ?))
+     WHERE q.game_id = ? AND (q.status IN ('on_ballot', 'passed', 'failed', 'enacted', 'not_applied', 'approved') OR (q.status = 'confirmed' AND q.player_id = ?))
        AND (? IS NULL OR q.target = ? OR substr(q.target, 1, length(?) + 1) = ? || '.')
      ORDER BY q.number`,
   ).bind(game.id, player?.id ?? "", rule, rule, rule, rule).all()).results as any[];
   const n = await playerCount(env, game.id);
+  const tickets = await commissionsFor(env, game.id, rows.filter((r) => r.kind === "commission").map((r) => r.id));
   const today = game.day;
   return json({
     day: today,
-    proposals: rows.map((r) => view(r, player?.id, n)),
+    proposals: rows.map((r) => ({ ...view(r, player?.id, n), ticket: tickets.get(r.id) })),
     ballot: rows.filter((r) => r.status === "on_ballot" && r.day_ballot === today).map((r) => `P${r.number}`),
   });
 };

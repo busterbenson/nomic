@@ -76,7 +76,7 @@ export function deadlineAfter(tz, endsAtMs, hour = DEADLINE_HOUR) {
 
 // ---- the gate ----------------------------------------------------------------------------------------------------
 /** @rule 107.1 */
-export const lockMessage = (n) => `Chalant is processing day ${n}. Play resumes when it's done.`;
+export const lockMessage = (n) => `The players are sleeping. Chalant is processing day ${n}; play resumes when it's done.`;
 
 // Is the game locked at `nowMs`? The flag (the game or the day no longer open) OR the clock (the day has ended).
 /** @rule 107.1 */
@@ -104,3 +104,11 @@ export const dayOpenSql = `g.status = 'playing' AND g.phase = 'open' AND g.day =
   AND NOT EXISTS (SELECT 1 FROM day_turns t WHERE t.game_id = g.id AND t.day = ? AND t.player_id = ? AND t.ended_at IS NOT NULL)`;
 /** @rule 107.1, 202.4 */
 export const dayOpenBinds = (day, nowMs, playerId) => [day, new Date(nowMs).toISOString(), day, playerId];
+
+// The lock alone, in SQL, for a write the lock stops but End turn does not (a post in a ticket's discussion, rule 107.1): the
+// game row is aliased g. It holds while the game is not mid-play, or is open on a day that is open and not yet over. Binds
+// (lockOpenBinds): now (ISO).
+/** @rule 107.1 */
+export const lockOpenSql = `(g.status != 'playing' OR (g.phase = 'open' AND EXISTS (SELECT 1 FROM days d WHERE d.game_id = g.id AND d.n = g.day AND d.status = 'open' AND d.ends_at > ?)))`;
+/** @rule 107.1 */
+export const lockOpenBinds = (nowMs) => [new Date(nowMs).toISOString()];

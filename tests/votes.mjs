@@ -19,7 +19,7 @@ const check = (name, ok, detail = "") => {
   if (ok) { pass++; console.log(`  ok    ${name}`); } else { fail++; console.log(`  FAIL  ${name}${detail ? "  -> " + detail : ""}`); }
 };
 const J = JSON.stringify;
-const LOCK2 = "Chalant is processing day 2. Play resumes when it's done.";
+const LOCK2 = "The players are sleeping. Chalant is processing day 2; play resumes when it's done.";
 const LA = "America/Los_Angeles";
 
 // ---------------------------------------------------------------- the count (pure)
