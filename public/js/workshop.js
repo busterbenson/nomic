@@ -18,7 +18,7 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&
 const lines = (s) => String(s || "").split("\n").map((x) => x.trim()).filter(Boolean);
 
 export function createWorkshop({ api, me, pill, rpill, when, canCommission, refresh, cards }) {
-  const S = { cat: { kinds: [], required: {}, entries: [] }, flavorOpen: {}, list: [], total: 0, counts: {}, view: "main", all: { rows: [], next: null, state: "", err: "" }, detail: {}, form: null, busy: false, err: "", note: "", openErr: "", draftPost: {} };
+  const S = { cat: { kinds: [], required: {}, registry: {}, entries: [] }, flavorOpen: {}, list: [], total: 0, counts: {}, view: "main", all: { rows: [], next: null, state: "", err: "" }, detail: {}, form: null, busy: false, err: "", note: "", openErr: "", draftPost: {} };
 
   /** @rule 801.2 */
   async function load() {
@@ -31,7 +31,7 @@ export function createWorkshop({ api, me, pill, rpill, when, canCommission, refr
   /** @rule 701.1 */
   async function loadCatalog() {
     const r = await api("/api/catalog");
-    S.cat = r.ok && r.data ? { kinds: r.data.kinds || [], required: r.data.required || {}, entries: r.data.entries || [] } : { kinds: [], required: {}, entries: [] };
+    S.cat = r.ok && r.data ? { kinds: r.data.kinds || [], required: r.data.required || {}, registry: r.data.registry || {}, entries: r.data.entries || [] } : { kinds: [], required: {}, registry: {}, entries: [] };
   }
   // The all-tickets list: 50 at a time, newest change first, optionally one state; "More" asks for the next page. @rule 801.2
   async function loadAll(reset) {
@@ -125,7 +125,7 @@ export function createWorkshop({ api, me, pill, rpill, when, canCommission, refr
     if (!v) return null;
     const open = !!S.flavorOpen[id];
     const more = v.flavorMore > 0 ? `<button type="button" class="btn ghost small" data-w="flavor" data-entry="${esc(id)}" aria-expanded="${open}">${open ? "Show fewer" : `Show all ${esc(v.flavor.length)}`}</button>` : "";
-    const from = v.copiedFrom ? `<div class="tr"><dt>Copied from</dt><dd><button type="button" class="linkbtn" data-entry="${esc(v.copiedFrom)}">${esc(v.copiedFrom)}</button></dd></div>` : "";
+    const from = v.copiedFrom ? `<div class="tr"><dt>Copied from</dt><dd>${S.cat.entries.some((e) => e.id === v.copiedFrom) ? `<button type="button" class="linkbtn" data-entry="${esc(v.copiedFrom)}">${esc(v.copiedFrom)}</button>` : esc(v.copiedFrom)}</dd></div>` : "";
     const made = v.madeBy || v.day !== null ? `<div class="tr"><dt>Made by</dt><dd>${v.madeBy ? wPill(v.madeBy) : ""}${v.day !== null ? ` Day ${esc(v.day)}` : ""}</dd></div>` : "";
     return { cls: "crit tk", label: `${v.id} ${v.name}`, backLabel: v.id,
       html: `<div class="mtop"><div class="cart">${artTile(v, true)}</div><span class="wpill big">${esc(v.id)}</span><h2>${esc(v.name)}</h2>${kindChip(v)}</div>
@@ -173,7 +173,6 @@ ${catalogHTML()}</div></div>`;
   // ---- the ticket page (a card) ----------------------------------------------------------------------------------
   const label = (key) => { const x = String(key).replace(/_/g, " "); return x.charAt(0).toUpperCase() + x.slice(1); };
   const requiredOf = (kind) => (kind && S.cat.required[kind]) || [];
-  const allRequiredKeys = () => new Set(Object.values(S.cat.required).flat().map((a) => a.key));
   /** A stored attribute as the form field shows it: a size is "2×1". @rule 704.1 */
   const fieldValue = (v) => (v && typeof v === "object" ? `${v.w}×${v.h}` : v === true ? "yes" : v === false ? "no" : v === undefined || v === null ? "" : String(v));
   /**
@@ -181,11 +180,13 @@ ${catalogHTML()}</div></div>`;
    * no kind needs), so saving by hand never drops what Gremlin or the night put there. @rule 801.2
    */
   function formFrom(t) {
-    const need = allRequiredKeys();
     return { n: t.n, title: t.title, brief: t.brief,
-      entries: t.makes.filter((m) => m.kind === "entry").map((m) => ({ name: m.name, kind: m.catalogKind || "",
-        vals: Object.fromEntries(Object.entries(m.attrs || {}).filter(([k]) => need.has(k)).map(([k, v]) => [k, fieldValue(v)])),
-        keep: { attrs: Object.fromEntries(Object.entries(m.attrs || {}).filter(([k]) => !need.has(k))), flavor: m.flavor, needsBuild: m.needsBuild, art: m.art, copiedFrom: m.copiedFrom } })),
+      entries: t.makes.filter((m) => m.kind === "entry").map((m) => {
+        const mine = new Set(requiredOf(m.catalogKind).map((a) => a.key));   // only the fields this kind's form shows are edited; every other attribute is kept as it is
+        return { name: m.name, kind: m.catalogKind || "",
+          vals: Object.fromEntries(Object.entries(m.attrs || {}).filter(([k]) => mine.has(k)).map(([k, v]) => [k, fieldValue(v)])),
+          keep: { attrs: Object.fromEntries(Object.entries(m.attrs || {}).filter(([k]) => !mine.has(k))), flavor: m.flavor, needsBuild: m.needsBuild, art: m.art, copiedFrom: m.copiedFrom } };
+      }),
       rules: t.makes.filter((m) => m.kind === "rule" && m.num).map((m) => m.num).join(", "), drafts: t.makes.filter((m) => m.kind === "rule" && !m.num).map((m) => m.draft),
       estimate: t.estimate, running_cost: t.running_cost, tasks: t.tasks.map((x) => x.text).join("\n") };
   }
@@ -196,7 +197,10 @@ ${catalogHTML()}</div></div>`;
     const item = { kind: "entry", name: e.name };
     if (e.kind) item.catalogKind = e.kind;
     if (Object.keys(attrs).length) item.attrs = attrs;
-    for (const k of ["flavor", "needsBuild", "art", "copiedFrom"]) if (e.keep[k] !== undefined && e.keep[k] !== null) item[k] = e.keep[k];
+    for (const k of ["flavor", "art", "copiedFrom"]) if (e.keep[k] !== undefined && e.keep[k] !== null) item[k] = e.keep[k];
+    // a key waiting for its rule that a rule now defines is no longer waiting (a ticket may not list it, 703.3)
+    const waiting = (e.keep.needsBuild || []).filter((k) => !Object.hasOwn(S.cat.registry, k));
+    if (waiting.length) item.needsBuild = waiting;
     return item;
   }
   /** @rule 801.2 */
@@ -232,6 +236,7 @@ ${requiredOf(e.kind).map((a) => attrField(i, a, e.vals[a.key] ?? "", off)).join(
     return `<div class="pf wkform"><label for="wfTitle">Title</label><input id="wfTitle" maxlength="80" value="${esc(f.title)}"${off}>
 <label for="wfBrief">Brief</label><textarea id="wfBrief" rows="4" maxlength="2000"${off}>${esc(f.brief)}</textarea>
 ${f.entries.map((e, i) => entryFields(e, i, off)).join("")}<div class="row"><button type="button" class="btn ghost small" data-w="addentry"${off}>Add an entry</button></div>
+${f.drafts.map((d, i) => `<div class="wkdraft"><span>${esc(d)}</span><button type="button" class="btn ghost small" data-w="rmdraft" data-ei="${i}"${off}>Remove</button></div>`).join("")}
 <label for="wfRules">Rules</label><input id="wfRules" value="${esc(f.rules)}"${off}>
 <label for="wfEstimate">Nights</label><input id="wfEstimate" type="number" min="1" max="99" step="1" value="${esc(f.estimate)}"${off}>
 <label for="wfCost">Running cost</label><input id="wfCost" maxlength="200" value="${esc(f.running_cost)}"${off}>
@@ -310,8 +315,10 @@ ${editing ? formHTML(t) : factsHTML(t)}${reopenHTML(t)}${editing ? "" : tasksHTM
       return;
     }
     if (a === "flavor") { S.flavorOpen[el.dataset.entry] = !S.flavorOpen[el.dataset.entry]; cards.redraw(); return; }
-    if ((a === "addentry" || a === "rmentry") && S.form && !S.busy) {
-      if (a === "addentry") S.form.entries.push({ name: "", kind: "", vals: {}, keep: {} }); else S.form.entries.splice(Number(el.dataset.ei), 1);
+    if ((a === "addentry" || a === "rmentry" || a === "rmdraft") && S.form && !S.busy) {
+      if (a === "addentry") S.form.entries.push({ name: "", kind: "", vals: {}, keep: {} });
+      else if (a === "rmdraft") S.form.drafts.splice(Number(el.dataset.ei), 1);
+      else S.form.entries.splice(Number(el.dataset.ei), 1);
       cards.redraw();
       return;
     }
@@ -346,7 +353,11 @@ ${editing ? formHTML(t) : factsHTML(t)}${reopenHTML(t)}${editing ? "" : tasksHTM
     if (entry) {
       if (ef === "name") entry.name = el.value;
       else if (ef === "attr") entry.vals[el.dataset.key] = el.value;
-      else if (ef === "kind") { entry.kind = el.value; cards.redraw(); }   // the kind's required fields follow the kind
+      else if (ef === "kind") {   // the kind's required fields follow the kind, and take the values the entry already holds for them
+        entry.kind = el.value;
+        for (const a of requiredOf(entry.kind)) if (entry.keep.attrs && Object.hasOwn(entry.keep.attrs, a.key) && !(a.key in entry.vals)) { entry.vals[a.key] = fieldValue(entry.keep.attrs[a.key]); delete entry.keep.attrs[a.key]; }
+        cards.redraw();
+      }
     }
     if (entry || (Object.hasOwn(FIELD, el.id) && S.form)) {
       if (!entry) S.form[FIELD[el.id]] = el.value;

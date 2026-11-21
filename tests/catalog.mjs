@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { join as pjoin } from "node:path";
 import { ROOT } from "./lib.mjs";
 import { attr } from "../src/engine/api.js";
-import { attrCalls, catalogClaimProblems, knownNumbers } from "../src/engine/claims.js";
+import { attrCalls, catalogClaimProblems } from "../src/engine/catalog-claims.js";
+import { knownNumbers } from "../src/engine/claims.js";
 import { KINDS, KIND_IDS, VALUE_TYPES, buildRegistry, classifyAttr, entryView, readCatalog, readEntryDraft, readValue, showValue } from "../src/lib/catalog.js";
 import { readFields, readMakes } from "../src/lib/tickets.js";
 import { BundleError, bundleGames } from "../scripts/bundle-games.mjs";
@@ -117,6 +118,15 @@ check("(b) attr() needs a literal key the registry has: a typo, a flavor key and
 check("(b) attr calls are found through nested calls, comments and strings", J(attrCalls('a(attr(f(1, 2), "x"));\n// attr(e, "no")\n/* attr(e, "no") */\nattr(e, "y")').map((c) => c.key)) === J(["x", "y"]) && attrCalls('const s = "attr(e, k)"; attr(e, "z")').length >= 1);
 check("(c) a required attribute with no type fails; one a rule also defines must agree with the rule's type", catalogClaimProblems({ required: { creature: [{ key: "hearts" }] }, known }).length === 1 && /as a number, but rule 602 defines it as a text/.test(catalogClaimProblems({ registry: { hearts: { key: "hearts", rule: 602, type: "text", kinds: ["creature"] } }, required: { creature: [{ key: "hearts", type: "number" }] }, known })[0]) && catalogClaimProblems({ required, known }).length === 0);
 
+check("(b) attr is read from the code, not the text: a \"/*\" or \"http://\" inside a string does not hide a call, and attr( inside a string is not a call", J(attrCalls('const a = "/*"; attr(e, "x"); const b = "*/";\nconst u = "http://x"; attr(e, "y");\nconst s = "attr(e, k)";').map((c) => c.key)) === J(["x", "y"]));
+check("(b) attr passed around, renamed or called through an object is a problem, as is reading an entry's attrs or flavor by hand", [
+  "const g = attr; g(e, 'x');", "E.attr(e, 'x');", "export const h = [attr];", "const v = entry.attrs.speed;", "const w = entry?.flavor;", "const z = entry['attrs'];",
+].every((src) => attrCalls(src).some((c) => c.problem)) && attrCalls('import { attr, defineRule } from "promptocracy/engine";\nattr(e, "x");').every((c) => !c.problem));
+check("a constructor or other inherited name is an ordinary key: it is kept as flavor, in a draft, in catalog.json and in a view", ok({ kind: "entry", name: "x", catalogKind: "tile", flavor: { constructor: "hi", mood: "a" } }).flavor.constructor === "hi" && readCatalog([{ id: "T1", name: "Bog", kind: "tile", flavor: { constructor: "hi" } }], ctx).entries[0].flavor.constructor === "hi" && entryView({ name: "x", catalogKind: "tile", flavor: { constructor: "hi" } }, ctx).flavor[0].shown === "hi");
+check("a kind that is not a string is refused; attrs: null reads as none on both paths", /kind must be one of the kinds' names/.test(bad({ kind: "entry", name: "x", catalogKind: ["creature"] })) && ok({ kind: "entry", name: "x", catalogKind: "tile", attrs: null }).name === "x" && readCatalog([{ id: "T1", name: "Bog", kind: "tile", attrs: null }], ctx).entries.length === 1);
+check("saved drawings need their own keys: a duplicate, a path out of the folder and a space are refused", [[{ key: "a.png" }, { key: "a.png" }], [{ key: "../a.png" }], [{ key: "a b.png" }]].every((saved) => readCatalog([entry({ art: { saved, default: null } })], ctx).errors?.length === 1));
+check("only rule 704 holds the required lists, and a choice's options are trimmed and short", /only rule 704 holds the required lists/.test(buildRegistry([mod(602, undefined, required)]).errors[0]) && buildRegistry([mod(602, [{ key: "temper", type: "choice", choices: [" a "], kinds: ["creature"] }])]).errors.length === 1);
+
 console.log("attr() (rule 703.2: the only way rule code reads an attribute)");
 check("attr(entry, key) reads attrs and nothing else: a flavor key, a missing key and a null entry are undefined", attr({ attrs: { speed: 2 }, flavor: { mood: "grumpy" } }, "speed") === 2 && attr({ attrs: { speed: 2 }, flavor: { mood: "grumpy" } }, "mood") === undefined && attr({}, "speed") === undefined && attr(null, "speed") === undefined && attr({ attrs: {} }, "constructor") === undefined);
 
@@ -151,9 +161,14 @@ fixed("two rules defining the same attribute fail the build, naming the rule tha
 fixed("an attribute defined by a module whose rule is not in RULES.md fails the build", (d) => { put(d, "rules/602.ts", attrsModule(602, "speed")); put(d, "game.json", J({ engine: 1, modules: [107, 202, 504, 505, 602] })); }, /rules\/602\.ts is a module for rule 602, which RULES\.md does not have/);
 fixed("a rule that reads attr() with a key no rule defines fails the build", (d) => {
   put(d, "RULES.md", readFileSync(pjoin(FIX, "RULES.md"), "utf8") + "\n## 600. Hearts [majority]\n\n### 602 Speed\n**602.1** x\n");
-  put(d, "rules/602.ts", `import { attr, defineRule } from "promptocracy/engine";\nexport default defineRule({ rule: 602,\n  /** @rule 602.1 */\n  actionAllowed(ctx, actor) { return attr(actor, "speed") ? null : null; } });\n`);
+  put(d, "rules/602.ts", `import { attr, defineRule } from "promptocracy/engine";\nexport default defineRule({ rule: 602,\n  /** @rule 602.1 */\n  actionAllowed(ctx, actor) {\n    return attr(actor, "speed") ? null : null;\n  },\n});\n`);
   put(d, "game.json", J({ engine: 1, modules: [107, 202, 504, 505, 602] }));
 }, /catalog claims failed[^]*attr\(\.\.\., "speed"\) reads an attribute no rule defines/);
+fixed("a module whose attributes cannot be plain data (a circular one) fails the build with that reason", (d) => {
+  put(d, "RULES.md", readFileSync(pjoin(FIX, "RULES.md"), "utf8") + "\n## 600. Hearts [majority]\n\n### 602 Speed\n**602.1** x\n");
+  put(d, "rules/602.ts", `import { defineRule } from "promptocracy/engine";\nconst loop: any = { key: "speed", type: "number", kinds: ["creature"] };\nloop.self2 = loop;\nexport const attributes = [loop];\nexport default defineRule({ rule: 602 });\n`);
+  put(d, "game.json", J({ engine: 1, modules: [107, 202, 504, 505, 602] }));
+}, /rules\/602\.ts: attributes and required must be plain data/);
 fixed("a catalog.json that is not valid fails the build, naming the entry and the reason", (d) => put(d, "catalog.json", J([{ id: "C1", name: "Blob", kind: "dragon" }])), /catalog\.json entry 1 \(C1\): kind must be one of item, creature/);
 fixed("a catalog.json that is not JSON fails the build", (d) => put(d, "catalog.json", "[oops"), /catalog\.json is missing or is not valid JSON/);
 fixed("an entry whose id is used twice fails the build", (d) => put(d, "catalog.json", J([{ id: "C1", name: "A", kind: "creature" }, { id: "C1", name: "B", kind: "creature" }])), /this id is used twice/);

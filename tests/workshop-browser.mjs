@@ -74,8 +74,15 @@ try {
     { kind: "entry", name: "Wyrm", catalogKind: "creature", attrs: { hearts: 4, flies: true }, flavor: { colour: "slate", mood: "grumpy", smell: "of wet stone", habitat: "the north hill" }, needsBuild: ["flies"] },
     { kind: "rule", num: "801.2" }, { kind: "rule", draft: "A creature that flies can cross walls." }], estimate: 1, tasks: ["Draw them"] }), "fay edit");
   d1(state, `UPDATE tickets SET state = 'Approved', queue_pos = 1, price = 0, paid = 0, paid_at = 'x', approved_at = '2026-11-19T08:00:00.000Z' WHERE game_id = '${cgid}' AND number = ${Number(fn.slice(1))}`);
+  // Eli's draft holds what the form does not edit: an attribute another kind needs (size on a creature, waiting for its rule), an entry with
+  // no kind and an attribute, a rule that is only a draft sentence. Saving it by hand must change none of it.
+  const en = ok(await eli.post(CT, {}), "eli open").data.ticket;
+  ok(await eli.post(`${CT}/${en}/edit`, { title: "Things the form keeps", brief: "A draft with data the form does not show.", makes: [
+    { kind: "entry", name: "Dragon", catalogKind: "creature", attrs: { hearts: 4, size: "2x1" }, flavor: { mood: "grumpy" }, needsBuild: ["size"], copiedFrom: "C2" },
+    { kind: "entry", name: "Thing", attrs: { hearts: 3 } },
+    { kind: "rule", draft: "A creature that flies can cross walls." }], estimate: 1 }), "eli edit");
   const ccookie = [...eli.jar].find(([k]) => k === "s|/catalogued")[1];
-  const r3 = await promisify(execFile)("/usr/local/bin/python3", [ROOT + "/tests/browser-catalog.py", srv.base, shots || "-", ccookie], { timeout: 240000, maxBuffer: 1 << 24 });
+  const r3 = await promisify(execFile)("/usr/local/bin/python3", [ROOT + "/tests/browser-catalog.py", srv.base, shots || "-", ccookie, en], { timeout: 240000, maxBuffer: 1 << 24 });
   process.stdout.write(r3.stdout);
 } catch (e) {
   failed = true;

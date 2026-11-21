@@ -13,11 +13,6 @@
 // A shape the scan cannot see is caught for the one place it matters: the bundler asks the LOADED module which hooks it
 // has and fails the build unless each hook's function carries a tag (see hookClaimProblems).
 // Only a `/** ... */` block counts as a doc comment; a `// @rule` line does not.
-//
-// The catalog adds three checks (catalogClaimProblems, below, docs/catalog.md section 2): every attribute a module exports is
-// defined by one rule that exists, rule code reads an attribute only through attr(entry, "key") with a literal key the registry has,
-// and every attribute a kind needs has a type.
-import { VALUE_TYPES, definitionOf } from "../lib/catalog.js";
 
 const CONTROL = new Set(["if", "for", "while", "switch", "catch", "return", "else", "with", "function", "do", "try", "typeof", "await", "new", "throw", "delete", "void", "yield", "super"]);
 const TAG = /@rule\s+([0-9][0-9.,\s]*)/g;
@@ -160,66 +155,4 @@ export function compareNumbers(a, b) {
   const x = a.split(".").map(Number), y = b.split(".").map(Number);
   for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] ?? -1) !== (y[i] ?? -1)) return (x[i] ?? -1) - (y[i] ?? -1);
   return 0;
-}
-
-/**
- * The catalog's three checks (docs/catalog.md section 2), run by the bundler on every game and by npm test on the starter pack. `registry`
- * and `required` are what the modules export (buildRegistry in src/lib/catalog.js, which has already refused a key two rules define);
- * `known` is the rule and clause numbers of the game's RULES.md; `sources` maps each module's file name to its source. Returns problems
- * (empty = fine): see definedProblems, readProblems and requiredProblems.
- * @rule 703.1
- */
-export function catalogClaimProblems({ registry = {}, required = {}, known, sources = {} }) {
-  return [...definedProblems(registry, known), ...readProblems(registry, sources), ...requiredProblems(registry, required)];
-}
-
-/** (a) Each registry key is defined by a rule the text has (rule 703.3 says one rule defines a key; the registry builder refuses two). @rule 703.3 */
-function definedProblems(registry, known) {
-  return Object.values(registry).filter((d) => !known.has(String(d.rule))).map((d) => `attribute ${d.key} is defined by rule ${d.rule}, which RULES.md does not have (703.3)`);
-}
-
-/** (b) Code reads an attribute only through attr(entry, "key"): a literal key, and one the registry has, so code cannot read flavor or a typo. @rule 703.2 */
-function readProblems(registry, sources) {
-  const problems = [];
-  for (const [file, src] of Object.entries(sources)) {
-    for (const c of attrCalls(src)) {
-      if (c.key === null) problems.push(`${file}:${c.line} attr() needs a literal key, like attr(entry, "speed"), so the check can see which attribute it reads (703.2)`);
-      else if (!Object.hasOwn(registry, c.key)) problems.push(`${file}:${c.line} attr(..., "${c.key}") reads an attribute no rule defines (703.1)`);
-    }
-  }
-  return problems;
-}
-
-/** (c) Each attribute a kind needs has a type, and agrees with the registry when a rule also defines it. @rule 704.1 */
-function requiredProblems(registry, required) {
-  const problems = [];
-  for (const [kind, list] of Object.entries(required)) {
-    for (const a of list) {
-      if (!VALUE_TYPES.includes(a.type)) problems.push(`rule 704 needs ${a.key} for a ${kind} but gives it no type (704.1)`);
-      const d = definitionOf({ registry }, kind, a.key);
-      if (d && d.type !== a.type) problems.push(`rule 704 needs ${a.key} for a ${kind} as a ${a.type}, but rule ${d.rule} defines it as a ${d.type} (704.1)`);
-    }
-  }
-  return problems;
-}
-
-/** The attr(...) calls in a source file: {line, key} with key null when it is not a string literal. @rule 703.2 */
-export function attrCalls(src) {
-  const text = String(src).replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " ")).replace(/\/\/[^\n]*/g, (m) => " ".repeat(m.length));
-  const out = [];
-  for (const m of text.matchAll(/(?<![\w$.])attr\s*\(/g)) {
-    let depth = 1, i = m.index + m[0].length, argStart = i, quote = null;
-    const args = [];
-    for (; i < text.length && depth > 0; i++) {
-      const ch = text[i];
-      if (quote) { if (ch === "\\") i++; else if (ch === quote) quote = null; continue; }
-      if (ch === '"' || ch === "'" || ch === "`") quote = ch;
-      else if (ch === "(" || ch === "[" || ch === "{") depth++;
-      else if (ch === ")" || ch === "]" || ch === "}") { depth--; if (depth === 0) args.push(text.slice(argStart, i)); }
-      else if (ch === "," && depth === 1) { args.push(text.slice(argStart, i)); argStart = i + 1; }
-    }
-    const lit = /^\s*(["'])([^"'\\]*)\1\s*$/.exec(args[1] ?? "");
-    out.push({ line: text.slice(0, m.index).split("\n").length, key: lit ? lit[2] : null });
-  }
-  return out;
 }

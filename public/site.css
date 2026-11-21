@@ -559,6 +559,7 @@ button.pill[aria-pressed="true"]{background:color-mix(in srgb,var(--accent) 16%,
 .eid{color:var(--ink-muted);font-size:.72rem}
 .cmade{margin:0;font-size:.7rem;color:var(--ink-muted);display:flex;gap:8px;align-items:center}
 .wkcat{gap:16px}
+.wkdraft{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin:6px 0;overflow-wrap:anywhere}
 .wkentry{border:1.5px dashed var(--line);border-radius:12px;padding:10px;margin:8px 0;display:flex;flex-direction:column;gap:6px;min-width:0}
 .mtop .kchip{align-self:center}
 .mcard.tk .erows{margin:10px 0 0}

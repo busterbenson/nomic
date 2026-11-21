@@ -21,7 +21,10 @@ try {
     const ns = await import(pathToFileURL(join(rulesDir, f)).href);
     const mod = ns.default;
     // What a module exports beside its rule: the attributes it defines (703.1), and rule 704's list of what each kind needs (704.1).
-    if (ns.attributes !== undefined || ns.required !== undefined) exported.push({ rule: Number(f.slice(0, -3)), attributes: ns.attributes, required: ns.required });
+    if (ns.attributes !== undefined || ns.required !== undefined) {
+      try { exported.push(JSON.parse(JSON.stringify({ rule: Number(f.slice(0, -3)), attributes: ns.attributes, required: ns.required }))); }
+      catch { problems.push(`rules/${f}: attributes and required must be plain data (lists, objects, strings, numbers)`); }
+    }
     if (!mod || mod.rule !== Number(f.slice(0, -3))) problems.push(`rules/${f} must default-export defineRule({ rule: ${Number(f.slice(0, -3))}, ... })`);
     else mods.push(mod);
   }

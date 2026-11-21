@@ -35,7 +35,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { ENGINE_VERSION } from "../src/engine/api.js";
-import { catalogClaimProblems, checkFileClaims, claimMap, hookClaimProblems, knownNumbers, worksWith } from "../src/engine/claims.js";
+import { checkFileClaims, claimMap, hookClaimProblems, knownNumbers, worksWith } from "../src/engine/claims.js";
+import { catalogClaimProblems } from "../src/engine/catalog-claims.js";
 import { buildRegistry, readCatalog } from "../src/lib/catalog.js";
 import { lintModule } from "../src/engine/lint.js";
 import { checkRulebook } from "../src/engine/rulesmd.js";
@@ -218,6 +219,9 @@ export function checkTree(dirIn, label, { starter = false, skipTests = false } =
   try { verdict = JSON.parse(chk.stdout.trim().split("\n").pop()); } catch { fail(`${label}: the module check did not run:\n${chk.out.slice(-1500)}`); }
   if (verdict.problems.length) fail(`${label}: ${verdict.problems.join("\n  ")}`);
   // The hooks the LOADED modules have must each be a tagged function the checker can see (closes any shape the line scan misses).
+  const hookProblems = files.flatMap((f) => hookClaimProblems(`rules/${f}`, sources[`rules/${f}`], verdict.hooks?.[parseInt(f)] ?? []));
+  if (hookProblems.length) fail(`${label}: rule claims failed:\n  ${hookProblems.join("\n  ")}`);
+
   // The catalog (rules 701-705): the attributes the modules define and what each kind needs become the registry and the required
   // lists; catalog.json (none = no entries) is held against them; the three catalog claim checks run on the modules' code.
   const built = buildRegistry(verdict.exported ?? []);
@@ -227,8 +231,6 @@ export function checkTree(dirIn, label, { starter = false, skipTests = false } =
   const catalogPath = join(dir, "catalog.json");
   const read = readCatalog(existsSync(catalogPath) ? readJson(catalogPath, `${label}: catalog.json`) : [], built);
   if ("errors" in read) fail(`${label}: ${read.errors.join("\n  ")}`);
-  const hookProblems = files.flatMap((f) => hookClaimProblems(`rules/${f}`, sources[`rules/${f}`], verdict.hooks?.[parseInt(f)] ?? []));
-  if (hookProblems.length) fail(`${label}: rule claims failed:\n  ${hookProblems.join("\n  ")}`);
 
   let testSummary = "skipped";
   if (!skipTests) {

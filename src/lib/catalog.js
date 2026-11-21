@@ -160,16 +160,16 @@ function sortAttrs(kind, attrsIn, flavorIn, needsBuild, ctx, drafting) {
       const d = definitionOf(ctx, kind, key);
       const r = readValue(d.type, v, d);
       if (r.error) {
-        if (!drafting && from === "flavor") { if (!(key in flavor) && !(key in attrs)) flavor[key] = readScalar(v).value ?? clean(v); continue; }
+        if (!drafting && from === "flavor") { if (!Object.hasOwn(flavor, key) && !Object.hasOwn(attrs, key)) { const f = readScalar(v); if (f.error) return { error: `${key} ${f.error}` }; flavor[key] = f.value; } continue; }
         return { error: `${key} ${r.error}` };
       }
-      if (from === "attrs" || !(key in attrs)) attrs[key] = r.value;
+      if (from === "attrs" || !Object.hasOwn(attrs, key)) attrs[key] = r.value;
       delete flavor[key];
     } else if (cls === "needs-build") {
       const r = readScalar(v);
       if (r.error) return { error: `${key} ${r.error}` };
-      if (from === "attrs" || !(key in attrs)) attrs[key] = r.value;
-    } else if (!(key in attrs)) {
+      if (from === "attrs" || !Object.hasOwn(attrs, key)) attrs[key] = r.value;
+    } else if (!Object.hasOwn(attrs, key)) {
       const r = readScalar(v);
       if (r.error) return { error: `${key} ${r.error}` };
       flavor[key] = r.value;
@@ -195,7 +195,8 @@ export function readEntryDraft(m, ctx = {}) {
   if (name.length > LIMITS.name) return { error: `A catalog entry's name is at most ${LIMITS.name} characters.` };
   const out = { kind: "entry", name };
   const raw = m.catalogKind ?? null;
-  const kind = raw === null || raw === "" ? null : String(raw).toLowerCase();
+  if (raw !== null && typeof raw !== "string") return { error: "An entry's kind must be one of the kinds' names." };
+  const kind = raw === null || raw === "" ? null : raw.toLowerCase();
   if (kind !== null && !KIND_IDS.includes(kind)) return { error: `"${clean(raw).slice(0, 30)}" is not a kind of entry. The kinds are ${KIND_IDS.join(", ")}.` };
   for (const f of ["attrs", "flavor"]) if (m[f] !== undefined && m[f] !== null && !isObject(m[f])) return { error: `An entry's ${f} must be a list of keys and values.` };
   let needsBuild = [];
@@ -272,7 +273,7 @@ export function readCatalog(raw, ctx = {}) {
     const name = clean(e.name);
     if (!name || name.length > LIMITS.name) return bad(`name must be 1 to ${LIMITS.name} characters`);
     if (names.has(`${kind}|${name.toLowerCase()}`)) return bad(`there is already a ${kind} called ${name}`);
-    for (const f of ["attrs", "flavor"]) if (e[f] !== undefined && !isObject(e[f])) return bad(`${f} must be a list of keys and values`);
+    for (const f of ["attrs", "flavor"]) if (e[f] !== undefined && e[f] !== null && !isObject(e[f])) return bad(`${f} must be a list of keys and values`);
     const s = sortAttrs(kind, e.attrs ?? {}, e.flavor ?? {}, [], ctx, false);
     if (s.error) return bad(s.error);
     const out = { id: e.id, name, kind, attrs: s.attrs, flavor: s.flavor };
@@ -284,7 +285,7 @@ export function readCatalog(raw, ctx = {}) {
     if (!isObject(art) || !Array.isArray(art.saved ?? []) || (art.saved ?? []).length > LIMITS.saved) return bad("art must hold a list of saved drawings and a default");
     const saved = [];
     for (const d of art.saved ?? []) {
-      if (!isObject(d) || typeof d.key !== "string" || !d.key || d.key.length > LIMITS.artKey) return bad("each saved drawing needs a key");
+      if (!isObject(d) || typeof d.key !== "string" || !/^[A-Za-z0-9._\/-]{1,200}$/.test(d.key) || d.key.includes("..") || saved.some((x) => x.key === d.key)) return bad("each saved drawing needs its own key (letters, digits and . _ / -)");
       saved.push({ key: d.key, ...(typeof d.prompt === "string" && d.prompt ? { prompt: clean(d.prompt).slice(0, LIMITS.prompt) } : {}) });
     }
     const dflt = art.default ?? null;
@@ -312,7 +313,7 @@ export function buildRegistry(modules) {
         if (!isObject(a) || !KEY.test(String(a.key ?? ""))) { errors.push(`${at}: key must be lowercase letters and _`); continue; }
         if (!VALUE_TYPES.includes(a.type)) { errors.push(`${at}: type must be one of ${VALUE_TYPES.join(", ")}`); continue; }
         if (!Array.isArray(a.kinds) || !a.kinds.length || a.kinds.some((k) => !KIND_IDS.includes(k))) { errors.push(`${at}: kinds must be a list of ${KIND_IDS.join(", ")}`); continue; }
-        if (a.type === "choice" && (!Array.isArray(a.choices) || !a.choices.length || a.choices.length > LIMITS.choices || a.choices.some((c) => typeof c !== "string" || !clean(c)))) { errors.push(`${at}: a choice needs a list of choices`); continue; }
+        if (a.type === "choice" && (!Array.isArray(a.choices) || !a.choices.length || a.choices.length > LIMITS.choices || a.choices.some((c) => typeof c !== "string" || !clean(c) || clean(c) !== c || c.length > 40))) { errors.push(`${at}: a choice needs a list of short, trimmed choices`); continue; }
         if (a.default !== undefined && readValue(a.type, a.default, a).error) { errors.push(`${at}: default is not a ${a.type}`); continue; }
         if (a.missing !== undefined && (typeof a.missing !== "string" || clean(a.missing).length > 80)) { errors.push(`${at}: missing must be a few words`); continue; }
         if (a.meaning !== undefined && (typeof a.meaning !== "string" || a.meaning.length > 300)) { errors.push(`${at}: meaning must be one line`); continue; }
@@ -320,7 +321,8 @@ export function buildRegistry(modules) {
         registry[a.key] = { key: a.key, type: a.type, kinds: [...a.kinds], ...(a.choices ? { choices: [...a.choices] } : {}), ...(a.default !== undefined ? { default: a.default } : {}), ...(a.missing ? { missing: clean(a.missing) } : {}), ...(a.meaning ? { meaning: clean(a.meaning) } : {}), rule: m.rule };
       }
     }
-    if (m.required !== undefined && m.rule === 704) {
+    if (m.required !== undefined && m.rule !== 704) { errors.push(`rules/${m.rule}.ts: only rule 704 holds the required lists`); continue; }
+    if (m.required !== undefined) {
       if (!isObject(m.required)) { errors.push("rules/704.ts: required must map each kind to its list"); continue; }
       for (const [kind, list] of Object.entries(m.required)) {
         if (!KIND_IDS.includes(kind) || !Array.isArray(list)) { errors.push(`rules/704.ts: required.${kind} must be a list for one of ${KIND_IDS.join(", ")}`); continue; }
@@ -352,6 +354,7 @@ export function entryView(e, ctx = {}) {
   const flavor = isObject(e.flavor) ? e.flavor : {};
   const needsBuild = Array.isArray(e.needsBuild) ? e.needsBuild : [];
   const rows = [], missing = [];
+  /** @rule 703.1 */
   const ruleThere = (n) => !ctx.rules || ctx.rules.has(n);
   /** @rule 703.1 */
   const row = (key, state, d, raw) => {
@@ -377,11 +380,11 @@ export function entryView(e, ctx = {}) {
       const cls = classifyAttr(ctx.registry ?? {}, ctx.required ?? {}, kind, key, needsBuild);
       const d = definitionOf(ctx, kind, key);
       if (cls === "flavor") { flav.push([key, attrs[key]]); continue; }   // a key in attrs that no rule defines, the kind needs or the ticket builds
-      const state = !(key in attrs) ? "missing" : cls === "defined" ? "defined" : cls === "required" ? "no-rule" : "not-built";
+      const state = !Object.hasOwn(attrs, key) ? "missing" : cls === "defined" ? "defined" : cls === "required" ? "no-rule" : "not-built";
       rows.push(row(key, state, d, attrs[key]));   // a value that does not read as its type turns the row into "missing" (703.1)
     }
     // the registry's attributes the kind uses, absent: only the ones with a `missing` state to show
-    for (const d of Object.values(ctx.registry ?? {})) if (d.kinds.includes(kind) && !(d.key in attrs) && d.missing && !rows.some((r) => r.key === d.key)) rows.push(row(d.key, "missing", { ...d, source: "registry" }, undefined));
+    for (const d of Object.values(ctx.registry ?? {})) if (d.kinds.includes(kind) && !Object.hasOwn(attrs, d.key) && d.missing && !rows.some((r) => r.key === d.key)) rows.push(row(d.key, "missing", { ...d, source: "registry" }, undefined));
   } else for (const [key, v] of Object.entries(attrs)) flav.push([key, v]);
   const flavorRows = [...flav, ...Object.entries(flavor).filter(([key]) => !flav.some(([f]) => f === key))]
     .map(([key, v]) => ({ key, label: labelOf(key), shown: typeof v === "boolean" ? (v ? "Yes" : "No") : String(v) }));

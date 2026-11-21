@@ -3,12 +3,12 @@
 # Fay's W1 (approved) makes an item, a 2x1 structure and a creature (hearts, flies waiting for a rule) and two rules.
 # Checks the Workshop's catalog groups, an entry's page and its flavor expander, the ticket's Makes cards, and the draft form's kind picker
 # and required fields, in light and dark at 1280 and 390, no sideways scroll and no console errors. "ok"/"FAIL" lines; any FAIL exits 1.
-# Usage: browser-catalog.py <base> <screenshot dir or -> <Eli's session cookie>
-import re, sys
+# Usage: browser-catalog.py <base> <screenshot dir or -> <Eli's session cookie> <Eli's draft, with data the form does not show>
+import json, re, sys
 from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
 
-base, out, cookie = sys.argv[1:4]
+base, out, cookie, keep_ticket = sys.argv[1:5]
 host = urlparse(base).hostname
 failed = []
 SLUG = "catalogued"
@@ -81,6 +81,21 @@ with sync_playwright() as p:
         page.keyboard.press("Escape")
         check(f"{tag}: no console errors", not errors, str(errors))
         c.close()
+    # ---- Save by hand keeps what the form does not show: an attribute another kind needs, waiting for its rule, flavor, a kind-less entry, a draft rule
+    c, page, errors = new_page(b, 1280, 900, "light")
+    mk = lambda: page.evaluate("(n) => fetch('/catalogued/api/tickets/' + n).then(r => r.json()).then(j => JSON.stringify(j.ticket.makes))", keep_ticket)
+    before = mk()
+    page.click("#tab-workshop"); page.click(f"#p-workshop [data-ticket='{keep_ticket}']"); page.wait_for_selector("#wfTitle")
+    check("the draft's form lists a draft-only rule with a Remove button, and no field for the creature's size (a structure's attribute)", "A creature that flies can cross walls." in text(page, "#mroot .wkdraft") and page.locator('#mroot [data-w="rmdraft"]').count() == 1 and page.locator("#wfEa0-size").count() == 0)
+    page.click('[data-w="save"]'); page.wait_for_selector("#mroot .vmsg")
+    check("Save by hand changes nothing it does not edit: the stored makes hold the same data before and after (the order of an entry's keys may differ)", json.loads(mk()) == json.loads(before), before + " -> " + mk())
+    page.select_option("#wfEk1", "creature"); page.wait_for_selector("#wfEa1-hearts")
+    check("giving the kind-less entry a kind brings its held attribute into the kind's field: Hearts 3", page.input_value("#wfEa1-hearts") == "3")
+    page.click('[data-w="rmdraft"]'); page.wait_for_function("document.querySelectorAll('#mroot .wkdraft').length === 0")
+    page.click('[data-w="save"]'); page.wait_for_selector("#mroot .vmsg")
+    after = mk()
+    check("removing the draft rule and saving takes the rule out and keeps the rest", "A creature that flies" not in after and '"needsBuild":["size"]' in after and '"copiedFrom":"C2"' in after and '"catalogKind":"creature","attrs":{"hearts":3}' in after.replace(" ", ""), after)
+    check("no console errors", not errors, str(errors)); c.close()
     # ---- the draft form: a kind picker and the kind's required fields
     for w, h, scheme in [(1280, 900, "light"), (390, 844, "dark")]:
         tag = f"{w}-{scheme}"
