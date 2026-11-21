@@ -256,7 +256,18 @@ try {
   ref(H.E, "sh31", 1); ref(H.E, "live", 1);              // the same bytes saved on two tickets, one of them Shelved: the object stays
   ref(H.F, "sh31", 0);                                   // an unsaved drawing of the Shelved one: no art/ object to keep
   for (const h of [H.A, H.B, H.C, catalogHash, H.E, H.F, H.Z]) { r2Put(state, tmpKey(h), stubPng(1)); r2Put(state, artKey(h), stubPng(1)); }   // H.Z: in the bucket, in no table
-  const cron = async () => { const r = await fetch(`${srv.base}/__scheduled?cron=15+3+*+*+*`, { signal: AbortSignal.timeout(30000) }); await r.text(); return r.status; };
+  // On CI this fetch has failed ("fetch failed", no response at all) 3 times in about 6 runs of shard 1, never alone and never on the Mac, on
+  // identical code; the sweep itself passes whenever it is reached. Until the cause is found (issue: art sweep CI flake), a connection-level failure
+  // is logged with its cause and the server's log, and retried once. A second failure, or any real answer, is reported as is.
+  const cron = async (retry = true) => {
+    try { const r = await fetch(`${srv.base}/__scheduled?cron=15+3+*+*+*`, { signal: AbortSignal.timeout(30000) }); await r.text(); return r.status; }
+    catch (e) {
+      if (!retry || e?.name === "TimeoutError") throw e;
+      console.log("  note  the sweep cron fetch failed (" + (e?.cause?.code || e?.message) + "); retrying once. Server log tail:\n" + srv.log().slice(-3000));
+      await new Promise((res) => setTimeout(res, 2000));
+      return cron(false);
+    }
+  };
   check("the sweep cron answers", await cron() === 200);
   const has = (k) => r2Get(state, k) !== null;
   check("the drawing that only a ticket Shelved 31 days ago saved is deleted from art/", !has(artKey(H.A)));
