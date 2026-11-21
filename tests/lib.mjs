@@ -25,6 +25,16 @@ globalThis.fetch = (input, init) => {
   headers.set("connection", "close");
   return realFetch(input, { ...init, headers });
 };
+// The python that runs the Playwright browser checks (tests/browser-*.py, screenshot.py). PYTHON wins when set (CI sets it);
+// otherwise the first of /usr/local/bin/python3 (the Mac mini's, which has playwright) and `python3` that can import
+// playwright, otherwise plain `python3` (the check then fails or skips with a clear message). Resolved once, here.
+export const PYTHON = (() => {
+  if (process.env.PYTHON) return process.env.PYTHON;
+  for (const py of ["/usr/local/bin/python3", "python3"]) {
+    try { execFileSync(py, ["-c", "import playwright"], { stdio: "ignore", timeout: 20000 }); return py; } catch {}
+  }
+  return "python3";
+})();
 const WRANGLER = pjoin(ROOT, "node_modules", ".bin", "wrangler");
 // GAMES_SOURCE: wrangler's [build] step (scripts/bundle-games.mjs) reads the fixture games in tests/fixtures/games
 // instead of fetching real ones from GitHub, so tests never reach the network. BUNDLE_SKIP_TESTS: the bundle's own

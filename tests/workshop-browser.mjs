@@ -5,7 +5,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
-import { ROOT, createGame, d1, join, migrate, newState, startPlaying, startRulesStub, startServer, freePort } from "./lib.mjs";
+import { ROOT, createGame, d1, join, migrate, newState, startPlaying, startRulesStub, startServer, freePort, PYTHON } from "./lib.mjs";
 
 const shots = process.env.WORKSHOP_SHOTS || "";
 if (shots) mkdirSync(shots, { recursive: true });
@@ -44,7 +44,7 @@ try {
   const cookie = [...ada.jar].find(([k]) => k === "s|/shop")[1];
   const vcookie = "-";
   if (process.env.WORKSHOP_SERVE) { console.log("SERVE", srv.base, cookie); await new Promise((res) => setTimeout(res, Number(process.env.WORKSHOP_SERVE) * 1000)); }
-  const r = await promisify(execFile)("/usr/local/bin/python3", [ROOT + "/tests/browser-workshop.py", srv.base, shots || "-", cookie, vcookie], { timeout: 240000, maxBuffer: 1 << 24 });
+  const r = await promisify(execFile)(PYTHON, [ROOT + "/tests/browser-workshop.py", srv.base, shots || "-", cookie, vcookie], { timeout: 240000, maxBuffer: 1 << 24 });
   process.stdout.write(r.stdout);
   // Then a Workshop with many tickets: a Ready one (Bo can't pay), a refused one of Ada's, and 60 closed ones, so the list shows the
   // live work and 5 closed, and "All tickets" pages 50 at a time (tests/browser-workshop-list.py).
@@ -55,7 +55,7 @@ try {
     ('ref', '${gid}', 41, '${id("Ada")}', 'A very large hat', 'A hat.', '[]', 'Refused', 0, 1, '2026-11-17T08:00:00.000Z', '2026-11-18T08:00:00.000Z', '2026-11-18T08:00:00.000Z')`);
   d1(state, `INSERT INTO ticket_log (ticket_id, day, kind, text, at) VALUES ('rdy', 1, 'ready', 'Ready: P9 passed. Bo has 1 of the 3 points it costs; it joins the queue when they can pay.', '2026-11-19T08:00:00.000Z'), ('ref', 1, 'refused', 'Refused: it names nothing to make.', '2026-11-18T08:00:00.000Z')`);
   d1(state, `WITH RECURSIVE c(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM c WHERE i < 60) INSERT INTO tickets (id, game_id, number, player_id, title, brief, state, created_at, updated_at) SELECT 'old' || i, '${gid}', 100 + i, '${id("Cy")}', 'Old ticket ' || i, 'Done long ago.', CASE WHEN i % 3 = 0 THEN 'Shelved' ELSE 'Done' END, '2026-10-01T08:00:00.000Z', '2026-10-' || printf('%02d', 1 + i / 3) || 'T08:00:00.000Z' FROM c`);
-  const r2 = await promisify(execFile)("/usr/local/bin/python3", [ROOT + "/tests/browser-workshop-list.py", srv.base, shots || "-", cookie], { timeout: 240000, maxBuffer: 1 << 24 });
+  const r2 = await promisify(execFile)(PYTHON, [ROOT + "/tests/browser-workshop-list.py", srv.base, shots || "-", cookie], { timeout: 240000, maxBuffer: 1 << 24 });
   process.stdout.write(r2.stdout);
   // Then a game with a catalog (the fixture game "catalogued": the starter rules, rule 602 defining speed, seven entries in catalog.json):
   // the Workshop's catalog groups, an entry's page with its flavor expander, a ticket whose Makes cards show a kind, attribute rows with
