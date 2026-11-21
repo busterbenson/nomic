@@ -32,6 +32,17 @@ database_name = "promptocracy"
 database_id = "639f045e-df2d-406e-91a4-a1facc4ca2fe"
 migrations_dir = "migrations"
 
+# Generated art (rules 701.1, 705.1; src/lib/art.js). One R2 bucket holds every drawing under tmp/<sha256> (as made; a lifecycle rule
+# on the bucket, tmp-30d, deletes tmp/ objects after 30 days) and art/<sha256> (saved to an entry; never expires on its own). Keys are
+# the SHA-256 of the bytes. The bucket is private: the Worker serves a drawing only through /<slug>/art/<sha256>.
+[[r2_buckets]]
+binding = "ART"
+bucket_name = "promptocracy-art"
+
+# Workers AI draws the pictures (src/lib/art.js). This binding is the only way in: no key, no REST call.
+[ai]
+binding = "AI"
+
 [vars]
 # PRODUCTION values. Cloudflare Email Sending is set up for promptocracy.us, and the
 # sender is Chalant (the moderator), not "Promptocracy". Local development and the tests
@@ -66,7 +77,16 @@ database_name = "promptocracy-preview"
 # Keep wrangler.preview-migrations.toml pointing at the same database.
 database_id = "9f652287-3859-4597-9c1b-c92b9185d9a7"
 
+[[previews.r2_buckets]]
+binding = "ART"
+bucket_name = "promptocracy-art-preview"
+
+# Previews do not inherit the [ai] binding either.
+[previews.ai]
+binding = "AI"
+
 # The midnight run (src/lib/day.ts runMidnight): every 5 minutes, lock the days that have ended in each game's time zone,
 # process them and open the next. The lock itself does not wait for it: every write checks the clock (rule 107.1).
 [triggers]
-crons = ["*/5 * * * *"]
+# The second cron is the art sweep (src/lib/art-sweep.ts), once a day at 03:15 UTC.
+crons = ["*/5 * * * *", "15 3 * * *"]

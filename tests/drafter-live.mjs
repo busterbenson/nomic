@@ -5,7 +5,7 @@
 //        [--rules RULES.md] [--flags none|a,b] [--max-calls 300] [--ledger file] [--out results.json] [--concurrency 4] [--dry-run] [--list]
 //
 // It runs the REAL drafter (the same Messages API call the Worker makes) and the same checks the draft route runs
-// (readRequest, draftRewording, draftOf, fixedRefusal) over a real game's RULES.md, then grades each answer IN CODE, never
+// (readRequest, draftRewording, draftOf, notWiredRefusal) over a real game's RULES.md, then grades each answer IN CODE, never
 // by a model. The key is PROMPTOCRACY_MODEL_API_KEY, read from the environment or from ~/chalantbot/.env; it is passed to
 // the drafter as MODEL_API_KEY (MODEL_BASE_URL unset = the real API) and is never printed, logged or written to a result.
 // Every model call is counted in code and the run stops at the cap (--max-calls, counted across runs in the ledger file).
@@ -16,7 +16,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { ROOT } from "./lib.mjs";
-import { clauseText, draftOf, fixedParts, fixedRefusal, needsModel, parseBook, readRequest, textOf } from "../src/lib/proposals.js";
+import { clauseText, draftOf, needsModel, notWiredParts, notWiredRefusal, parseBook, readRequest, textOf } from "../src/lib/proposals.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PRICE_IN = 0.10 / 1e6, PRICE_OUT = 0.50 / 1e6;   // dollars per token (Haiku 5.5)
@@ -131,8 +131,8 @@ async function pipeline(drafter, book, md, c, env) {
   }
   const d = draftOf(book, req, after);
   if ("error" in d) return { outcome: "refused", reason: "request", message: d.error };
-  const refused = fixedRefusal(book, { ...req, ...d, settings });
-  if (refused) return { outcome: "refused", reason: "110.1", message: refused };
+  const refused = notWiredRefusal(book, { ...req, ...d, settings });
+  if (refused) return { outcome: "refused", reason: "not wired", message: refused };
   const conflicts = [...new Set([...d.conflicts, ...modelConflicts])];
   return { outcome: "drafted", req, before_text: d.before_text, after_text: d.after_text, conflicts, settings, drafted_by: after === null ? "code" : "model" };
 }
@@ -176,11 +176,11 @@ export function codeDraftProblems(r) {
   return out;
 }
 
-// The protected parts (110.1) inside the target, which a draft must leave word for word.
+// The parts not wired yet inside the target, which a draft must leave word for word.
 export function protectedProblems(book, c, after, settings) {
   const node = book.byNum[c.target], out = [];
   const paras = String(after).split(/\n\s*\n/).map(plain);
-  for (const p of fixedParts(book)) {
+  for (const p of notWiredParts(book)) {
     if (p === c.target) {
       if (plain(after) !== plain(textOf(node))) out.push(`protected ${p} changed`);
     } else if (p.startsWith(`${c.target}.`) && book.byNum[p]?.kind === "clause") {
