@@ -7,15 +7,34 @@ Every function that carries out the game should say which rule it implements, wi
 `src/` is only reported for now: these functions have no claim yet. Site plumbing such as sign-in and email goes
 under rule 101 or 102; a follow-up change claims them and moves `src/` into the strict set.
 
-140 of 382 functions outside `src/engine/` are unclaimed.
+158 of 468 functions outside `src/engine/` are unclaimed.
 
 ## src/index.ts (5)
 
-- line 62: `secure`
-- line 72: `notFound`
-- line 78: `run`
-- line 83: `route`
-- line 185: `fetch`
+- line 65: `secure`
+- line 75: `notFound`
+- line 81: `run`
+- line 86: `route`
+- line 197: `fetch`
+
+## src/lib/art-sweep.ts (1)
+
+- line 29: `wanted`
+
+## src/lib/art.js (6)
+
+- line 105: `crcTable`
+- line 106: `crc32`
+- line 107: `u32`
+- line 108: `chunk`
+- line 112: `px`
+- line 123: `concat`
+
+## src/lib/art.ts (3)
+
+- line 74: `queueNew`
+- line 93: `fail`
+- line 122: `gateOf`
 
 ## src/lib/auth.ts (6)
 
@@ -47,6 +66,10 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 - line 20: `parseFrom`
 - line 25: `sendEmail`
 
+## src/lib/escalate.js (1)
+
+- line 31: `line`
+
 ## src/lib/geometry.js (13)
 
 - line 15: `validCoord`
@@ -63,9 +86,12 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 - line 64: `chartedAround`
 - line 69: `islandCoords`
 
-## src/lib/gremlin.js (1)
+## src/lib/gremlin.js (4)
 
-- line 288: `def`
+- line 228: `answerSchema`
+- line 304: `def`
+- line 347: `readGremlinAnswer`
+- line 468: `clip`
 
 ## src/lib/links.ts (2)
 
@@ -116,18 +142,18 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/lib/settings.js (12)
 
-- line 49: `validTimeZone`
-- line 56: `isInt`
-- line 57: `isObj`
-- line 58: `evenInt`
-- line 62: `max_players`
-- line 66: `mcp_enabled`
-- line 74: `exactly`
-- line 83: `spawnSpots`
-- line 84: `inside`
-- line 92: `validateSettings`
-- line 112: `getSettings`
-- line 126: `settingsForSize`
+- line 54: `validTimeZone`
+- line 61: `isInt`
+- line 62: `isObj`
+- line 63: `evenInt`
+- line 67: `max_players`
+- line 71: `mcp_enabled`
+- line 81: `exactly`
+- line 90: `spawnSpots`
+- line 91: `inside`
+- line 99: `validateSettings`
+- line 119: `getSettings`
+- line 133: `settingsForSize`
 
 ## src/lib/tickets.js (1)
 
@@ -135,33 +161,37 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/lib/util.ts (27)
 
-- line 43: `validShape`
-- line 55: `mixHex`
-- line 57: `legacyInfo`
-- line 61: `colorInfo`
-- line 62: `isOfferedColor`
-- line 65: `colorOf`
-- line 71: `who`
-- line 80: `json`
-- line 90: `readJson`
-- line 99: `base64url`
-- line 105: `randomToken`
-- line 107: `sha256Hex`
-- line 114: `normCode`
-- line 116: `validEmail`
-- line 119: `normEmail`
-- line 123: `cleanName`
-- line 130: `esc`
-- line 135: `siteUrl`
-- line 145: `validSlug`
-- line 151: `plain`
-- line 152: `validRepo`
-- line 154: `validRulesPath`
-- line 156: `validRef`
-- line 159: `gameBase`
-- line 161: `seatsTaken`
-- line 168: `playersLine`
-- line 174: `seatLimit`
+- line 57: `validShape`
+- line 69: `mixHex`
+- line 71: `legacyInfo`
+- line 75: `colorInfo`
+- line 76: `isOfferedColor`
+- line 79: `colorOf`
+- line 85: `who`
+- line 94: `json`
+- line 104: `readJson`
+- line 113: `base64url`
+- line 119: `randomToken`
+- line 121: `sha256Hex`
+- line 128: `normCode`
+- line 130: `validEmail`
+- line 133: `normEmail`
+- line 137: `cleanName`
+- line 144: `esc`
+- line 149: `siteUrl`
+- line 159: `validSlug`
+- line 165: `plain`
+- line 166: `validRepo`
+- line 168: `validRulesPath`
+- line 170: `validRef`
+- line 173: `gameBase`
+- line 175: `seatsTaken`
+- line 182: `playersLine`
+- line 188: `seatLimit`
+
+## src/routes/api-art.ts (1)
+
+- line 64: `done`
 
 ## src/routes/api-ballot.ts (1)
 
@@ -169,7 +199,7 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/routes/api-chat.ts (1)
 
-- line 171: `stateNow`
+- line 179: `stateNow`
 
 ## src/routes/api-day.ts (1)
 
@@ -183,9 +213,10 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 - line 4: `get`
 
-## src/routes/api-moderator.ts (1)
+## src/routes/api-moderator.ts (2)
 
-- line 35: `unauthorized`
+- line 44: `unauthorized`
+- line 209: `num`
 
 ## src/routes/api-notifications-read.ts (1)
 
@@ -204,11 +235,16 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 - line 11: `text`
 - line 14: `get`
 
+## src/routes/api-starling.ts (2)
+
+- line 34: `no`
+- line 167: `stateNow`
+
 ## src/routes/api-tickets.ts (3)
 
-- line 30: `out`
-- line 285: `undo`
-- line 354: `need`
+- line 32: `out`
+- line 295: `undo`
+- line 367: `need`
 
 ## src/routes/landing.ts (2)
 

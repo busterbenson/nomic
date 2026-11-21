@@ -22,9 +22,11 @@ import { CLOSED_STATES, COMMISSION_DRAFT_SQL, EDIT_GUARD, LIVE_STATES, OPEN_DRAF
 import { refusalBody, turnBlock } from "../lib/turn";
 import { COLS, FROM, ticketView } from "../lib/ticket-view";
 import { Ctx, colorOf, json, nowIso, readJson } from "../lib/util";
+import { PENDING_SHOWN_MS, finishReply, reserveReply } from "../lib/thread";
 import { bookFor, confirm as confirmProposal } from "./api-proposals";
 import { catalogFor, viewContext } from "./api-catalog";
 import { entryView } from "../lib/catalog.js";
+import { overlay } from "../lib/art";
 
 type Out = { status: number; body: any };
 const out = (body: any, status = 200): Out => ({ status, body });
@@ -112,7 +114,7 @@ async function page(ctx: Ctx, r: any, player: any, nowMs: number) {
     env.DB.prepare("SELECT text, done, done_day FROM ticket_tasks WHERE ticket_id = ? ORDER BY pos").bind(r.id).all(),
     env.DB.prepare("SELECT day, kind, text, at FROM ticket_log WHERE ticket_id = ? ORDER BY id").bind(r.id).all(),
     env.DB.prepare(
-      `SELECT x.id, x.author_kind, x.body, x.at, p.display_name AS name, p.color FROM ticket_posts x LEFT JOIN players p ON p.game_id = x.game_id AND p.id = x.player_id WHERE x.ticket_id = ? ORDER BY x.id`,
+      `SELECT x.id, x.author_kind, x.body, x.at, x.reply_to, p.display_name AS name, p.color FROM ticket_posts x LEFT JOIN players p ON p.game_id = x.game_id AND p.id = x.player_id WHERE x.ticket_id = ? ORDER BY x.id`,
     ).bind(r.id).all(),
   ]);
   let edit: { allowed: boolean; reason?: string } = { allowed: false };
@@ -133,16 +135,24 @@ async function page(ctx: Ctx, r: any, player: any, nowMs: number) {
     const { game: g, day } = await loadToday(env, game, nowMs);
     if (g.status === "playing" && day && isLocked(g, day, nowMs)) post = { allowed: false, reason: lockMessage(day.n), locked: true };
   }
+  // Is Gremlin answering one of YOUR posts on this ticket right now? A reservation from the last minute that is still pending (rule 804.1).
+  let replyPending = false;
+  if (player) {
+    const p: any = await env.DB.prepare("SELECT 1 AS x FROM agent_calls WHERE game_id = ? AND player_id = ? AND agent = 'gremlin' AND purpose = 'thread' AND outcome = 'pending' AND reason = ? AND at > ? LIMIT 1")
+      .bind(game.id, player.id, `W${r.number}`, nowIso(nowMs - PENDING_SHOWN_MS)).first();
+    replyPending = !!p;
+  }
   // each entry it makes comes with the view a card shows (rules 701.1, 704.2): its kind, attribute rows and flavor, in the order of the entries in `makes`
   const view = ticketView(r, player?.id);
   const cat = viewContext(catalogFor(game));
   return {
     ...view,
-    entry_views: view.makes.filter((m: any) => m.kind === "entry").map((m: any) => entryView(m, cat)),
+    reply_pending: replyPending,
+    entry_views: await overlay(env, r.id, view.makes, view.makes.filter((m: any) => m.kind === "entry").map((m: any) => entryView(m, cat)), !!player && r.player_id === player.id, nowMs),   // + each entry's drawings (rule 801.2)
     tasks: (tasks.results as any[]).map((t) => ({ text: t.text, done: !!t.done, done_day: t.done_day ?? null })),
     log: (log.results as any[]).map((l) => ({ day: l.day ?? null, kind: l.kind, text: l.text, at: l.at })),
     posts: (posts.results as any[]).map((x) => ({
-      id: x.id, at: x.at, body: x.body, author: x.author_kind,
+      id: x.id, at: x.at, body: x.body, author: x.author_kind, reply_to: x.reply_to ?? null,
       by: x.author_kind === "player" && x.name ? { name: x.name, color: colorOf(x.color) } : undefined,
     })),
     can: { edit, confirm: edit, post, reopen },
@@ -162,7 +172,7 @@ export const one = async (ctx: Ctx) => {
 
 // Your draft, for a write: the player's own ticket, still a draft, and the day open for them to propose.
 /** @rule 801.1 */
-async function mine(ctx: Ctx, player: any, raw: unknown, nowMs: number): Promise<{ t: any; game: any } | Out> {
+export async function mine(ctx: Ctx, player: any, raw: unknown, nowMs: number): Promise<{ t: any; game: any } | Out> {
   const { env } = ctx;
   const { game, day, turn } = await loadToday(env, ctx.data.game!, nowMs, player.id);
   const blocked = turnBlock(game, day, turn, player, "propose", nowMs);
@@ -346,6 +356,9 @@ export async function addPost(ctx: Ctx, player: any, raw: unknown, body: any, no
     const n = day?.n ?? g.day;
     return out(refusalBody({ status: 423, error: lockMessage(n), processing_day: n }), 423);
   }
+  // Gremlin answers (rule 804.1) after this returns: the page shows his reply when it lands (a pending reply is on the page, see `reply_pending`).
+  const reserved = await reserveReply(env, g, player, t, nowMs);
+  if (reserved !== null) ctx.waitUntil(finishReply(env, g, player, t, Number(res.meta.last_row_id), reserved, nowMs));
   return out({ ok: true, ticket: await page(ctx, t, player, nowMs) });
 }
 

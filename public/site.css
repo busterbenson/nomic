@@ -510,6 +510,7 @@ button.wpill:hover{background:var(--surface-2)}
 .tstate[data-state="Ready"],.tstate[data-state="Approved"],.tstate[data-state="Building"],.tstate[data-state="Done"]{border-color:var(--accent);color:var(--accent)}
 .tstate[data-state="Draft"],.tstate[data-state="Ready"],.tstate[data-state="Shelved"]{border-style:dashed}
 .tstate[data-state="Refused"],.tstate[data-state="Failed"]{border-color:var(--err);color:var(--err)}
+.tstate[data-state="Escalated"]{background:var(--warm1);border-color:var(--warm-line);color:var(--ink)}
 .tfilter{display:flex;flex-wrap:wrap;gap:6px;padding:4px 0 8px}
 button.pill{background:none;cursor:pointer;min-height:30px;font:inherit;font-family:var(--font-mono);font-size:.6rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:3px 9px}
 button.pill[aria-pressed="true"]{background:color-mix(in srgb,var(--accent) 16%,transparent)}
@@ -607,7 +608,8 @@ button.pill[aria-pressed="true"]{background:color-mix(in srgb,var(--accent) 16%,
 .chat .msg{display:flex;gap:7px;align-items:flex-end;max-width:100%}
 .chat .msg .bub{padding:8px 12px;border-radius:16px;font-size:.92rem;line-height:1.45;min-width:0;overflow-wrap:anywhere;white-space:pre-wrap}
 .chat .msg.cher .bub{background:var(--sea);border:1.5px solid var(--ink);border-bottom-left-radius:4px;max-width:88%}
-.chat .msg.cher.cont{padding-left:35px}
+.chat .msg.cher.cont,.chat .msg.chalant{padding-left:35px}
+.chat .msg .who{display:block;font-weight:700;font-size:.78rem;color:var(--accent);margin-bottom:2px}
 .chat .msg.cme{justify-content:flex-end}
 .chat .msg.cme .bub{background:var(--accent-tint);border-bottom-right-radius:4px;max-width:82%}
 .chat .ev{align-self:center;font-family:var(--font-mono);font-size:.6rem;color:var(--ink-muted);display:flex;gap:6px;align-items:center;padding:2px 10px;border-radius:999px;border:1px solid var(--line);background:var(--chat);text-align:center}
@@ -660,4 +662,41 @@ button.pill[aria-pressed="true"]{background:color-mix(in srgb,var(--accent) 16%,
   body.chat-sheet{overflow:hidden}
 }
 .wkprice{margin:0}
+/* Starling (rules 103.1, 106.2): the Rulebook's agent in the same window. Her slip is a draft proposal; past slips collapse to a line. */
+.chat .por.st,.chatfab .por.st{background:color-mix(in srgb,#2F3B52 22%,var(--surface))}
+.chat .ch-today{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 12px;border-bottom:1px solid var(--line);background:var(--chat);font-family:var(--font-mono);font-size:.6rem}
+.chat .ch-today .k{font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-muted)}
+.chat .ch-today .n{margin-left:auto;color:var(--ink-muted)}
+.chat .ppill{font-family:var(--font-mono);font-size:.62rem;font-weight:700;padding:1px 7px;border-radius:999px;background:var(--ink);color:var(--surface);white-space:nowrap}
+.chat .msg .bub .q{display:block;margin:6px 0 2px;padding:4px 0 4px 10px;border-left:2px solid var(--accent);font-size:.84rem;line-height:1.4;white-space:normal}
+.chat .msg .bub .q .rpill,.chat .msg .bub .q .pill{margin-right:6px}
+.chat .msg .bub .ctx{display:inline-flex;gap:4px;margin-right:6px;vertical-align:baseline}
+.chat .slip .hd .hdt{min-width:0;overflow-wrap:anywhere}
+.chat .slip .yw{color:var(--ink-muted);font-size:.84rem;overflow-wrap:anywhere}
+.chat .slip .tx{padding-left:10px;border-left:1.5px solid var(--ink);font-size:.88rem;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--ink)}
+.chat .slip .tx.del{text-decoration:line-through;color:var(--ink-muted)}
+.chat .slip .act{display:flex;gap:6px 10px;align-items:center;flex-wrap:wrap;border-top:1px solid color-mix(in srgb,var(--accent) 30%,transparent);padding-top:8px}
+.chat .slip .act .why{font-family:var(--font-mono);font-size:.62rem;color:var(--ink-muted);flex:1 1 8em}
+.chat .slip .act .linkbtn{margin-left:auto}
+.chat .slip .err{margin:0;font-size:.8rem;color:var(--err)}
+.chat .slip.locked{background:var(--surface);border:1.5px solid var(--accent);border-top:1.5px solid var(--accent)}
+.chat .slip.past{background:transparent;border:1px solid var(--line);border-top:1px solid var(--line);padding:8px 10px;gap:4px}
+.chat .slip.past .cstamp{font-size:.55rem;top:8px}
+.chat .slip.refused .cstamp{color:var(--err);border-color:var(--err)}
+.chat .slip.refused .tx{border-color:var(--err);color:var(--ink-muted)}
 /* ==== end of the chat window ==== */
+
+/* generated art (rules 701.1, 801.2): the drawing in the art slot, the strip of drawings, and the state beside it */
+.artimg{flex:none;width:72px;height:72px;border-radius:14px;border:1.5px solid var(--line);background:var(--surface-2);object-fit:cover;display:block}
+.artimg.big{width:120px;height:120px;border-radius:20px}
+.mkc.dim .artimg{opacity:.85}
+.arttile.drawing{border-style:dashed;animation:artpulse 1.4s ease-in-out infinite}
+@keyframes artpulse{50%{opacity:.55}}
+@media (prefers-reduced-motion:reduce){.arttile.drawing{animation:none}}
+.wkart{display:flex;flex-direction:column;gap:8px;min-width:0}
+.artbox{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.artact{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.artstrip{list-style:none;margin:0;padding:0;display:flex;gap:10px;flex-wrap:wrap}
+.artstrip li{display:flex;flex-direction:column;gap:4px;align-items:flex-start;padding:6px;border:1.5px solid var(--line);border-radius:12px;background:var(--surface)}
+.artstrip li.is-default{border-color:var(--ink-muted)}
+.artthumb{width:64px;height:64px;border-radius:8px;object-fit:cover;display:block;background:var(--surface-2)}

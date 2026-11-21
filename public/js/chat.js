@@ -19,6 +19,7 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&
 // The characters. Gremlin's portrait is the mockup's; Starling's comes with her.
 export const AGENTS = {
   gremlin: { key: "gremlin", name: "Gremlin", path: "gremlin", tab: "workshop", cls: "gr", placeholder: "Message Gremlin", symbol: "chat-gremlin" },
+  starling: { key: "starling", name: "Starling", path: "starling", tab: "rules", cls: "st", placeholder: "Message Starling", symbol: "chat-starling", proposals: true },
 };
 const SYMBOLS = `<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
 <symbol id="chat-gremlin" viewBox="0 0 40 40">
@@ -31,14 +32,28 @@ const SYMBOLS = `<svg width="0" height="0" style="position:absolute" aria-hidden
 <path d="M8 30 L30 30 Q32 38 20 38 Q8 38 8 30Z" fill="#6E7B62" stroke="#18202B" stroke-width="1"/>
 <path d="M29 26 L35 33 M33 25.5 a2.6 2.6 0 1 0 3.2 3.2" stroke="#9AA5B1" stroke-width="2" fill="none" stroke-linecap="round"/>
 </symbol>
+<symbol id="chat-starling" viewBox="0 0 40 40">
+<path d="M4 22 Q10 12 22 13 Q31 13 35 19 L38 17 L36 23 Q33 31 22 32 Q12 32 4 22Z" fill="#2F3B52" stroke="#18202B" stroke-width="1.2"/>
+<path d="M14 28 L10 37 M20 29 L19 37" stroke="#18202B" stroke-width="1.4" stroke-linecap="round"/>
+<path d="M8 21 Q14 17 22 18" stroke="#7F8FB0" stroke-width="1.2" fill="none"/>
+<circle cx="29" cy="17.5" r="2.2" fill="#fff" stroke="#18202B" stroke-width="1"/><circle cx="29.4" cy="17.6" r="1" fill="#18202B"/>
+<path d="M34 18.5 L39.5 20.5 L34 22.5Z" fill="#E3A33B" stroke="#18202B" stroke-width="1"/>
+<circle cx="15" cy="22" r=".8" fill="#fff"/><circle cx="19" cy="25" r=".8" fill="#fff"/><circle cx="23" cy="21" r=".8" fill="#fff"/><circle cx="12" cy="26" r=".8" fill="#fff"/>
+</symbol>
 <symbol id="chat-send" viewBox="0 0 20 20"><path d="M3 10 L17 3 L12 17 L10 11 Z" fill="currentColor"/></symbol>
 </defs></svg>`;
 
+// The two windows (Gremlin on the Workshop tab, Starling on the Rulebook) share ONE column and ONE pill in the page. Only the one whose tab is
+// showing may draw into them, place them or answer a click: `ACTIVE` is that agent's key.
+let ACTIVE = null;
+/** The settings a slip sets, as "key = value" (an object value as its numbers joined by x, a boolean as on / off): the drafter keeps a setting change out of the text. @rule 103.1 */
+export const settingsLine = (settings) => Object.entries(settings || {}).map(([k, v]) => `${k} = ${v && typeof v === "object" ? Object.values(v).join("x") : typeof v === "boolean" ? (v ? "on" : "off") : String(v)}`).join(", ");
 const LEFT_SHOWN = 10;   // "N left" appears in the last ten messages of the day
 
-export function createChat({ api, root, me, slug, agent = AGENTS.gremlin, rpill, wpill, onTicket }) {
-  const S = { msgs: [], next: null, state: null, ticket: null, slip: null, busy: false, draft: "", err: "", sheet: false, open: true, loaded: false, loading: false, tab: "", note: "" };
+export function createChat({ api, root, me, slug, agent = AGENTS.gremlin, rpill, wpill, onTicket, onProposals }) {
+  const S = { msgs: [], next: null, state: null, ticket: null, rule: null, live: null, slips: {}, lockErr: {}, slip: null, busy: false, draft: "", err: "", sheet: false, open: true, loaded: false, loading: false, tab: "", note: "" };
   const col = root.querySelector("#chatcol"), fab = root.querySelector("#chatfab");
+  const mine = () => ACTIVE === agent.key;
   if (!document.getElementById("chat-symbols")) { const d = document.createElement("div"); d.id = "chat-symbols"; d.innerHTML = SYMBOLS; document.body.appendChild(d); }
   const desktop = () => !!(window.matchMedia && matchMedia("(min-width: 900px)").matches);
   const reduced = () => !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
@@ -80,13 +95,64 @@ ${refused ? `<div class="tx">${esc(last.refusal)}</div>` : ""}
 <dt>Price</dt><dd>${esc(`${t.price} ${t.price === 1 ? "point" : "points"}`)}${t.price_reason ? `<span class="cwhy"> · ${esc(t.price_reason)}</span>` : ""}</dd></dl></section>`;
   }
 
+  // ---- Starling's slips: a draft proposal, as the drafter made it ------------------------------------------------------------------
+  const STAMPS = { draft: "DRAFT", confirmed: "LOCKED", on_ballot: "ON THE BALLOT", withdrawn: "UNLOCKED", passed: "PASSED", failed: "FAILED", enacted: "IN THE RULES", not_applied: "NOT APPLIED", approved: "APPROVED" };
+  const KIND = { amend: "Reword", addclause: "Add a clause", add: "Add a rule", repeal: "Repeal", move: "Move", mark: "Mark" };
+  const ppill = (n) => `<span class="ppill">${esc(n)}</span>`;
+  /** Is this proposal still the one the window is for: a draft, or locked in and not yet on the ballot? */
+  const alive = (sl) => !!sl && (sl.status === "draft" || sl.status === "confirmed");
+  /** The proposal the slip at the bottom of the log shows: the last one her lines pointed at, while it is still a draft or locked in. @rule 103.1 */
+  function liveId() {
+    const last = [...S.msgs].reverse().find((m) => m.proposal && S.slips[m.proposal]);
+    // no loaded line points at a slip (the draft is older than the page of history): the server names the newest one
+    const id = last ? last.proposal : S.live;
+    return id && alive(S.slips[id]) ? id : null;
+  }
+  /** One past slip, collapsed to a line and its outcome. @rule 103.1 */
+  function pastSlipHTML(id) {
+    const sl = S.slips[id];
+    if (!sl) return "";
+    const stamp = id === liveId() ? "" : sl.status === "draft" ? "REPLACED" : STAMPS[sl.status] || String(sl.status).toUpperCase();
+    return `<section class="slip past" aria-label="${esc(sl.n || "Draft")}"><span class="cstamp">${esc(stamp)}</span><div class="hd">${sl.n ? ppill(sl.n) : ""}<span class="hdt">${textHTML(sl.head || "")}</span></div>${sl.words ? `<div class="yw">${esc(`“${sl.words}”`)}</div>` : ""}</section>`;
+  }
+  /** The live draft: the change, scope, votes needed, conflicts, and Lock it in or Unlock with the reason beside a disabled one. @rule 103.1, 103.2, 103.3 */
+  function proposalSlipHTML() {
+    const id = liveId();
+    if (!id) return "";
+    const sl = S.slips[id], locked = sl.status === "confirmed";
+    const c = sl.can || {};
+    const why = (b) => (b && !b.allowed && b.reason ? `<span class="why">${esc(b.reason)}</span>` : "");
+    const needs = sl.needs ? `${esc(sl.needs.mark)} · ${esc(sl.needs.needed)} of ${esc(sl.needs.of)}` : esc(sl.mark || "");
+    const act = locked
+      ? `<span class="pill dash">On tomorrow's ballot</span><button type="button" class="linkbtn" data-c="unlock" data-id="${esc(id)}"${c.unlock && c.unlock.allowed ? "" : " disabled"}>Unlock</button>${why(c.unlock)}`
+      : `<button type="button" class="btn small" data-c="lock" data-id="${esc(id)}"${c.lock && c.lock.allowed ? "" : " disabled"}>Lock it in</button>${why(c.lock)}`;
+    const err = S.lockErr[id] ? `<p class="err" role="alert">${esc(S.lockErr[id])}</p>` : "";
+    return `<section class="slip${locked ? " locked" : ""}" aria-label="${esc(sl.n || "Draft")}"><span class="cstamp">${locked ? "LOCKED" : "DRAFT"}</span>
+<div class="hd">${sl.n ? ppill(sl.n) : ""}<span class="hdt">${textHTML(sl.head || "")}</span></div>
+${sl.words ? `<div class="yw">${esc(`Your words: “${sl.words}”`)}</div>` : ""}
+${sl.after_text ? `<div class="tx">${esc(sl.after_text)}</div>` : sl.before_text ? `<div class="tx del">${esc(sl.before_text)}</div>` : ""}
+<dl><dt>Change</dt><dd>${esc(KIND[sl.kind] || sl.kind)}${sl.target ? ` ${rpill(sl.target)}` : ""}</dd>${sl.settings && Object.keys(sl.settings).length ? `<dt>Sets</dt><dd>${esc(settingsLine(sl.settings))}</dd>` : ""}<dt>Needs</dt><dd>${needs}</dd><dt>Conflicts</dt><dd>${sl.conflicts && sl.conflicts.length ? sl.conflicts.map((n) => rpill(n)).join(" ") : "none"}</dd></dl>
+<div class="act">${act}</div>${err}</section>`;
+  }
+  /** The drafter said no: the reason, no button. @rule 103.1, 110.1 */
+  const refusedHTML = (m) => `<section class="slip refused" aria-label="Refused"><span class="cstamp err">REFUSED</span><div class="tx">${esc(m.refused.error)}</div></section>`;
+  /** "Today  P13 P14  2 of 3": what the player has locked in. @rule 103.2 */
+  function todayHTML() {
+    const t = S.state && S.state.today;
+    return t && agent.proposals ? `<div class="ch-today"><span class="k">Today</span>${(t.list || []).map(ppill).join("")}<span class="n">${esc(t.made)} of ${esc(t.limit)}</span></div>` : "";
+  }
+
   // ---- the log ------------------------------------------------------------------------------------------------------------
   /** One stored line. @rule 106.3 */
   function lineHTML(m, prev) {
     if (m.role === "event") return `<div class="ev">${esc(m.body)}</div>`;
-    if (m.role === "player") return `<div class="msg cme"><div class="bub">${esc(m.body)}</div></div>`;
+    if (m.role === "player") return `<div class="msg cme"><div class="bub">${m.rule ? `<span class="ctx">${rpill(m.rule)}</span>` : ""}${esc(m.body)}</div></div>`;
+    // Chalant's answer to an escalated turn (rule 106.4): his own line, named, not Gremlin's portrait
+    if (m.role === "chalant") return `<div class="msg cher chalant"><div class="bub"><b class="who">Chalant</b>${textHTML(m.body)}</div></div>`;
     const cont = prev && (prev.role === "agent" || prev.role === "excuse") && prev.date === m.date;
-    return `<div class="msg cher${cont ? " cont" : ""}">${cont ? "" : portrait(true)}<div class="bub">${textHTML(m.body)}</div></div>`;
+    const quotes = (m.quotes || []).map((q) => `<span class="q">${rpill(q.num)}${esc(q.text)}</span>`).join("");
+    const after = (m.refused ? refusedHTML(m) : "") + (m.proposal && m.proposal !== liveId() ? pastSlipHTML(m.proposal) : "");
+    return `<div class="msg cher${cont ? " cont" : ""}">${cont ? "" : portrait(true)}<div class="bub">${textHTML(m.body)}${quotes}</div></div>${after}`;
   }
   function logHTML() {
     const out = [];
@@ -97,7 +163,7 @@ ${refused ? `<div class="tx">${esc(last.refusal)}</div>` : ""}
       prev = m;
     }
     if (S.busy) out.push(`<div class="msg cher">${portrait(true)}<div class="bub"><span class="typing" aria-label="${esc(agent.name)} is typing"><i></i><i></i><i></i></span></div></div>`);
-    out.push(slipHTML());
+    out.push(agent.proposals ? proposalSlipHTML() : slipHTML());
     return out.join("");
   }
 
@@ -106,7 +172,8 @@ ${refused ? `<div class="tx">${esc(last.refusal)}</div>` : ""}
     const st = S.state;
     const closed = st && st.closed;
     const left = st && st.left <= LEFT_SHOWN && !closed ? `<span class="left">${esc(st.left)} left</span>` : "";
-    const chip = S.ticket ? `<span class="chip">${wpill(S.ticket)}<button type="button" class="x" data-c="detach" aria-label="Detach ${esc(S.ticket)}">×</button></span>` : "";
+    const chip = S.ticket ? `<span class="chip">${wpill(S.ticket)}<button type="button" class="x" data-c="detach" aria-label="Detach ${esc(S.ticket)}">×</button></span>`
+      : S.rule ? `<span class="chip">${rpill(S.rule)}<button type="button" class="x" data-c="detach-rule" aria-label="Detach rule ${esc(S.rule)}">×</button></span>` : "";
     if (closed) return `<div class="ch-in"><p class="closed" role="status">${esc(closed.text)}</p></div>`;
     return `<div class="ch-in">${chip}<div class="row"><textarea id="chatText" rows="1" maxlength="2000" placeholder="${esc(agent.placeholder)}" aria-label="${esc(agent.placeholder)}"${S.busy ? " disabled" : ""}>${esc(S.draft)}</textarea>
 <button type="button" class="send" data-c="send" aria-label="Send"${S.busy || !S.draft.trim() ? " disabled" : ""}><svg width="18" height="18" aria-hidden="true"><use href="#chat-send"/></svg></button></div>${S.err ? `<p class="err" role="alert">${esc(S.err)}</p>` : ""}${left}</div>`;
@@ -114,7 +181,7 @@ ${refused ? `<div class="tx">${esc(last.refusal)}</div>` : ""}
 
   /** The whole window. The log keeps its place; the draft keeps its text and its caret. @rule 106.3 */
   function draw(toEnd) {
-    if (!col) return;
+    if (!col || ACTIVE !== agent.key) return;
     const p = player();
     col.hidden = !p;
     if (!p) return;
@@ -123,9 +190,9 @@ ${refused ? `<div class="tx">${esc(last.refusal)}</div>` : ""}
     const ta0 = col.querySelector("#chatText");
     const focus = ta0 && document.activeElement === ta0 ? [ta0.selectionStart, ta0.selectionEnd] : null;
     const ready = S.state ? S.state.ready : true;
-    col.innerHTML = `<section class="chat" aria-label="${esc(agent.name)}">
+    col.innerHTML = `<section class="chat" data-agent="${esc(agent.key)}" aria-label="${esc(agent.name)}">
 <header class="ch-h">${portrait(false)}<div class="cnm"><b>${esc(agent.name)}</b>${!ready ? "<small>can't be reached</small>" : S.busy ? '<small class="live">typing</small>' : ""}</div>
-<button type="button" class="ch-x" data-c="min" aria-label="Minimize" title="Minimize">–</button><button type="button" class="ch-x ch-close" data-c="close" aria-label="Close" title="Close">×</button></header>
+<button type="button" class="ch-x" data-c="min" aria-label="Minimize" title="Minimize">–</button><button type="button" class="ch-x ch-close" data-c="close" aria-label="Close" title="Close">×</button></header>${todayHTML()}
 <div class="ch-log" id="chatLog" tabindex="0" aria-live="polite">${S.loaded ? logHTML() : ""}</div>${inputHTML()}</section>`;
     const log = col.querySelector(".ch-log");
     if (log) {
@@ -139,7 +206,7 @@ ${refused ? `<div class="tx">${esc(last.refusal)}</div>` : ""}
   }
   function autosize(ta) { ta.style.height = "auto"; ta.style.height = Math.min(120, ta.scrollHeight) + "px"; }
   function drawFab() {
-    if (!fab) return;
+    if (!fab || ACTIVE !== agent.key) return;
     fab.innerHTML = `${portrait(false)}<span>${esc(agent.name)}</span>`;
     fab.setAttribute("aria-label", `Open ${agent.name}`);
   }
@@ -147,6 +214,7 @@ ${refused ? `<div class="tx">${esc(last.refusal)}</div>` : ""}
   // ---- where it lives: the tab, minimized, the sheet -----------------------------------------------------------------------------
   /** The wrapper's state: off (not this tab, or not a player), open (the column), min (the pill); the phone's sheet is separate. @rule 106.3 */
   function place() {
+    if (ACTIVE && ACTIVE !== agent.key) return;   // the other window's tab is showing: the column and the pill are theirs
     const on = !!player() && S.tab === agent.tab;
     root.dataset.chat = !on ? "off" : S.open ? "open" : "min";
     root.dataset.sheet = on && S.sheet ? "open" : "closed";
@@ -159,11 +227,12 @@ ${refused ? `<div class="tx">${esc(last.refusal)}</div>` : ""}
   async function sync(tab, reread) {
     const entering = tab !== S.tab;
     S.tab = tab;
+    if (tab === agent.tab) ACTIVE = agent.key; else if (ACTIVE === agent.key) ACTIVE = null;
     S.open = remembered();
     if (S.tab !== agent.tab) S.sheet = false;
     place();
     if (player() && S.tab === agent.tab) {
-      if (!S.loaded && !S.loading) await load();
+      if (!S.loaded && !S.loading) { draw(); await load(); }   // the empty window first: the other agent's must not stay on screen while this one loads
       else if (entering || reread) await readState();   // the day, the lock or the cap may have changed since this was drawn
       else draw(true);
     }
@@ -173,6 +242,8 @@ ${refused ? `<div class="tx">${esc(last.refusal)}</div>` : ""}
     const r = await api(`/api/chat/${agent.path}`);
     if (r.ok) {
       S.state = r.data.state;
+      if (r.data.slips) S.slips = { ...S.slips, ...r.data.slips };
+      if (r.data.live !== undefined) S.live = r.data.live;
       const have = new Set(S.msgs.map((m) => m.id));
       for (const m of r.data.messages) if (!have.has(m.id)) S.msgs.push(m);
     }
@@ -192,7 +263,7 @@ ${refused ? `<div class="tx">${esc(last.refusal)}</div>` : ""}
     S.loading = true;
     const r = await api(`/api/chat/${agent.path}`);
     S.loading = false;
-    if (r.ok) { S.msgs = r.data.messages; S.next = r.data.next; S.state = r.data.state; S.loaded = true; S.err = ""; } else S.err = (r.data && r.data.error) || "Something went wrong.";
+    if (r.ok) { S.msgs = r.data.messages; S.next = r.data.next; S.state = r.data.state; S.slips = r.data.slips || {}; S.live = r.data.live || null; S.loaded = true; S.err = ""; } else S.err = (r.data && r.data.error) || "Something went wrong.";
     // the ticket the last turns were about stays on the slip; the box is attached to it only while it is still a draft
     const lastTicket = S.ticket || ([...S.msgs].reverse().find((m) => m.ticket) || {}).ticket;
     if (lastTicket) await loadSlip(lastTicket, !S.ticket);
@@ -213,7 +284,7 @@ ${refused ? `<div class="tx">${esc(last.refusal)}</div>` : ""}
     const r = await api(`/api/chat/${agent.path}?before=${S.next}`);
     S.loading = false;
     if (!r.ok) return;
-    S.msgs = r.data.messages.concat(S.msgs); S.next = r.data.next;
+    S.msgs = r.data.messages.concat(S.msgs); S.next = r.data.next; if (r.data.slips) S.slips = { ...S.slips, ...r.data.slips };
     draw();
     const l2 = col.querySelector(".ch-log"); if (l2) l2.scrollTop = l2.scrollHeight - before;
   }
@@ -225,8 +296,11 @@ ${refused ? `<div class="tx">${esc(last.refusal)}</div>` : ""}
     const optimistic = { id: -1, role: "player", body: text, date: S.state ? S.state.date : "", ticket: S.ticket };
     S.msgs.push(optimistic); S.draft = "";
     draw();
-    const r = await api(`/api/chat/${agent.path}`, S.ticket ? { ticket: S.ticket, body: text } : { body: text });
+    const rule = agent.proposals ? S.rule : null;
+    optimistic.rule = rule;
+    const r = await api(`/api/chat/${agent.path}`, S.ticket ? { ticket: S.ticket, body: text } : rule ? { rule, body: text } : { body: text });
     S.busy = false;
+    if (r.ok && rule && r.data.out === "ok") S.rule = null;   // the rule rides on the first message that was answered (not at the cap, or when she is out)
     S.msgs = S.msgs.filter((m) => m !== optimistic);
     if (!r.ok) {
       S.draft = text;
@@ -238,6 +312,7 @@ ${refused ? `<div class="tx">${esc(last.refusal)}</div>` : ""}
     // a line the server did not store (he is out, over budget) is shown for this visit only
     for (const m of r.data.messages) S.msgs.push(m);
     if (r.data.state) S.state = r.data.state;
+    if (r.data.slips) S.slips = { ...S.slips, ...r.data.slips };
     if (r.data.ticket) { S.slip = r.data.ticket; onTicket && (await onTicket(r.data.ticket)); }
     draw();
   }
@@ -245,25 +320,44 @@ ${refused ? `<div class="tx">${esc(last.refusal)}</div>` : ""}
   // ---- the page's clicks and keys ----------------------------------------------------------------------------------------------------
   root.addEventListener("click", async (e) => {
     const el = e.target.closest("[data-c], #chatfab");
-    if (!el || !root.contains(el)) return;
+    if (!el || !root.contains(el) || !mine()) return;
     if (el === fab) { open(); return; }
     const a = el.dataset.c;
     if (a === "min") minimize();
     else if (a === "close") { S.sheet = false; place(); }
     else if (a === "send") await send();
     else if (a === "detach") { S.ticket = null; S.slip = null; draw(); }
+    else if (a === "detach-rule") { S.rule = null; draw(); }
+    else if (a === "lock" || a === "unlock") await lockOrUnlock(el.dataset.id, a === "lock" ? "confirm" : "withdraw");
   });
   root.addEventListener("input", (e) => {
-    if (e.target.id !== "chatText") return;
+    if (e.target.id !== "chatText" || !mine()) return;
     S.draft = e.target.value; autosize(e.target);
     const b = col.querySelector('[data-c="send"]'); if (b) b.disabled = S.busy || !S.draft.trim();
   });
   root.addEventListener("keydown", (e) => {
+    if (!mine()) return;
     if (e.target.id === "chatText" && e.key === "Enter" && !e.shiftKey && desktop()) { e.preventDefault(); send(); }
     if (e.key === "Escape" && S.sheet) { S.sheet = false; place(); }
   });
   if (window.matchMedia) matchMedia("(min-width: 900px)").addEventListener?.("change", () => { S.sheet = false; place(); });
 
+  /** Lock it in = confirm (103.2), Unlock = withdraw (103.3): the player's own click on the proposal routes, costing no message. @rule 103.2, 103.3 */
+  async function lockOrUnlock(id, what) {
+    if (!id || S.locking) return;
+    S.lockErr[id] = "";
+    S.locking = true;
+    const r = await api(`/api/proposals/${encodeURIComponent(id)}/${what}`, {});
+    S.locking = false;
+    if (!r.ok) S.lockErr[id] = (r.data && r.data.error) || "Something went wrong.";
+    await readState();
+    if (onProposals) await onProposals();
+  }
+  /** A rule card's "Propose a change": the window opens with that rule riding on the next message. @rule 103.1 */
+  async function attachRule(num, o = {}) {
+    S.rule = num || null;
+    if (o.open) open(); else draw();
+  }
   /** A ticket is what the next messages are about (and the window opens on it). @rule 801.2 */
   async function attach(n, o = {}) {
     S.ticket = n || null;
@@ -272,5 +366,5 @@ ${refused ? `<div class="tx">${esc(last.refusal)}</div>` : ""}
   }
   /** Can he be reached? True until the server says there is no key. @rule 106.3 */
   const ready = () => !S.state || S.state.ready !== false;
-  return { sync, attach, open, load, minimize, ready, state: () => S, draw, reduced };
+  return { sync, attach, attachRule, open, load, minimize, ready, state: () => S, draw, reduced };
 }

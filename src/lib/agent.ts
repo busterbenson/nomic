@@ -65,14 +65,14 @@ export async function callModel(env: Env, c: ModelCall): Promise<ModelResult> {
 }
 
 /** One row of agent_calls (`tz` is the game's zone, from src/lib/day.ts, so the day and the month are the ones the chat uses) (no prompt text, no player text): what the budget sums and Chalant's night read counts. @rule 106.7 */
-export async function logCall(env: Env, game: { id: string }, tz: string, nowMs: number, row: { player_id?: string | null; agent: string; purpose: string; model: string; outcome: string; usage?: Usage; ms?: number; reason?: string | null }) {
+export async function logCall(env: Env, game: { id: string }, tz: string, nowMs: number, row: { player_id?: string | null; agent: string; purpose: string; model: string; outcome: string; usage?: Usage; ms?: number; reason?: string | null; cost_micro?: number }) {
   const u = row.usage;
   try {
     await env.DB.prepare(
       `INSERT INTO agent_calls (game_id, player_id, agent, purpose, model, outcome, input_tokens, cache_read, cache_write, output_tokens, ms, cost_micro, reason, local_date, at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(game.id, row.player_id ?? null, row.agent, row.purpose, row.model, row.outcome, u?.input_tokens ?? null, u?.cache_read_input_tokens ?? null, u?.cache_creation_input_tokens ?? null,
-      u?.output_tokens ?? null, row.ms ?? null, u ? costMicro(row.model, u) : 0, row.reason ? String(row.reason).slice(0, 200) : null, localDate(tz, nowMs), nowIso(nowMs)).run();
+      u?.output_tokens ?? null, row.ms ?? null, row.cost_micro ?? (u ? costMicro(row.model, u) : 0), row.reason ? String(row.reason).slice(0, 200) : null, localDate(tz, nowMs), nowIso(nowMs)).run();
   } catch (e: any) { console.error("agent: could not log a call:", e?.message || "error"); }   // the budget is best-effort on a failed write, the reply still goes
 }
 

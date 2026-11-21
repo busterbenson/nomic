@@ -21,6 +21,20 @@ export type Env = {
   DRAFTER_FLAGS?: string;
   // The agents' (Gremlin's) monthly budget per game, in dollars (src/lib/agent.ts): unset = the site's own limit. The tests lower it.
   AGENT_BUDGET_USD?: string;
+  // Generated art (src/lib/art.ts): the R2 bucket (private; the Worker serves it through /<slug>/art/<sha256>) and the Workers AI binding that
+  // draws. IMAGE_MODEL picks the model (default FLUX.2 klein 4B). ART_STUB is for the tests: it replaces the model with fixed bytes
+  // (src/lib/art.js); unset in production, where an unset AI binding means drawing is simply unavailable.
+  ART: R2Like;
+  AI?: { run(model: string, input: any): Promise<any> };
+  IMAGE_MODEL?: string;
+  ART_STUB?: string;
+};
+// The part of an R2 bucket the art code uses.
+export type R2Like = {
+  get(key: string): Promise<{ body: ReadableStream; arrayBuffer(): Promise<ArrayBuffer>; httpMetadata?: { contentType?: string }; size: number } | null>;
+  put(key: string, value: ArrayBuffer | Uint8Array | ReadableStream, o?: { httpMetadata?: { contentType?: string } }): Promise<unknown>;
+  head(key: string): Promise<{ size: number } | null>;
+  delete(key: string): Promise<void>;
 };
 export type Ctx = {
   request: Request;
@@ -140,7 +154,7 @@ export function siteUrl(env: Env, request: Request): string {
 // Every game lives under /<slug>/. These words would collide with the site's
 // own routes and files, so no game may use them.
 export const RESERVED_SLUGS = new Set([
-  "api", "auth", "join", "assets", "static", "site.css", "theme.css", "index.html", "admin", "www", "mail", "help", "about", "rules", "board", "js", "vendor",
+  "api", "auth", "join", "assets", "static", "site.css", "theme.css", "index.html", "admin", "www", "mail", "help", "about", "rules", "board", "js", "vendor", "art",
 ]);
 export const validSlug = (s: unknown): s is string =>
   typeof s === "string" && /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])$/.test(s) && !RESERVED_SLUGS.has(s);

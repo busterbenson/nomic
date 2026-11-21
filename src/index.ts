@@ -26,6 +26,9 @@ import * as apiProposals from "./routes/api-proposals";
 import * as apiCatalog from "./routes/api-catalog";
 import * as apiTickets from "./routes/api-tickets";
 import * as apiChat from "./routes/api-chat";
+import * as apiStarling from "./routes/api-starling";
+import * as apiArt from "./routes/api-art";
+import { sweepArt } from "./lib/art-sweep";
 import { AGENTS } from "./lib/chat.js";
 import * as apiBoard from "./routes/api-board";
 import * as apiAction from "./routes/api-action";
@@ -47,7 +50,7 @@ import * as oauthRegister from "./routes/oauth-register";
 import * as oauthToken from "./routes/oauth-token";
 import { preflight, withCors } from "./lib/oauth";
 
-const SUBROUTES = new Set(["api", "join", "auth", "mcp", "oauth", ".well-known"]);
+const SUBROUTES = new Set(["api", "join", "auth", "mcp", "oauth", ".well-known", "art"]);
 
 type Handler = (ctx: Ctx) => Promise<Response>;
 type Methods = { get?: Handler; post?: Handler };
@@ -159,6 +162,11 @@ async function route(request: Request, env: Env, execCtx: ExecutionContext): Pro
   // The moderator's routes (bearer token; src/routes/api-moderator.ts)
   if (sub === "api" && segs.length === 4 && segs[2] === "moderator" && segs[3] === "pending") return run({ get: apiModerator.pending }, method, ctx);
   if (sub === "api" && segs.length === 4 && segs[2] === "moderator" && segs[3] === "agents") return run({ get: apiModerator.agents }, method, ctx);
+  if (sub === "api" && segs.length === 4 && segs[2] === "moderator" && segs[3] === "escalations") return run({ get: apiModerator.escalations }, method, ctx);
+  if (sub === "api" && segs.length === 6 && segs[2] === "moderator" && segs[3] === "escalations" && /^\d{1,9}$/.test(segs[4]) && (segs[5] === "answer" || segs[5] === "delivered")) {
+    ctx.params.id = segs[4];
+    return run({ post: segs[5] === "answer" ? apiModerator.answer : apiModerator.delivered }, method, ctx);
+  }
   if (sub === "api" && segs.length === 6 && segs[2] === "moderator" && segs[3] === "days" && segs[5] === "claim" && /^\d{1,6}$/.test(segs[4])) {
     ctx.params.n = segs[4];
     return run({ post: apiModerator.claim }, method, ctx);
@@ -168,15 +176,19 @@ async function route(request: Request, env: Env, execCtx: ExecutionContext): Pro
     ctx.params.id = segs[3];
     return run({ post: apiProposals.action(segs[4]) }, method, ctx);
   }
+  // /<slug>/art/<sha256>: a drawing, from the bucket (rule 701.1)
+  if (sub === "art" && segs.length === 3) { ctx.params.hash = segs[2]; return run(apiArt, method, ctx); }
   // /api/catalog/<id>: one catalog entry (rule 701.1)
   if (sub === "api" && segs.length === 4 && segs[2] === "catalog") { ctx.params.id = segs[3]; return run({ get: apiCatalog.one }, method, ctx); }
-  // /api/chat/<agent>: a player's private chat with Gremlin (rules 106.3, 106.7)
-  if (sub === "api" && segs.length === 4 && segs[2] === "chat" && AGENTS.includes(segs[3])) return run(apiChat, method, ctx);
+  // /api/chat/<agent>: a player's private chat with Gremlin or Starling (rules 106.2, 106.3, 106.7)
+  if (sub === "api" && segs.length === 4 && segs[2] === "chat" && AGENTS.includes(segs[3])) return run(segs[3] === "starling" ? apiStarling : apiChat, method, ctx);
   // /api/tickets/<W3> (the ticket page), and /api/tickets/<W3>/edit, /confirm, /reopen and /post (rules 801, 804)
   if (sub === "api" && segs[2] === "tickets" && (segs.length === 4 || segs.length === 5)) {
     ctx.params.n = segs[3];
     if (segs.length === 4) return run({ get: apiTickets.one }, method, ctx);
     if (segs[4] === "edit" || segs[4] === "confirm" || segs[4] === "post" || segs[4] === "reopen") return run({ post: apiTickets.action(segs[4]) }, method, ctx);
+    // /api/tickets/<W3>/art: save, default or redraw one of an entry's drawings (rules 801.2, 106.7)
+    if (segs[4] === "art") return run({ post: apiArt.act }, method, ctx);
   }
   return notFound();
 }
@@ -188,7 +200,9 @@ export default {
   // The midnight run (wrangler.toml [triggers], every 5 minutes): lock the days that have ended, process them, open the
   // next (src/lib/day.ts). Idempotent, so a late or doubled tick is harmless.
   /** @rule 107.1, 203.1 */
-  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
+    // The second cron ("15 3 * * *", wrangler.toml) is the art sweep: once a day, the drawings of long-Shelved drafts (rule 801.5).
+    if (controller.cron === "15 3 * * *") { await sweepArt(env, await clockNow(env)); return; }
     await runMidnight(env, await clockNow(env));
   },
 };

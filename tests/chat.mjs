@@ -52,7 +52,7 @@ try {
 
   console.log("who can talk to him (rule 106.3)");
   check("a visitor can't read or write the chat: 401 both ways, nothing stored", (await visitor.get(CH)).status === 401 && (await visitor.post(CH, { body: "hi" })).status === 401 && d1(state, "SELECT COUNT(*) AS n FROM chat_messages")[0].n === 0);
-  check("an unknown agent is a 404 (Starling is step 2b)", (await Ana.get("/wk/api/chat/starling")).status === 404 && (await Ana.get("/wk/api/chat/nobody")).status === 404);
+  check("an unknown agent is a 404 (Starling's window is tests/starling-chat.mjs)", (await Ana.get("/wk/api/chat/starling")).status === 200 && (await Ana.get("/wk/api/chat/nobody")).status === 404);
   const empty = await Ana.get(CH);
   check("a player's empty window: no messages, the day's cap of 30 and all of it left, open, ready", empty.status === 200 && empty.data.messages.length === 0 && empty.data.state.cap === 30 && empty.data.state.left === 30 && empty.data.state.closed === null && empty.data.state.ready === true && empty.data.state.date === "2026-11-10", J(empty.data));
   check("an empty message and a message over 2000 characters are 400s, and are not stored", (await say(Ana, "  ")).status === 400 && (await say(Ana, "x".repeat(2001))).status === 400 && rows("Ana").length === 0);

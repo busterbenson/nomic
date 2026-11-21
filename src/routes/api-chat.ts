@@ -12,6 +12,7 @@
 import { Player, getPlayer } from "../lib/auth";
 import { EXCUSE_SQL, HISTORY_FOR_MODEL, PLAYER_MESSAGE_SQL, historyPage, rowView, usedToday } from "../lib/chat.js";
 import { agentsReady, callModel, logCall, monthSpend } from "../lib/agent";
+import { escalate } from "../lib/escalate.js";
 import { clockNow, isLocked, loadToday, lockMessage, settingsOf, timeZoneOf } from "../lib/day";
 import { lockOpenBinds, localDate } from "../lib/day-gate.js";
 import {
@@ -23,37 +24,43 @@ import { Ctx, json, nowIso, readJson } from "../lib/util";
 import { catalogFor } from "./api-catalog";
 import { bookFor } from "./api-proposals";
 import { gremlinWrite, pageOf } from "./api-tickets";
+import { queueNew } from "../lib/art";
 
-type Out = { status: number; body: any };
+export type Out = { status: number; body: any };
 /** @rule 106.3 */
-const out = (body: any, status = 200): Out => ({ status, body });
+export const out = (body: any, status = 200): Out => ({ status, body });
 const AGENT = "gremlin";
+// What an agent's limit excuse is made of: its own canned lines and its own improvised call (rule 106.7). Starling's is in api-starling.ts.
+export type ExcuseSpec = { agent: string; canned: () => string; request: (a: { lines: any[]; backAt: string }) => { system: string; messages: any[] } };
+const GREMLIN_EXCUSES: ExcuseSpec = { agent: AGENT, canned: () => cannedExcuse(), request: excuseRequest };
+/** An agent's daily cap, from the game's settings (rule 106.7). @rule 106.7 */
+export const capOf = (game: any, agent: string): number => settingsOf(game)[agent === "starling" ? "starling.messages_per_day" : "gremlin.messages_per_day"];
 /** @rule 106.3 */
-const send = (o: Out) => json(o.body, o.status);
+export const send = (o: Out) => json(o.body, o.status);
 
 /** The zone's short name for "back at midnight PST". @rule 106.7 */
-function zoneAbbr(tz: string, ms: number): string {
+export function zoneAbbr(tz: string, ms: number): string {
   try { return new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "short" }).formatToParts(new Date(ms)).find((x) => x.type === "timeZoneName")?.value ?? tz; } catch { return tz; }
 }
 /** Is the game locked right now (rule 107.1)? The lock alone: End turn and "before day 1" leave the chat open. @rule 107.1 */
-const lockedNow = (game: any, day: any, nowMs: number) => game.status === "playing" && !!day && isLocked(game, day, nowMs);
+export const lockedNow = (game: any, day: any, nowMs: number) => game.status === "playing" && !!day && isLocked(game, day, nowMs);
 
 // The window's state: today's cap and what is left, and why the composer is closed (a reason beside a disabled control, rule 106.7, 107.1).
 /** @rule 106.7, 107.1 */
-async function stateOf(ctx: Ctx, game: any, day: any, player: Player, nowMs: number) {
+export async function stateOf(ctx: Ctx, game: any, day: any, player: Player, nowMs: number, agent: string = AGENT) {
   const { env } = ctx;
   const tz = timeZoneOf(game), date = localDate(tz, nowMs);
-  const cap: number = settingsOf(game)["gremlin.messages_per_day"];
-  const used = await usedToday(env.DB, game.id, player.id, AGENT, date);
+  const cap: number = capOf(game, agent);
+  const used = await usedToday(env.DB, game.id, player.id, agent, date);
   let closed: { kind: string; text: string } | null = null;
   if (lockedNow(game, day, nowMs)) closed = { kind: "lock", text: lockMessage(day.n) };
   // At the cap the composer stays open until he has told the player (rule 106.7): the next send gets his excuse, and then it closes with the
   // count beside it. A player who never sends a message at the cap still sees "0 left".
   else if (used >= cap) {
-    const told: any = await env.DB.prepare("SELECT 1 AS x FROM chat_messages WHERE game_id = ? AND player_id = ? AND agent = ? AND local_date = ? AND role = 'excuse' LIMIT 1").bind(game.id, player.id, AGENT, date).first();
+    const told: any = await env.DB.prepare("SELECT 1 AS x FROM chat_messages WHERE game_id = ? AND player_id = ? AND agent = ? AND local_date = ? AND role = 'excuse' LIMIT 1").bind(game.id, player.id, agent, date).first();
     if (told) closed = { kind: "cap", text: `${used} of ${cap} messages today` };
   }
-  return { agent: AGENT, date, cap, used, left: Math.max(0, cap - used), closed, ready: agentsReady(env) };
+  return { agent, date, cap, used, left: Math.max(0, cap - used), closed, ready: agentsReady(env) };
 }
 
 // GET /api/chat/gremlin
@@ -73,27 +80,28 @@ export const get = async (ctx: Ctx) => {
 
 // One stored line, as the client reads it (the same whitelist the history uses).
 /** @rule 106.7 */
-const viewOf = (id: number, role: string, body: string, date: string, day: number | null, at: string, ticketNumber: number | null, meta: Record<string, unknown> = {}) =>
+export const viewOf = (id: number, role: string, body: string, date: string, day: number | null, at: string, ticketNumber: number | null, meta: Record<string, unknown> = {}) =>
   rowView({ id, role, body, local_date: date, day, at, ticket_number: ticketNumber, meta: JSON.stringify(meta) });
 
 // The one improvised excuse of the day (rule 106.7). Only the request whose INSERT lands calls the model; the canned excuse is already
 // stored when it does, so a failed call leaves the canned one in place. Anyone else at the cap gets a canned one, stored nowhere.
 /** @rule 106.7, 107.1 */
-async function excuse(ctx: Ctx, game: any, day: any, player: Player, nowMs: number, date: string, cap: number): Promise<string> {
+export async function excuse(ctx: Ctx, game: any, day: any, player: Player, nowMs: number, date: string, cap: number, spec: ExcuseSpec = GREMLIN_EXCUSES): Promise<string> {
   const { env } = ctx;
+  const agent = spec.agent;
   const tz = timeZoneOf(game);
-  const canned = cannedExcuse();
-  const ins = await env.DB.prepare(EXCUSE_SQL).bind(game.id, player.id, AGENT, date, game.day || null, canned, nowIso(nowMs), game.id, player.id, AGENT, date, cap, game.id, ...lockOpenBinds(nowMs)).run();
-  if (!(ins?.meta?.changes > 0)) return cannedExcuse();
+  const canned = spec.canned();
+  const ins = await env.DB.prepare(EXCUSE_SQL).bind(game.id, player.id, agent, date, game.day || null, canned, nowIso(nowMs), game.id, player.id, agent, date, cap, game.id, ...lockOpenBinds(nowMs)).run();
+  if (!(ins?.meta?.changes > 0)) return spec.canned();
   if (!agentsReady(env) || (await monthSpend(env, game, tz, nowMs)).over) return canned;
-  const rows = ((await env.DB.prepare("SELECT role, body FROM chat_messages WHERE game_id = ? AND player_id = ? AND agent = ? AND local_date = ? AND role IN ('player', 'agent') ORDER BY id DESC LIMIT 6").bind(game.id, player.id, AGENT, date).all()).results as any[]).reverse();
-  const req = excuseRequest({ lines: rows, backAt: `midnight ${zoneAbbr(tz, nowMs)}` });
+  const rows = ((await env.DB.prepare("SELECT role, body FROM chat_messages WHERE game_id = ? AND player_id = ? AND agent = ? AND local_date = ? AND role IN ('player', 'agent') ORDER BY id DESC LIMIT 6").bind(game.id, player.id, agent, date).all()).results as any[]).reverse();
+  const req = spec.request({ lines: rows, backAt: `midnight ${zoneAbbr(tz, nowMs)}` });
   if (estimateTokens(req.system + JSON.stringify(req.messages)) > EXCUSE_INPUT_CAP_TOKENS) return canned;
   const r = await callModel(env, { model: EXCUSE_MODEL, system: req.system, messages: req.messages, maxTokens: EXCUSE_OUTPUT_CAP_TOKENS, timeoutMs: EXCUSE_TIMEOUT_MS });
   const text = r.ok ? readExcuse(r.text) : null;
-  await logCall(env, game, tz, nowMs, { player_id: player.id, agent: AGENT, purpose: "excuse", model: EXCUSE_MODEL, outcome: r.ok ? (text ? "ok" : "invalid") : r.code, usage: r.usage, ms: r.ms, reason: r.ok ? (text ? null : "unusable") : r.reason });
+  await logCall(env, game, tz, nowMs, { player_id: player.id, agent, purpose: "excuse", model: EXCUSE_MODEL, outcome: r.ok ? (text ? "ok" : "invalid") : r.code, usage: r.usage, ms: r.ms, reason: r.ok ? (text ? null : "unusable") : r.reason });
   if (!text) return canned;
-  await env.DB.prepare("UPDATE chat_messages SET body = ? WHERE game_id = ? AND player_id = ? AND agent = ? AND local_date = ? AND role = 'excuse'").bind(text, game.id, player.id, AGENT, date).run();
+  await env.DB.prepare("UPDATE chat_messages SET body = ? WHERE game_id = ? AND player_id = ? AND agent = ? AND local_date = ? AND role = 'excuse'").bind(text, game.id, player.id, agent, date).run();
   return text;
 }
 
@@ -176,7 +184,7 @@ export async function turn(ctx: Ctx, player: Player, body: any, nowMs: number): 
     const dateL = localDate(tz, later), atL = nowIso(later);
     await logCall(env, game, tz, nowMs, { player_id: player.id, agent: AGENT, purpose: "chat", model: MODEL, outcome, usage: r.usage, ms: r.ms, reason });   // first: the budget counts the call whatever happens to the row
     const res = await env.DB.prepare("INSERT INTO chat_messages (game_id, player_id, agent, local_date, day, role, body, ticket_id, meta, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .bind(game.id, player.id, AGENT, dateL, game.day || null, role, bodyText, ticket?.id ?? null, JSON.stringify(meta), atL).run();
+      .bind(game.id, player.id, AGENT, dateL, game.day || null, role, bodyText, ticket?.id ?? null, JSON.stringify({ ...meta, turn: myId }), atL).run();   // `turn`: the player's message this line answers (two tabs can interleave turns; the escalation's reply is found by it, not by position)
     return viewOf(Number(res.meta.last_row_id), role, bodyText, dateL, game.day || null, atL, ticket?.number ?? null, meta);
   };
   /** @rule 106.3 */
@@ -196,13 +204,23 @@ export async function turn(ctx: Ctx, player: Player, body: any, nowMs: number): 
   let saved = true;
   if (wrote.length) {
     saved = ticket && ticket.state === "Draft" ? await gremlinWrite(env, game, player, ticket, patch, later) : false;
+    // Each entry that now carries an art prompt he has not drawn gets its first drawing, as part of this turn (rule 801.2): no extra message.
+    if (saved && ticket && "makes" in patch) { try { await queueNew(ctx, game, player, ticket, patch.makes, tz, later); } catch (e: any) { console.error("art: could not start the drawings:", e?.message || "error"); } }
   }
   const meta: Record<string, unknown> = {};
   if (saved && wrote.length) { meta.patch = patchSummary(patch); if ("price" in patch) meta.price = patch.price; }
   if (a.rejected.length) meta.rejected = a.rejected;
   if (a.notes.length) meta.notes = a.notes;
   if (a.refusal) meta.refusal = a.refusal;
-  lines.push(await reply("agent", a.say, meta, a.refusal ? "refused" : "ok", a.refusal ? "commission refused" : [a.clamped ? "price clamped" : "", a.unbuiltPrice ? "price without a build" : ""].filter(Boolean).join("; ") || null));
+  // What he can't settle goes to Chalant (rule 106.4): the escalation holds this turn's message; a second one while one is open in this chat, or a
+  // sixth today, is dropped and logged on the call's row. His words to the player stand either way.
+  let escNote = "";
+  if (a.escalate && !a.refusal) {
+    const got = await escalate(env.DB, { gameId: game.id, agent: AGENT, playerId: player.id, chatMessageId: myId, category: a.escalate.category, reason: a.escalate.reason, date: localDate(tz, later), at: nowIso(later) });
+    escNote = got === "stored" ? "escalated" : `escalation dropped: ${got}`;
+    if (got === "stored") meta.escalated = a.escalate.category;
+  }
+  lines.push(await reply("agent", a.say, meta, a.refusal ? "refused" : "ok", a.refusal ? "commission refused" : [a.clamped ? "price clamped" : "", a.unbuiltPrice ? "price without a build" : "", escNote].filter(Boolean).join("; ") || null));
   if (wrote.length && !saved) {
     const fresh: any = ticket ? await env.DB.prepare("SELECT state FROM tickets WHERE id = ?").bind(ticket.id).first() : null;
     const again = await loadToday(env, ctx.data.game!, later, player.id);

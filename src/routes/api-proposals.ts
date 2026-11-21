@@ -100,12 +100,13 @@ export function view(r: any, viewerId?: string | null, electorate?: number) {
 
 // Draft (rule 103.1). Returns the draft, or the refusal.
 /** @rule 103.1, 103.6, 108.3, 402.4 */
-export async function draft(ctx: Ctx, player: any, body: any, nowMs: number): Promise<Out> {
+export async function draft(ctx: Ctx, player: any, body: any, nowMs: number, o: { atLimit?: boolean } = {}): Promise<Out> {
   const { env } = ctx;
   const { game, day, turn } = await loadToday(env, ctx.data.game!, nowMs, player.id);
   const blocked = turnBlock(game, day, turn, player, "propose", nowMs);
   if (blocked) return out(refusalBody(blocked), blocked.status);
   const limit = limitOf(game), made = await confirmedToday(env, game.id, player.id, game.day);
+  // Starling drafts at the limit too (rule 103.1: drafting costs nothing, only a locked-in proposal counts): `atLimit`. Confirming still refuses past it.
   // The Champion's change (rule 402.4) is on top of the day's proposals, so the day's limit does not stop its draft; being
   // the Champion and not having made it this Era does. Drafted through the same checks as any proposal below.
   const asChampion = body?.champion === true;
@@ -114,7 +115,7 @@ export async function draft(ctx: Ctx, player: any, body: any, nowMs: number): Pr
     if (no) return out({ error: no.error }, no.status);
     if ((await championId(env, game.id)) !== player.id) return out({ error: "Only the Champion can make a Champion's change (rule 402.4)." }, 403);
     if (await changeUsed(env, game.id, player.id)) return out({ error: "You've made your change this Era (rule 402.4)." }, 409);
-  } else if (made >= limit) return out({ error: proposalLimitMessage(made) }, 409);
+  } else if (made >= limit && !o.atLimit) return out({ error: proposalLimitMessage(made) }, 409);
 
   const { md, book, sha } = await bookFor(game);
   // An action names its players by their names in the game (rule 103.5): the request needs the catalog and who is in the game.

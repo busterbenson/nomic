@@ -19,7 +19,7 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&
 const lines = (s) => String(s || "").split("\n").map((x) => x.trim()).filter(Boolean);
 
 export function createWorkshop({ api, me, pill, rpill, when, canCommission, refresh, cards, chat }) {
-  const S = { cat: { kinds: [], required: {}, registry: {}, entries: [] }, flavorOpen: {}, list: [], total: 0, counts: {}, view: "main", all: { rows: [], next: null, state: "", err: "" }, detail: {}, form: null, touched: new Set(), busy: false, err: "", note: "", openErr: "", draftPost: {} };
+  const S = { artErr: {}, cat: { kinds: [], required: {}, registry: {}, entries: [] }, flavorOpen: {}, list: [], total: 0, counts: {}, view: "main", all: { rows: [], next: null, state: "", err: "" }, detail: {}, form: null, touched: new Set(), busy: false, err: "", note: "", openErr: "", draftPost: {} };
 
   /** @rule 801.2 */
   async function load() {
@@ -53,6 +53,23 @@ export function createWorkshop({ api, me, pill, rpill, when, canCommission, refr
   }
   const player = () => !!(me() && me().player);
 
+  // After a post, Gremlin answers in the background (rule 804.1): the page asks again every 2.5 s, up to 30 s, while a reply is pending, then stops.
+  // A "no reply" answer ends the wait with nothing new, which is fine. Stops when the card is closed or shows another ticket.
+  const WAIT = { n: null, until: 0 };
+  /** @rule 804.1 */
+  function waitForReply(n) {
+    WAIT.n = n; WAIT.until = Date.now() + 30000;
+    const tick = async () => {
+      if (WAIT.n !== n) return;
+      const cur = cards.current();
+      if (!cur || cur.kind !== "ticket" || cur.key !== n || Date.now() > WAIT.until) { WAIT.n = null; return; }
+      await loadOne(n);
+      cards.redraw();
+      if (S.detail[n] && S.detail[n].reply_pending) setTimeout(tick, 2500); else WAIT.n = null;
+    };
+    setTimeout(tick, 2500);
+  }
+
   /** @rule 801.2 */
   async function open(n, push) {
     S.err = ""; S.note = "";
@@ -61,12 +78,75 @@ export function createWorkshop({ api, me, pill, rpill, when, canCommission, refr
     await loadOne(n);
     S.form = null;
     cards.redraw();
+    if (S.detail[n] && S.detail[n].reply_pending) waitForReply(n);
+    watchArt(n);
   }
 
 
   // ---- catalog entries: the pieces a Makes card and a catalog card share (rules 701.1, 703.1, 704.2, 705.1) ------------------------
-  /** The art slot: until a drawing exists, a neutral tile with the kind's letter. @rule 701.1 */
-  const artTile = (v, big) => `<span class="arttile${big ? " big" : ""}" aria-hidden="true">${esc(v.letter || "?")}</span>`;
+  const HASH = /^[0-9a-f]{64}$/;
+  const BASE = "/" + (typeof location === "object" && location.pathname ? location.pathname.split("/")[1] || "" : "");
+  /** A drawing's address: the Worker serves it from the bucket under the game's slug. Only a 64-hex hash is ever an address. @rule 701.1 */
+  const artUrl = (hash) => `${BASE}/art/${hash}`;
+  /** An entry's drawings as one shape, whether it is a ticket's (the page's overlay) or a live catalog entry's (catalog.json). @rule 701.1 */
+  function artOf(v) {
+    const a = (v && v.art) || {};
+    if (Array.isArray(a.drawings)) return { shown: HASH.test(a.shown || "") ? a.shown : null, state: a.state || "none", prompt: a.prompt || "", list: a.drawings.filter((d) => HASH.test(d.hash || "")) };
+    const list = (a.saved || []).filter((d) => HASH.test(d.key || "")).map((d) => ({ hash: d.key, saved: true, default: d.key === a.default }));
+    const first = list.find((d) => d.default) || list[0];
+    return { shown: first ? first.hash : null, state: "ready", prompt: a.prompt || "", list: first ? [first, ...list.filter((d) => d !== first)] : list };
+  }
+  /** The art slot: the drawing the entry shows, or until one exists a neutral tile with the kind's letter. @rule 701.1 */
+  function artTile(v, big) {
+    const a = artOf(v);
+    if (a.shown) return `<img class="artimg${big ? " big" : ""}" src="${artUrl(a.shown)}" alt="${esc(v.name || "")}" loading="lazy">`;
+    return `<span class="arttile${big ? " big" : ""}${a.state === "drawing" ? " drawing" : ""}" aria-hidden="true">${esc(v.letter || "?")}</span>`;
+  }
+  /** The strip of drawings: each one's thumbnail, and for the requester Save on one not kept and Make default on one kept; the default is marked. @rule 801.2 */
+  function stripHTML(a, can, who, min) {
+    if (a.list.length <= min) return "";
+    return `<ul class="artstrip" aria-label="Drawings">${a.list.map((d) => `<li${d.default ? ' class="is-default"' : ""}><img class="artthumb" src="${artUrl(d.hash)}" alt="" loading="lazy">${d.default ? '<span class="pill kchip">Default</span>' : d.saved ? `<span class="estate">Saved</span>${can ? `<button type="button" class="btn ghost small" ${who} data-act="default" data-hash="${d.hash}">Make default</button>` : ""}` : can ? `<button type="button" class="btn ghost small" ${who} data-act="save" data-hash="${d.hash}">Save</button>` : ""}</li>`).join("")}</ul>`;
+  }
+  /**
+   * The drawing block of one entry: the picture or its state (Drawing, Drawing failed), Redraw for the requester, and the strip of drawings
+   * made (the requester's: Save, Default) or saved (everyone's). The default is marked. @rule 801.2
+   */
+  function artInner(v, can, name) {
+    const a = artOf(v), err = S.artErr[name.toLowerCase()] || "";
+    const who = `data-w="art" data-name="${esc(name)}"`;
+    const state = a.state === "drawing" ? '<span class="estate" role="status">Drawing</span>' : a.state === "failed" ? '<span class="estate" role="status">Drawing failed</span>' : "";
+    const redraw = can && a.prompt && a.state !== "drawing" ? `<button type="button" class="btn ghost small" ${who} data-act="redraw">Redraw</button>` : "";
+    const strip = stripHTML(a, can, who, can ? 0 : 1);
+    return `<div class="artbox">${artTile(v, false)}<div class="artact">${state}${redraw}</div></div>${err ? `<p class="notice err" role="alert">${esc(err)}</p>` : ""}${strip}`;
+  }
+  /** One entry's drawing block, wrapped so it can be repainted alone (a drawing that lands must not disturb what the player is typing). @rule 801.2 */
+  const artBlock = (v, can, name) => `<div class="wkart" data-artfor="${esc(name.toLowerCase())}">${artInner(v, can, name)}</div>`;
+  /** Repaints every drawing block of the open ticket from its fresh page, in place. @rule 801.2 */
+  function paintArt(n) {
+    const t = S.detail[n];
+    const root = typeof document === "object" ? document.getElementById("mroot") : null;
+    if (!t || !root) return;
+    for (const el of root.querySelectorAll(".wkart")) {
+      const v = (t.entry_views || []).find((x) => x.name.toLowerCase() === el.dataset.artfor);
+      if (v) el.innerHTML = artInner(v, !!(t.can && t.can.edit.allowed), v.name);
+    }
+  }
+  const POLL = {};
+  /** While a drawing is on its way the page asks again every 2 seconds, for up to 60 (then the server says it failed). @rule 801.2 */
+  function watchArt(n) {
+    const drawing = () => { const t = S.detail[n]; return !!t && (t.entry_views || []).some((v) => v.art && v.art.state === "drawing"); };
+    if (POLL[n] || !drawing()) return;
+    const until = Date.now() + 62000;
+    POLL[n] = true;
+    const tick = async () => {
+      await loadOne(n);
+      const cur = cards.current();
+      const open = cur && cur.kind === "ticket" && cur.key === n;
+      if (open) paintArt(n);
+      if (open && drawing() && Date.now() < until) setTimeout(tick, 2000); else { delete POLL[n]; if (open) cards.redraw(); }
+    };
+    setTimeout(tick, 2000);
+  }
   /** The kind chip; an entry with no kind says so. @rule 702.1 */
   const kindChip = (v) => `<span class="pill kchip${v.kind ? "" : " dashed"}">${esc(v.kindLabel || "Kind not set")}</span>`;
   /** The footprint of a W by H structure: W by H diamonds. @rule 704.1 */
@@ -130,7 +210,7 @@ export function createWorkshop({ api, me, pill, rpill, when, canCommission, refr
     const made = v.madeBy || v.day !== null ? `<div class="tr"><dt>Made by</dt><dd>${v.madeBy ? wPill(v.madeBy) : ""}${v.day !== null ? ` Day ${esc(v.day)}` : ""}</dd></div>` : "";
     return { cls: "crit tk", label: `${v.id} ${v.name}`, backLabel: v.id,
       html: `<div class="mtop"><div class="cart">${artTile(v, true)}</div><span class="wpill big">${esc(v.id)}</span><h2>${esc(v.name)}</h2>${kindChip(v)}</div>
-${attrsHTML(v)}${flavorHTML(v, open)}${more ? `<div class="row">${more}</div>` : ""}${made || from ? `<dl class="tdl">${made}${from}</dl>` : ""}` };
+${stripHTML(artOf(v), false, "", 1)}${attrsHTML(v)}${flavorHTML(v, open)}${more ? `<div class="row">${more}</div>` : ""}${made || from ? `<dl class="tdl">${made}${from}</dl>` : ""}` };
   }
   /** @rule 701.1 */
   async function openEntry(id, push) {
@@ -141,8 +221,10 @@ ${attrsHTML(v)}${flavorHTML(v, open)}${more ? `<div class="row">${more}</div>` :
   /** @rule 801.2, 801.4 */
   function rowHTML(t, dense) {
     return `<li class="trow" id="wk-${esc(t.n)}"><span class="tmain"><button type="button" class="tlink" data-ticket="${esc(t.n)}" aria-haspopup="dialog"><span class="wpill">${esc(t.n)}</span><span class="tt">${esc(t.title || "Untitled")}</span></button></span>
-<span class="tmeta">${pill(t.by, t.mine)}<span class="pill tstate" data-state="${esc(t.state)}">${esc(t.state)}</span><span class="tnum mono">${esc(nights(t.estimate))}</span><span class="tnum mono">${esc(points(t.price))}</span>${dense ? `<span class="tnum mono">${esc(when(t.changed_at))}</span>` : ""}</span></li>`;
+<span class="tmeta">${pill(t.by, t.mine)}<span class="pill tstate" data-state="${esc(t.state)}">${esc(t.state)}</span>${escalatedChip(t)}<span class="tnum mono">${esc(nights(t.estimate))}</span><span class="tnum mono">${esc(points(t.price))}</span>${dense ? `<span class="tnum mono">${esc(when(t.changed_at))}</span>` : ""}</span></li>`;
   }
+  /** The chip a ticket with an open escalation wears (rule 106.4): Gremlin passed something on and Chalant hasn't answered. It is not a state. @rule 106.4 */
+  const escalatedChip = (t) => (t.escalated ? `<span class="pill tstate" data-state="Escalated">Escalated</span>` : "");
   /** @rule 801.1, 801.2 */
   function commissionButton() {
     if (!player()) return "";
@@ -231,8 +313,9 @@ ${catalogHTML()}</div></div>`;
     return `<label for="${id}">${esc(label(a.key))}</label>${ctl}`;
   }
   /** A catalog entry of the form: its name, kind, and the required fields of that kind. @rule 701.2, 704.1 */
-  function entryFields(e, i, off) {
-    return `<fieldset class="wkentry"><label for="wfEn${i}">Name</label><input id="wfEn${i}" data-ef="name" data-ei="${i}" maxlength="60" value="${esc(e.name)}"${off}>
+  function entryFields(e, i, off, t) {
+    const v = t && (t.entry_views || []).find((x) => x.name.toLowerCase() === e.name.trim().toLowerCase());
+    return `<fieldset class="wkentry">${v ? artBlock(v, !!t.can.edit.allowed, v.name) : ""}<label for="wfEn${i}">Name</label><input id="wfEn${i}" data-ef="name" data-ei="${i}" maxlength="60" value="${esc(e.name)}"${off}>
 <label for="wfEk${i}">Kind</label><select id="wfEk${i}" data-ef="kind" data-ei="${i}"${off}><option value="">Not set</option>${S.cat.kinds.map((k) => `<option value="${esc(k.id)}"${e.kind === k.id ? " selected" : ""}>${esc(k.label)}</option>`).join("")}</select>
 ${requiredOf(e.kind).map((a) => attrField(i, a, e.vals[a.key] ?? "", off)).join("")}<div class="row"><button type="button" class="btn ghost small" data-w="rmentry" data-ei="${i}"${off}>Remove</button></div></fieldset>`;
   }
@@ -244,7 +327,7 @@ ${requiredOf(e.kind).map((a) => attrField(i, a, e.vals[a.key] ?? "", off)).join(
     const can = t.can.confirm.allowed;
     return `<div class="pf wkform"><label for="wfTitle">Title</label><input id="wfTitle" maxlength="80" value="${esc(f.title)}"${off}>
 <label for="wfBrief">Brief</label><textarea id="wfBrief" rows="4" maxlength="2000"${off}>${esc(f.brief)}</textarea>
-${f.entries.map((e, i) => entryFields(e, i, off)).join("")}<div class="row"><button type="button" class="btn ghost small" data-w="addentry"${off}>Add an entry</button></div>
+${f.entries.map((e, i) => entryFields(e, i, off, t)).join("")}<div class="row"><button type="button" class="btn ghost small" data-w="addentry"${off}>Add an entry</button></div>
 ${f.drafts.map((d, i) => `<div class="wkdraft"><span>${esc(d)}</span><button type="button" class="btn ghost small" data-w="rmdraft" data-ei="${i}"${off}>Remove</button></div>`).join("")}
 <label for="wfRules">Rules</label><input id="wfRules" value="${esc(f.rules)}"${off}>
 <label for="wfEstimate">Nights</label><input id="wfEstimate" type="number" min="1" max="99" step="1" value="${esc(f.estimate)}"${off}>
@@ -271,7 +354,8 @@ ${row("Price", `${esc(points(t.price))}${t.price_reason ? `<span class="mnote"> 
     // the lock (rule 107.1) keeps the form but turns it off, with the lock's sentence; a visitor has no form
     const can = t.can.post, off = S.busy || !can.allowed;
     const form = can.allowed || can.locked ? `<div class="pf wkpost"><label for="wkPost">Post</label><textarea id="wkPost" rows="3" maxlength="2000"${off ? " disabled" : ""}>${esc(S.draftPost[t.n] || "")}</textarea>${can.locked ? `<p class="mnote">${esc(can.reason)}</p>` : ""}${S.err && !t.can.edit.allowed ? `<p class="notice err" role="alert">${esc(S.err)}</p>` : ""}<div class="row"><button class="btn small" type="button" data-w="post"${off ? " disabled" : ""}>Post</button></div></div>` : "";
-    return `<section class="tsec"><h3>Discussion</h3>${posts}${form}</section>`;
+    const wait = t.reply_pending ? `<p class="mnote gwait" role="status">Gremlin is looking at it…</p>` : "";
+    return `<section class="tsec"><h3>Discussion ${escalatedChip(t)}</h3>${posts}${wait}${form}</section>`;
   }
   /** A refused or failed ticket of yours can be reopened as a draft (rule 801.5); the lock turns the button off with its sentence. @rule 801.5 */
   function reopenHTML(t) {
@@ -328,6 +412,18 @@ ${editing ? formHTML(t) : factsHTML(t)}${reopenHTML(t)}${editing ? "" : tasksHTM
       await refresh();
       return;
     }
+    if (a === "art") {
+      const name = el.dataset.name || "", key = name.toLowerCase();
+      if (!n || S.artBusy) return;
+      S.artBusy = true; S.artErr[key] = "";
+      try {
+        const r = await api(`/api/tickets/${encodeURIComponent(n)}/art`, { entry: name, action: el.dataset.act, ...(el.dataset.hash ? { hash: el.dataset.hash } : {}) });
+        if (r.ok && r.data && r.data.ticket) S.detail[n] = r.data.ticket; else S.artErr[key] = (r.data && r.data.error) || "Something went wrong.";
+      } finally { S.artBusy = false; }
+      paintArt(n);
+      watchArt(n);
+      return;
+    }
     if (a === "flavor") { S.flavorOpen[el.dataset.entry] = !S.flavorOpen[el.dataset.entry]; cards.redraw(); return; }
     if ((a === "addentry" || a === "rmentry" || a === "rmdraft") && S.form && !S.busy) {
       S.touched.add(a === "rmdraft" ? "rules" : "entries");
@@ -357,7 +453,7 @@ ${editing ? formHTML(t) : factsHTML(t)}${reopenHTML(t)}${editing ? "" : tasksHTM
         const body = ta ? ta.value : "";
         S.draftPost[n] = body;
         const r = await api(`/api/tickets/${encodeURIComponent(n)}/post`, { body });
-        if (r.ok) { S.detail[n] = r.data.ticket; S.draftPost[n] = ""; } else S.err = (r.data && r.data.error) || "Something went wrong.";
+        if (r.ok) { S.detail[n] = r.data.ticket; S.draftPost[n] = ""; if (r.data.ticket.reply_pending) waitForReply(n); } else S.err = (r.data && r.data.error) || "Something went wrong.";
       }
     } finally { S.busy = false; cards.redraw(); }
   }
@@ -400,6 +496,7 @@ ${editing ? formHTML(t) : factsHTML(t)}${reopenHTML(t)}${editing ? "" : tasksHTM
       S.touched = typed;
     }
     if (cards.isOpen && cards.isOpen()) cards.redraw();
+    watchArt(t.n);
   }
 
   return { load, count, tabHTML, summaryHTML, card, open, openEntry, click, input, apply, list: () => S.list };
