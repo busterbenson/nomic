@@ -63,7 +63,7 @@ with sync_playwright() as p:
             c, page, errors = new_page(b, w, h, scheme)
             check(f"{tag}: the Champion's Summary shows Era 2 with no name yet, and the form to name it", text(page, "#sera h2") == "Era 2" and page.locator("#era-name").is_visible() and page.locator("#sera button[type=submit]").inner_text() == "Name the Era")
             check(f"{tag}: Ada's own Champion's change row has no vote to cast: Yes and No are disabled, with the reason", page.locator('#sb-P1 [data-vote="yes"]').is_disabled() and page.locator('#sb-P1 [data-vote="no"]').is_disabled() and "The Champion doesn't vote on their own change (rule 402.4)." in text(page, "#sb-P1"), text(page, "#sb-P1"))
-            check(f"{tag}: her 'N of M voted' leaves it out: 0 of 1", "0 of 1 voted" in text(page, "#sballot"), text(page, "#sballot"))
+            check(f"{tag}: her 'N of M voted' leaves her own change out: " + ("1 of 1" if name_it else "0 of 1"), ("1 of 1 voted" if name_it else "0 of 1 voted") in text(page, "#sballot"), text(page, "#sballot"))
             shot(page, f"summary-ada-form-{tag}", full_page=True); sideways(page, w, f"{tag} era form")
             strip = text(page, ".dsteps")
             check(f"{tag}: the day strip counts only what she can vote on: " + ("'Voted 1 of 1' (she voted on Bo's proposal earlier)" if name_it else "'Vote 0 of 1'"), ("Voted 1 of 1" if name_it else "Vote 0 of 1") in strip, strip)
