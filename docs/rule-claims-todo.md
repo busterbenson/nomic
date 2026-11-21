@@ -15,7 +15,7 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 - line 75: `notFound`
 - line 81: `run`
 - line 86: `route`
-- line 197: `fetch`
+- line 205: `fetch`
 
 ## src/lib/art-sweep.ts (1)
 
@@ -32,9 +32,9 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/lib/art.ts (3)
 
-- line 74: `queueNew`
-- line 93: `fail`
-- line 122: `gateOf`
+- line 76: `queueNew`
+- line 96: `fail`
+- line 125: `gateOf`
 
 ## src/lib/auth.ts (6)
 

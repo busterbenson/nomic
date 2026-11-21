@@ -591,10 +591,10 @@ button.pill[aria-pressed="true"]{background:color-mix(in srgb,var(--accent) 16%,
 .chatcol,.chatfab{display:none}
 .chat{display:flex;flex-direction:column;height:100%;background:var(--chat);border:1.5px solid var(--ink);border-radius:18px;overflow:hidden;box-shadow:4px 4px 0 var(--ink)}
 .chat .ch-h{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--chat-head)}
-.chat .por,.chatfab .por{flex:none;width:44px;height:44px;border-radius:50%;background:var(--accent-tint);border:1.5px solid var(--ink);display:grid;place-items:center;overflow:hidden}
+.chat .por,.chatfab .por{flex:none;width:44px;height:44px;border-radius:50%;background:var(--portrait-ground);border:1.5px solid var(--portrait-ink);--outline:var(--portrait-ink);display:grid;place-items:center;overflow:hidden}
 .chat .por svg,.chatfab .por svg{width:40px;height:40px}
 .chat .por.sm{width:28px;height:28px;border-width:1px}.chat .por.sm svg{width:26px;height:26px}
-.chat .por.gr,.chatfab .por.gr{background:color-mix(in srgb,#8E9B78 30%,var(--surface))}
+.chat .por.gr,.chatfab .por.gr{background:color-mix(in srgb,#8E9B78 30%,var(--portrait-ground))}
 .chat .cnm{display:flex;flex-direction:column;min-width:0;flex:1}
 .chat .cnm b{font-family:var(--font-display);font-weight:var(--display-weight);font-size:1.45rem;line-height:1}
 .chat .cnm small{font-family:var(--font-mono);font-size:.6rem;color:var(--ink-muted)}
@@ -668,10 +668,8 @@ button.pill[aria-pressed="true"]{background:color-mix(in srgb,var(--accent) 16%,
 @media (max-width:899.98px),(pointer:coarse){.chat .ch-in textarea{font-size:16px}}
 .wkprice{margin:0}
 /* Starling (rules 103.1, 106.2): the Rulebook's agent in the same window. Her slip is a draft proposal; past slips collapse to a line. */
-.chat .por.ch{background:color-mix(in srgb,#D7A63E 28%,var(--surface))}
-.chat .por.st,.chatfab .por.st{background:color-mix(in srgb,#2F3B52 22%,var(--surface))}
-/* her portrait is a near-black bird: on the dark theme it sits on a lighter backing so the body does not vanish into the circle */
-@media (prefers-color-scheme: dark){.chat .por.st,.chatfab .por.st{background:color-mix(in srgb,#9DAAC8 55%,var(--surface))}}
+.chat .por.ch{background:color-mix(in srgb,#D7A63E 28%,var(--portrait-ground))}
+.chat .por.st,.chatfab .por.st{background:color-mix(in srgb,#2F3B52 22%,var(--portrait-ground))}
 .chat .ch-today{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 12px;border-bottom:1px solid var(--line);background:var(--chat);font-family:var(--font-mono);font-size:.6rem}
 .chat .ch-today .k{font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-muted)}
 .chat .ch-today .n{margin-left:auto;color:var(--ink-muted)}
