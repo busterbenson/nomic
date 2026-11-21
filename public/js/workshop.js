@@ -186,9 +186,11 @@ ${editing ? formHTML(t) : factsHTML(t)}${reopenHTML(t)}${editing ? "" : tasksHTM
       const r = await api("/api/tickets", {});
       if (!r.ok) { S.openErr = (r.data && r.data.error) || "Something went wrong."; await refresh(); return; }
       await load();
-      await open(r.data.ticket, false);
       const c = chat && chat();
-      if (c) await c.attach(r.data.ticket, { open: true });   // the chat opens on the new draft (rule 801.2)
+      // Gremlin is there: the chat opens on the new draft and the player talks the commission through (rule 801.2); the card, with its form,
+      // is a click away (the slip's pill). Without him (no key: the chat says it can't be reached) the card and its form open, as in step 1.
+      if (c && c.ready()) { await c.attach(r.data.ticket, { open: true }); await refresh(); return; }
+      await open(r.data.ticket, false);
       return;
     }
     if (a === "all" || a === "main" || a === "filter" || a === "more") {
@@ -201,7 +203,7 @@ ${editing ? formHTML(t) : factsHTML(t)}${reopenHTML(t)}${editing ? "" : tasksHTM
       await refresh();
       return;
     }
-    if (a === "gremlin") { const c = chat && chat(); if (c && n) await c.attach(n, { open: true }); return; }
+    if (a === "gremlin") { const c = chat && chat(); if (c && n) { cards.close(); await c.attach(n, { open: true }); } return; }   // the card goes away first: it would cover the chat
     if (!n || S.busy) return;
     S.busy = true; S.err = ""; S.note = ""; cards.redraw();
     try {

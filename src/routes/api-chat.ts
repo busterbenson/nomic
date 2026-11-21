@@ -201,7 +201,7 @@ export async function turn(ctx: Ctx, player: Player, body: any, nowMs: number): 
   if (a.rejected.length) meta.rejected = a.rejected;
   if (a.notes.length) meta.notes = a.notes;
   if (a.refusal) meta.refusal = a.refusal;
-  lines.push(await reply("agent", a.say, meta, "ok", [a.clamped ? "price clamped" : "", a.unbuiltPrice ? "price without a build" : ""].filter(Boolean).join("; ") || null));
+  lines.push(await reply("agent", a.say, meta, a.refusal ? "refused" : "ok", a.refusal ? "commission refused" : [a.clamped ? "price clamped" : "", a.unbuiltPrice ? "price without a build" : ""].filter(Boolean).join("; ") || null));
   if (wrote.length && !saved) {
     const fresh: any = ticket ? await env.DB.prepare("SELECT state FROM tickets WHERE id = ?").bind(ticket.id).first() : null;
     const again = await loadToday(env, ctx.data.game!, later, player.id);

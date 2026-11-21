@@ -270,5 +270,7 @@ ${refused ? `<div class="tx">${esc(last.refusal)}</div>` : ""}
     if (n) await loadSlip(n); else S.slip = null;
     if (o.open) open(); else draw();
   }
-  return { sync, attach, open, load, minimize, state: () => S, draw, reduced };
+  /** Can he be reached? True until the server says there is no key. @rule 106.3 */
+  const ready = () => !S.state || S.state.ready !== false;
+  return { sync, attach, open, load, minimize, ready, state: () => S, draw, reduced };
 }

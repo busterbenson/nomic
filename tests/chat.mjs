@@ -110,6 +110,12 @@ try {
   const leak = await say(Ana, "SYNTH-LEAK", "W1");
   check("an answer that repeats the canary is dropped: a canned line, nothing written, logged invalid", leak.data.out === "malformed" && leak.data.messages[1].canned === "malformed" && !J(leak.data).includes("GRMLN") && acalls("outcome = 'invalid'").length === 1);
 
+  console.log("a refusal (801.3, 802.2) writes nothing and is a refused call in the night's read");
+  const snapRef = J(tk(1));
+  const refd = await say(Ana, REC["possible-privacy"].message, "W1");
+  check("his recorded refusal of a mailbox that shows everyone's email: 200, the ticket untouched, the reason on his line's meta, and the call logged as refused with a fixed reason (no player text)",
+    refd.status === 200 && J(tk(1)) === snapRef && !!JSON.parse(rows("Ana").at(-1).meta).refusal && acalls("outcome = 'refused' AND reason = 'commission refused'").length === 1 && !J(acalls("outcome = 'refused'")).includes("email"));
+
   console.log("failures: the message is kept, the line is canned, nothing is written (section 4.4)");
   const snap = J(tk(1));
   for (const [mode, code, outcome] of [["500", "failed", "failed"], ["refusal", "refused", "refused"], ["garbled", "malformed", "malformed"]]) {
@@ -250,7 +256,7 @@ try {
   const mod = (path, token = TOKEN) => fetch(`${A}/wk/api/moderator/${path}`, { headers: token ? { authorization: `Bearer ${token}` } : {} }).then(async (r) => ({ status: r.status, text: await r.text() }));
   const ag = await mod("agents?day=1");
   const agj = JSON.parse(ag.text);
-  check("the moderator's route needs the token; with it, calls by outcome, the month against its budget, reasons and who hit the cap", (await mod("agents?day=1", "")).status === 401 && (await mod("agents?day=1", "wrong-token-wrong-token-wrong")).status === 401 && ag.status === 200 && agj.calls.some((c) => c.outcome === "ok" && c.calls > 0) && agj.month.budget_micro === 60e6 && agj.reasons.some((r) => r.outcome === "malformed" || r.outcome === "invalid" || r.outcome === "failed") && agj.players_at_cap >= 1, ag.text.slice(0, 400));
+  check("the moderator's route needs the token; with it, calls by outcome, the month against its budget, reasons and who hit the cap", (await mod("agents?day=1", "")).status === 401 && (await mod("agents?day=1", "wrong-token-wrong-token-wrong")).status === 401 && ag.status === 200 && agj.calls.some((c) => c.outcome === "ok" && c.calls > 0) && agj.month.budget_micro === 60e6 && agj.reasons.some((r) => r.outcome === "malformed" || r.outcome === "invalid" || r.outcome === "failed") && agj.reasons.some((r) => r.outcome === "refused" && r.reason === "commission refused") && agj.players_at_cap >= 1, ag.text.slice(0, 400));
   check("it never carries a player's words, his replies, a prompt or a player id", !ag.text.includes("stone") && !ag.text.includes(WALL.slice(0, 20)) && !ag.text.includes(id.Ana) && !ag.text.includes("Lovely"));
 
   console.log("no key: he is out (section 4.4)");
