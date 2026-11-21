@@ -224,6 +224,36 @@ export async function edit(ctx: Ctx, player: any, raw: unknown, body: any, nowMs
   return out({ ok: true, ticket: await page(ctx, fresh, player, nowMs) });
 }
 
+// The ticket page for a ticket number, for the chat window (Gremlin's slip): the same page the ticket route serves.
+/** @rule 801.2 */
+export async function pageOf(ctx: Ctx, raw: unknown, player: any, nowMs: number) {
+  const game = ctx.data.game!;
+  const r = await findTicket(ctx.env, game.id, raw);
+  return visible(r, player) ? page(ctx, r, player, nowMs) : null;
+}
+
+// What Gremlin writes (rules 106.3, 801.2, 801.4): the player's own draft, through the same guard as their own edit (EDIT_GUARD: their draft,
+// not tied to a proposal, the whole day gate re-checked in the write), so he can never write an approved ticket, write during the lock, or
+// write after End turn. `patch` is what readGremlinAnswer returned: the only route by which `price` and `price_reason` are ever written
+// (readFields, the player's reader, does not read them). Returns whether it landed.
+/** @rule 801.2, 801.4, 106.3, 107.1, 202.4 */
+export async function gremlinWrite(env: Ctx["env"], game: any, player: any, t: any, patch: Record<string, any>, nowMs: number): Promise<boolean> {
+  const sets: string[] = [], binds: unknown[] = [];
+  for (const k of ["title", "brief", "estimate", "running_cost", "price", "price_reason"]) if (k in patch) { sets.push(`${k} = ?`); binds.push(patch[k]); }
+  if ("makes" in patch) { sets.push("makes = ?"); binds.push(JSON.stringify(patch.makes)); }
+  const f = patch as any;
+  if (!sets.length && !("tasks" in f)) return true;   // nothing to write is not a failed write
+  const gate = dayOpenBinds(game.day, nowMs, player.id);
+  const stmts = [env.DB.prepare(`UPDATE tickets SET ${[...sets, "updated_at = ?"].join(", ")} WHERE ${EDIT_GUARD}`).bind(...binds, nowIso(nowMs), t.id, player.id, ...gate)];
+  if ("tasks" in f) {
+    const ok = `EXISTS (SELECT 1 FROM tickets x JOIN games g ON g.id = x.game_id WHERE x.id = ? AND x.state = 'Draft' AND x.player_id = ? AND x.proposal_id IS NULL AND ${dayOpenSql})`;
+    stmts.push(env.DB.prepare(`DELETE FROM ticket_tasks WHERE ticket_id = ? AND ${ok}`).bind(t.id, t.id, player.id, ...gate));
+    f.tasks.forEach((text: string, i: number) => stmts.push(env.DB.prepare(`INSERT INTO ticket_tasks (ticket_id, pos, text) SELECT ?, ?, ? WHERE ${ok}`).bind(t.id, i + 1, text, t.id, player.id, ...gate)));
+  }
+  const res = await env.DB.batch(stmts);
+  return res[0]?.meta?.changes > 0;
+}
+
 // POST /api/tickets/<W3>/confirm: the commission is one of your proposals for the day (rule 801.1). It goes through the same
 // confirm as any proposal, so the day's limit, the number, the mark and the ballot are the proposals' own. A commission that
 // names nothing to make is refused (rule 801.3).

@@ -581,3 +581,83 @@ button.pill[aria-pressed="true"]{background:color-mix(in srgb,var(--accent) 16%,
 .tk .tr.stack{grid-template-columns:minmax(0,1fr)}
 .tk .tr.stack dt{padding-bottom:4px}
 .sdiff .wpill{align-self:flex-start}
+
+/* ==== The chat window ==== */
+/* The chat window (rules 106.3, 106.7): one component for the agents (Gremlin now, Starling in step 2b), written by public/js/chat.js.
+   Desktop: a sticky column beside the tab; minimize docks it as the corner pill and the tab reflows. Phone: the corner pill opens a
+   bottom sheet over a dim. The wrapper #bwrap says which: data-chat = off | open | min, data-sheet = open | closed. */
+.bwrap{display:block;min-width:0}
+.chatcol,.chatfab{display:none}
+.chat{display:flex;flex-direction:column;height:100%;background:var(--chat);border:1.5px solid var(--ink);border-radius:18px;overflow:hidden;box-shadow:4px 4px 0 var(--ink)}
+.chat .ch-h{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--chat-head)}
+.chat .por,.chatfab .por{flex:none;width:44px;height:44px;border-radius:50%;background:var(--accent-tint);border:1.5px solid var(--ink);display:grid;place-items:center;overflow:hidden}
+.chat .por svg,.chatfab .por svg{width:40px;height:40px}
+.chat .por.sm{width:28px;height:28px;border-width:1px}.chat .por.sm svg{width:26px;height:26px}
+.chat .por.gr,.chatfab .por.gr{background:color-mix(in srgb,#8E9B78 30%,var(--surface))}
+.chat .cnm{display:flex;flex-direction:column;min-width:0;flex:1}
+.chat .cnm b{font-family:var(--font-display);font-weight:var(--display-weight);font-size:1.45rem;line-height:1}
+.chat .cnm small{font-family:var(--font-mono);font-size:.6rem;color:var(--ink-muted)}
+.chat .cnm small.live{color:var(--accent);font-weight:700}
+.chat .ch-x{width:40px;height:40px;border-radius:50%;border:1.5px solid var(--line);background:var(--chat);color:var(--ink);display:grid;place-items:center;flex:none;font-size:1.2rem;line-height:1;cursor:pointer}
+.chat .ch-x:hover{background:var(--surface-2)}
+.chat .ch-close{display:none}
+.chat .ch-log{flex:1;min-height:0;overflow-y:auto;padding:12px 12px 16px;display:flex;flex-direction:column;gap:10px;scrollbar-width:thin}
+.chat .cday{position:sticky;top:-12px;z-index:2;display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:.6rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-muted);padding:6px 0;background:var(--chat)}
+.chat .cday::before,.chat .cday::after{content:"";flex:1;height:1px;background:var(--line)}
+.chat .msg{display:flex;gap:7px;align-items:flex-end;max-width:100%}
+.chat .msg .bub{padding:8px 12px;border-radius:16px;font-size:.92rem;line-height:1.45;min-width:0;overflow-wrap:anywhere;white-space:pre-wrap}
+.chat .msg.cher .bub{background:var(--sea);border:1.5px solid var(--ink);border-bottom-left-radius:4px;max-width:88%}
+.chat .msg.cher.cont{padding-left:35px}
+.chat .msg.cme{justify-content:flex-end}
+.chat .msg.cme .bub{background:var(--accent-tint);border-bottom-right-radius:4px;max-width:82%}
+.chat .ev{align-self:center;font-family:var(--font-mono);font-size:.6rem;color:var(--ink-muted);display:flex;gap:6px;align-items:center;padding:2px 10px;border-radius:999px;border:1px solid var(--line);background:var(--chat);text-align:center}
+.chat .typing{display:inline-flex;gap:4px;padding:4px 2px}
+.chat .typing i{width:7px;height:7px;border-radius:50%;background:var(--ink-muted);animation:chop 1.1s infinite ease-in-out}
+.chat .typing i:nth-child(2){animation-delay:.15s}.chat .typing i:nth-child(3){animation-delay:.3s}
+@keyframes chop{0%,60%,100%{transform:translateY(0);opacity:.5}30%{transform:translateY(-4px);opacity:1}}
+@media (prefers-reduced-motion:reduce){.chat .typing i{animation:none}}
+.chat .ch-in{border-top:1px solid var(--line);padding:8px 10px 10px;display:flex;flex-direction:column;gap:6px;background:var(--chat-head)}
+.chat .ch-in .chip{align-self:flex-start;display:inline-flex;gap:6px;align-items:center;font-size:.78rem;font-weight:700;padding:2px 4px 2px 2px;border-radius:999px;border:1px solid var(--line);background:var(--sea)}
+.chat .ch-in .chip .x{font-family:var(--font-mono);font-size:.8rem;color:var(--ink-muted);background:none;border:0;padding:0 6px;min-height:26px;cursor:pointer}
+.chat .ch-in .row{display:flex;gap:8px;align-items:flex-end}
+.chat .ch-in textarea{flex:1;min-width:0;min-height:44px;max-height:120px;resize:none;border:1.5px solid var(--line);border-radius:14px;background:var(--sea);color:var(--ink);padding:10px 12px;font:inherit;font-size:.92rem;box-sizing:border-box}
+.chat .ch-in textarea:disabled{opacity:.6}
+.chat .send{width:44px;height:44px;border-radius:50%;border:0;background:var(--accent);color:var(--on-accent);display:grid;place-items:center;flex:none;cursor:pointer}
+.chat .send:disabled{background:var(--surface-2);color:var(--ink-muted);cursor:not-allowed}
+.chat .ch-in .left{font-family:var(--font-mono);font-size:.6rem;color:var(--ink-muted);align-self:flex-end}
+.chat .ch-in .err{margin:0;font-size:.8rem;color:var(--err)}
+.chat .ch-in .closed{margin:0;font-family:var(--font-mono);font-size:.7rem;color:var(--ink-muted);padding:10px 4px;text-align:center;line-height:1.5}
+/* the slip: his ticket, inside the log */
+.chat .slip{position:relative;background:var(--accent-tint);border-top:2px dashed var(--accent);border-radius:12px;padding:12px 12px 10px;display:flex;flex-direction:column;gap:8px;font-size:.88rem}
+.chat .slip .cstamp{position:absolute;right:10px;top:10px;font-family:var(--font-mono);font-weight:700;font-size:.62rem;letter-spacing:.14em;color:var(--accent);border:2px solid var(--accent);border-radius:6px;padding:2px 7px;transform:rotate(-6deg);background:var(--accent-tint)}
+.chat .slip .cstamp.err{color:var(--err);border-color:var(--err)}
+.chat .slip .hd{font-weight:700;padding-right:84px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.chat .slip .tx{padding-left:10px;border-left:1.5px solid var(--err);font-size:.88rem;color:var(--ink-muted)}
+.chat .slip dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-family:var(--font-mono);font-size:.62rem}
+.chat .slip dt{color:var(--ink-muted);text-transform:uppercase;letter-spacing:.08em;padding-top:2px}
+.chat .slip dd{margin:0;font-weight:700;min-width:0;overflow-wrap:anywhere}
+.chat .slip .cwhy{font-weight:400;color:var(--ink-muted);font-family:var(--font-body);font-size:.8rem}
+.chat .slip.refused{background:var(--surface);border:1.5px dashed var(--err)}
+.chat .slip .makes{display:flex;flex-wrap:wrap;gap:4px}
+.chat .slip .mk{font-family:var(--font-body);font-weight:400;font-size:.8rem;border-style:solid;background:var(--chat)}
+.chat .slip .mk small{font-family:var(--font-mono);font-size:.58rem;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.06em}
+/* the corner pill: the minimized column, and the phone's way in */
+.chatfab{position:fixed;right:16px;bottom:18px;z-index:40;align-items:center;gap:8px;padding:5px 16px 5px 5px;border-radius:999px;border:1.5px solid var(--ink);background:var(--surface);color:var(--ink);box-shadow:3px 3px 0 var(--ink);font-family:var(--font-display);font-weight:var(--display-weight);font-size:1.2rem;min-height:52px;cursor:pointer}
+.chatfab .por{width:40px;height:40px}.chatfab .por svg{width:36px;height:36px}
+@media (min-width:900px){
+  .bwrap[data-chat="open"]{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:0 8px;align-items:start}
+  .bwrap[data-chat="open"] .chatcol{display:block;position:sticky;top:12px;padding:14px 16px 16px 0;height:calc(100vh - 24px);max-height:820px;min-height:520px}
+  .bwrap[data-chat="min"] .chatfab{display:inline-flex}
+}
+@media (max-width:899.98px){
+  .bwrap[data-chat="open"] .chatfab,.bwrap[data-chat="min"] .chatfab{display:inline-flex}
+  .bwrap[data-sheet="open"] .chatfab{display:none}
+  .bwrap[data-sheet="open"] .chatcol{display:block;position:fixed;left:0;right:0;bottom:0;top:56px;z-index:61}
+  .bwrap[data-sheet="open"] .chat{border-radius:20px 20px 0 0;border-bottom:0;box-shadow:none}
+  .bwrap[data-sheet="open"] .chat .ch-close{display:grid}
+  .bwrap[data-sheet="open"] .chat .ch-x[data-c="min"]{display:none}
+  .bwrap[data-sheet="open"]::before{content:"";position:fixed;inset:0;background:var(--scrim);z-index:60}
+  body.chat-sheet{overflow:hidden}
+}
+.wkprice{margin:0}
+/* ==== end of the chat window ==== */

@@ -10,6 +10,9 @@ import { join as pjoin, dirname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const ROOT = pjoin(dirname(fileURLToPath(import.meta.url)), "..");
+// The starter game's catalog as Gremlin's reader gets it from the bundle: no attribute is defined by a rule yet, and rule 704 lists what each kind
+// needs (templates/rules/704.ts).
+export const STARTER_CATALOG = { registry: {}, required: { creature: [{ key: "hearts", type: "number" }], item: [{ key: "acquired", type: "rule" }], structure: [{ key: "size", type: "size" }] } };
 
 // d1() below blocks the event loop (execFileSync of `wrangler d1 execute`, seconds each under load, 17 s for five in a
 // row). After a gap past ~15 s `wrangler dev` has dropped the idle keep-alive socket, the blocked client never saw it

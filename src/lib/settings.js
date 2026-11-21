@@ -33,11 +33,16 @@ export const DEFAULT_SETTINGS = {
   // How many proposals a player can confirm in a day (rule 103.2). The site refuses a confirm past it; withdrawn proposals
   // and drafts don't count. The draft-attempt cap grows with it (draftsPerDay in api-proposals.ts).
   "proposals.per_day": 3,
+  // How many of a player's messages Gremlin answers in a day (rule 106.7), counted from midnight to midnight in the game's time
+  // zone. The validator's upper bound is the site's own, so a vote can lower it and can't raise it past what the site pays for.
+  "gremlin.messages_per_day": 30,
+  // The most points Gremlin can charge for one commission (rule 801.4); his mood can't price a ticket past it.
+  "workshop.price_ceiling": 25,
 };
 
 // Settings added after engine 1 shipped. A game's settings.json may leave these out (its tagged files predate them),
 // and then the default applies. Present, they are validated like any other, and RULES.md must name them.
-export const OPTIONAL_SETTINGS = Object.freeze(["game.timezone", "night.apply_minutes", "night.apply_effort", "proposals.per_day"]);
+export const OPTIONAL_SETTINGS = Object.freeze(["game.timezone", "night.apply_minutes", "night.apply_effort", "proposals.per_day", "gremlin.messages_per_day", "workshop.price_ceiling"]);
 export const EFFORTS = Object.freeze(["low", "medium", "high"]);
 
 // Is this an IANA time zone the runtime knows? (Intl throws a RangeError for anything else.)
@@ -46,6 +51,8 @@ export function validTimeZone(v) {
   try { new Intl.DateTimeFormat("en-US", { timeZone: v }); return true; } catch { return false; }
 }
 
+// The site's own bounds (what it will pay for), not game settings: a passed proposal can lower these two settings, never raise them past here.
+export const GREMLIN_MESSAGES_MAX = 60, PRICE_CEILING_MAX = 100;
 const isInt = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 const evenInt = (v, lo, hi) => isInt(v, lo, hi) && v % 2 === 0;
@@ -60,6 +67,8 @@ const VALIDATORS = {
   "game.timezone": (v) => (validTimeZone(v) ? null : "must be a time zone name like America/Los_Angeles"),
   "night.apply_minutes": (v) => (isInt(v, 1, 60) ? null : "must be a whole number from 1 to 60"),
   "proposals.per_day": (v) => (isInt(v, 1, 10) ? null : "must be a whole number from 1 to 10"),
+  "gremlin.messages_per_day": (v) => (isInt(v, 0, GREMLIN_MESSAGES_MAX) ? null : `must be a whole number from 0 to ${GREMLIN_MESSAGES_MAX}`),
+  "workshop.price_ceiling": (v) => (isInt(v, 0, PRICE_CEILING_MAX) ? null : `must be a whole number from 0 to ${PRICE_CEILING_MAX}`),
   "night.apply_effort": (v) => (EFFORTS.includes(v) ? null : `must be one of ${EFFORTS.join(", ")}`),
 };
 function exactly(v, keys) {

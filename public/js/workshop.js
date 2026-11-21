@@ -9,7 +9,8 @@
 //     canCommission()    {allowed, reason}: the proposals' own answer (rule 103.2)
 //     refresh()          reload the page's state after a confirm
 //     cards              the card host (cards.js)
-//   W.load()  W.count()  W.tabHTML()  W.summaryHTML()  W.card(spec)  W.open(n, push)  W.openEntry(id, push)  W.click(el)  W.input(el)
+//     chat()             the chat window (chat.js) or null: "Commission something" opens it on the new draft (rule 801.2)
+//   W.load()  W.count()  W.tabHTML()  W.summaryHTML()  W.card(spec)  W.open(n, push)  W.openEntry(id, push)  W.click(el)  W.input(el)  W.apply(page)
 // A card is a ticket ({kind: "ticket", key: "W3"}) or a catalog entry ({kind: "entry", key: "I1"}); the entries come from /api/catalog (rules 701-705).
 // Nothing here decides what is allowed: the server's answers (the lock, one a day, a refusal) are shown as they come.
 import { nights, points, wPill } from "/js/commission.js";
@@ -17,8 +18,8 @@ import { nights, points, wPill } from "/js/commission.js";
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const lines = (s) => String(s || "").split("\n").map((x) => x.trim()).filter(Boolean);
 
-export function createWorkshop({ api, me, pill, rpill, when, canCommission, refresh, cards }) {
-  const S = { cat: { kinds: [], required: {}, registry: {}, entries: [] }, flavorOpen: {}, list: [], total: 0, counts: {}, view: "main", all: { rows: [], next: null, state: "", err: "" }, detail: {}, form: null, busy: false, err: "", note: "", openErr: "", draftPost: {} };
+export function createWorkshop({ api, me, pill, rpill, when, canCommission, refresh, cards, chat }) {
+  const S = { cat: { kinds: [], required: {}, registry: {}, entries: [] }, flavorOpen: {}, list: [], total: 0, counts: {}, view: "main", all: { rows: [], next: null, state: "", err: "" }, detail: {}, form: null, touched: new Set(), busy: false, err: "", note: "", openErr: "", draftPost: {} };
 
   /** @rule 801.2 */
   async function load() {
@@ -180,7 +181,7 @@ ${catalogHTML()}</div></div>`;
    * no kind needs), so saving by hand never drops what Gremlin or the night put there. @rule 801.2
    */
   function formFrom(t) {
-    return { n: t.n, title: t.title, brief: t.brief,
+    const f = { n: t.n, title: t.title, brief: t.brief,
       entries: t.makes.filter((m) => m.kind === "entry").map((m) => {
         const mine = new Set(requiredOf(m.catalogKind).map((a) => a.key));   // only the fields this kind's form shows are edited; every other attribute is kept as it is
         return { name: m.name, kind: m.catalogKind || "",
@@ -189,6 +190,9 @@ ${catalogHTML()}</div></div>`;
       }),
       rules: t.makes.filter((m) => m.kind === "rule" && m.num).map((m) => m.num).join(", "), numDrafts: Object.fromEntries(t.makes.filter((m) => m.kind === "rule" && m.num && m.draft).map((m) => [m.num, m.draft])), drafts: t.makes.filter((m) => m.kind === "rule" && !m.num).map((m) => m.draft),
       estimate: t.estimate, running_cost: t.running_cost, tasks: t.tasks.map((x) => x.text).join("\n") };
+    f.was = { makes: JSON.stringify(makesBody(f)), held: t.makes.length };   // what the lists made when the form opened
+    S.touched = new Set();   // no field has been typed in yet
+    return f;
   }
   /** One entry of the form as a `makes` item: the kind's required fields that are filled, plus what the form keeps. @rule 701.2, 704.1 */
   function entryBody(e) {
@@ -205,13 +209,18 @@ ${catalogHTML()}</div></div>`;
   }
   /** @rule 801.2 */
   function bodyOf(f) {
-    return {
-      title: f.title, brief: f.brief, estimate: Number(f.estimate), running_cost: f.running_cost, tasks: lines(f.tasks),
-      makes: [...f.entries.filter((e) => e.name.trim()).map(entryBody), ...String(f.rules || "").split(/[\s,]+/).filter(Boolean).map((num) => ({ kind: "rule", num, ...(Object.hasOwn(f.numDrafts || {}, num) ? { draft: f.numDrafts[num] } : {}) })), ...f.drafts.map((draft) => ({ kind: "rule", draft }))],
-    };
+    const b = { title: f.title, brief: f.brief, estimate: Number(f.estimate), running_cost: f.running_cost, tasks: lines(f.tasks) };
+    // The lists are sent only if the player changed them: what Gremlin drafted (kinds, sizes, a rule's draft) is kept when they didn't touch it.
+    const makes = makesBody(f);
+    if (!f.was || JSON.stringify(makes) !== f.was.makes) b.makes = makes;
+    return b;
+  }
+  /** What the form's lists make: its entries, the rules it names, and the rule drafts. @rule 801.2 */
+  function makesBody(f) {
+    return [...f.entries.filter((e) => e.name.trim()).map(entryBody), ...String(f.rules || "").split(/[\s,]+/).filter(Boolean).map((num) => ({ kind: "rule", num, ...(Object.hasOwn(f.numDrafts || {}, num) ? { draft: f.numDrafts[num] } : {}) })), ...f.drafts.map((draft) => ({ kind: "rule", draft }))];
   }
   /** @rule 801.3 */
-  const makesNothing = (f) => !bodyOf(f).makes.length;
+  const makesNothing = (f) => { const m = makesBody(f); return f.was && JSON.stringify(m) === f.was.makes ? !f.was.held : !m.length; };
   /** One required attribute's field, by the type of its value. @rule 704.1 */
   function attrField(i, a, val, off) {
     const id = `wfEa${i}-${esc(a.key)}`, at = `data-ef="attr" data-ei="${i}" data-key="${esc(a.key)}"`;
@@ -241,8 +250,9 @@ ${f.drafts.map((d, i) => `<div class="wkdraft"><span>${esc(d)}</span><button typ
 <label for="wfEstimate">Nights</label><input id="wfEstimate" type="number" min="1" max="99" step="1" value="${esc(f.estimate)}"${off}>
 <label for="wfCost">Running cost</label><input id="wfCost" maxlength="200" value="${esc(f.running_cost)}"${off}>
 <label for="wfTasks">Tasks</label><textarea id="wfTasks" rows="3"${off}>${esc(f.tasks)}</textarea>
+<label>Price</label><p class="wkprice">${esc(points(t.price))}${t.price_reason ? `<span class="mnote"> · ${esc(t.price_reason)}</span>` : ""}</p>
 ${S.err ? `<p class="notice err" role="alert">${esc(S.err)}</p>` : ""}${S.note ? `<p class="vmsg" role="status">${esc(S.note)}</p>` : ""}
-<div class="row"><button class="btn small" type="button" data-w="confirm"${off}${can && !nothing ? "" : " disabled"}>Put it on tomorrow's ballot</button><button class="btn ghost small" type="button" data-w="save"${off}${t.can.edit.allowed ? "" : " disabled"}>Save</button>${can ? `<span class="mnote" id="wfWhy"${nothing ? "" : " hidden"}>It makes nothing yet.</span>` : `<span class="mnote">${esc(t.can.confirm.reason || "")}</span>`}</div></div>`;
+<div class="row"><button class="btn small" type="button" data-w="confirm"${off}${can && !nothing ? "" : " disabled"}>Put it on tomorrow's ballot</button><button class="btn ghost small" type="button" data-w="save"${off}${t.can.edit.allowed ? "" : " disabled"}>Save</button>${chat && chat() && player() ? `<button class="btn ghost small" type="button" data-w="gremlin">Talk to Gremlin</button>` : ""}${can ? `<span class="mnote" id="wfWhy"${nothing ? "" : " hidden"}>It makes nothing yet.</span>` : `<span class="mnote">${esc(t.can.confirm.reason || "")}</span>`}</div></div>`;
   }
   /** @rule 801.2, 801.4, 803.1 */
   function factsHTML(t) {
@@ -301,6 +311,10 @@ ${editing ? formHTML(t) : factsHTML(t)}${reopenHTML(t)}${editing ? "" : tasksHTM
       const r = await api("/api/tickets", {});
       if (!r.ok) { S.openErr = (r.data && r.data.error) || "Something went wrong."; await refresh(); return; }
       await load();
+      const c = chat && chat();
+      // Gremlin is there: the chat opens on the new draft and the player talks the commission through (rule 801.2); the card, with its form,
+      // is a click away (the slip's pill). Without him (no key: the chat says it can't be reached) the card and its form open, as in step 1.
+      if (c && c.ready()) { await c.attach(r.data.ticket, { open: true }); await refresh(); return; }
       await open(r.data.ticket, false);
       return;
     }
@@ -316,12 +330,14 @@ ${editing ? formHTML(t) : factsHTML(t)}${reopenHTML(t)}${editing ? "" : tasksHTM
     }
     if (a === "flavor") { S.flavorOpen[el.dataset.entry] = !S.flavorOpen[el.dataset.entry]; cards.redraw(); return; }
     if ((a === "addentry" || a === "rmentry" || a === "rmdraft") && S.form && !S.busy) {
+      S.touched.add(a === "rmdraft" ? "rules" : "entries");
       if (a === "addentry") S.form.entries.push({ name: "", kind: "", vals: {}, keep: {} });
       else if (a === "rmdraft") S.form.drafts.splice(Number(el.dataset.ei), 1);
       else S.form.entries.splice(Number(el.dataset.ei), 1);
       cards.redraw();
       return;
     }
+    if (a === "gremlin") { const c = chat && chat(); if (c && n) { cards.close(); await c.attach(n, { open: true }); } return; }   // the card goes away first: it would cover the chat
     if (!n || S.busy) return;
     S.busy = true; S.err = ""; S.note = ""; cards.redraw();
     try {
@@ -351,6 +367,7 @@ ${editing ? formHTML(t) : factsHTML(t)}${reopenHTML(t)}${editing ? "" : tasksHTM
     const ef = el.dataset && el.dataset.ef;
     const entry = ef && S.form ? S.form.entries[Number(el.dataset.ei)] : null;
     if (entry) {
+      S.touched.add("entries");
       if (ef === "name") entry.name = el.value;
       else if (ef === "attr") entry.vals[el.dataset.key] = el.value;
       else if (ef === "kind") {   // the kind's required fields follow the kind, and take the values the entry already holds for them
@@ -360,7 +377,7 @@ ${editing ? formHTML(t) : factsHTML(t)}${reopenHTML(t)}${editing ? "" : tasksHTM
       }
     }
     if (entry || (Object.hasOwn(FIELD, el.id) && S.form)) {
-      if (!entry) S.form[FIELD[el.id]] = el.value;
+      if (!entry) { S.form[FIELD[el.id]] = el.value; S.touched.add(FIELD[el.id]); }
       // the Put-it-on-the-ballot button follows what the form makes (rule 801.3), without redrawing under the caret
       const b = document.querySelector('#mroot [data-w="confirm"]');
       const why = document.getElementById("wfWhy"); if (why) why.hidden = !makesNothing(S.form);
@@ -371,5 +388,19 @@ ${editing ? formHTML(t) : factsHTML(t)}${reopenHTML(t)}${editing ? "" : tasksHTM
     }
   }
 
-  return { load, count, tabHTML, summaryHTML, card, open, openEntry, click, input, list: () => S.list };
+  /** A ticket page the chat window got back from a turn (Gremlin wrote the draft): the card shows it and the form is made again from it. @rule 801.2 */
+  function apply(t) {
+    S.detail[t.n] = t;
+    if (S.form && S.form.n === t.n) {
+      // what the player has typed in the open form stays; every field they have not touched takes what Gremlin wrote
+      const typed = new Set(S.touched), fresh = formFrom(t);
+      const lists = typed.has("entries") || typed.has("rules");   // the two lists change together or not at all (a half-refreshed pair would look edited)
+      for (const k of Object.keys(fresh)) if (k !== "n" && k !== "was" && !typed.has(k) && !(lists && ["entries", "rules", "numDrafts", "drafts"].includes(k))) S.form[k] = fresh[k];
+      if (!lists) S.form.was = fresh.was;
+      S.touched = typed;
+    }
+    if (cards.isOpen && cards.isOpen()) cards.redraw();
+  }
+
+  return { load, count, tabHTML, summaryHTML, card, open, openEntry, click, input, apply, list: () => S.list };
 }
