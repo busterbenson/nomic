@@ -608,7 +608,7 @@ button.pill[aria-pressed="true"]{background:color-mix(in srgb,var(--accent) 16%,
 .chat .msg{display:flex;gap:7px;align-items:flex-end;max-width:100%}
 .chat .msg .bub{padding:8px 12px;border-radius:16px;font-size:.92rem;line-height:1.45;min-width:0;overflow-wrap:anywhere;white-space:pre-wrap}
 .chat .msg.cher .bub{background:var(--sea);border:1.5px solid var(--ink);border-bottom-left-radius:4px;max-width:88%}
-.chat .msg.cher.cont,.chat .msg.chalant{padding-left:35px}
+.chat .msg.cher.cont{padding-left:35px}
 .chat .msg .who{display:block;font-weight:700;font-size:.78rem;color:var(--accent);margin-bottom:2px}
 .chat .msg.cme{justify-content:flex-end}
 .chat .msg.cme .bub{background:var(--accent-tint);border-bottom-right-radius:4px;max-width:82%}
@@ -663,6 +663,7 @@ button.pill[aria-pressed="true"]{background:color-mix(in srgb,var(--accent) 16%,
 }
 .wkprice{margin:0}
 /* Starling (rules 103.1, 106.2): the Rulebook's agent in the same window. Her slip is a draft proposal; past slips collapse to a line. */
+.chat .por.ch{background:color-mix(in srgb,#D7A63E 28%,var(--surface))}
 .chat .por.st,.chatfab .por.st{background:color-mix(in srgb,#2F3B52 22%,var(--surface))}
 /* her portrait is a near-black bird: on the dark theme it sits on a lighter backing so the body does not vanish into the circle */
 @media (prefers-color-scheme: dark){.chat .por.st,.chatfab .por.st{background:color-mix(in srgb,#9DAAC8 55%,var(--surface))}}

@@ -39,6 +39,8 @@ try {
     ok(await c.post(CH, { body: REC["q-withdraw"].message }), `${n} question`);
     ok(await c.post(CH, { rule: "401", body: REC["d-amend"].message }), `${n} draft`);
   }
+  // Chalant's answer to an escalated turn, in Ada's and Dee's chats: his own line, named, with his portrait
+  d1(state, ["Ada", "Dee"].map((n) => `INSERT INTO chat_messages (game_id, player_id, agent, local_date, day, role, body, at) VALUES ('${gid}', '${pid(n)}', 'starling', '${new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date())}', 1, 'chalant', 'Chalant here. A reword changes one rule; the drafter keeps the rest as written.', '${new Date().toISOString()}')`).join(";\n"));
   // Cy: three proposals locked in (3 of 3) and a draft beside them: drafting is free, Lock it in is disabled with the reason
   for (const t of ["401", "402", "403"]) { const r = ok(await cy.post(P, { kind: "mark", target: t }), "cy draft " + t); ok(await cy.post(`${P}/${r.data.proposal.id}/confirm`, {}), "cy lock " + t); }
   ok(await cy.post(CH, { rule: "401", body: REC["d-amend"].message }), "cy draft slip");
