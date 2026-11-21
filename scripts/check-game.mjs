@@ -12,12 +12,16 @@ const dir = process.argv[2];
 const rulesDir = join(dir, "rules");
 const problems = [];
 const mods = [];
+const exported = [];
 try {
   const rulesMd = readFileSync(join(dir, "RULES.md"), "utf8");
   const settings = JSON.parse(readFileSync(join(dir, "settings.json"), "utf8"));
   const files = readdirSync(rulesDir).filter((f) => /^\d+\.ts$/.test(f)).sort();
   for (const f of files) {
-    const mod = (await import(pathToFileURL(join(rulesDir, f)).href)).default;
+    const ns = await import(pathToFileURL(join(rulesDir, f)).href);
+    const mod = ns.default;
+    // What a module exports beside its rule: the attributes it defines (703.1), and rule 704's list of what each kind needs (704.1).
+    if (ns.attributes !== undefined || ns.required !== undefined) exported.push({ rule: Number(f.slice(0, -3)), attributes: ns.attributes, required: ns.required });
     if (!mod || mod.rule !== Number(f.slice(0, -3))) problems.push(`rules/${f} must default-export defineRule({ rule: ${Number(f.slice(0, -3))}, ... })`);
     else mods.push(mod);
   }
@@ -27,4 +31,4 @@ try {
   problems.push(`could not load the game: ${e.message}`);
 }
 const hooks = Object.fromEntries(mods.map((m) => [m.rule, Object.keys(m).filter((k) => k !== "rule")]));
-console.log(JSON.stringify({ problems, hooks }));
+console.log(JSON.stringify({ problems, hooks, exported }));

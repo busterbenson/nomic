@@ -23,6 +23,7 @@ import * as apiMe from "./routes/api-me";
 import * as apiRules from "./routes/api-rules";
 import * as apiTurn from "./routes/api-turn";
 import * as apiProposals from "./routes/api-proposals";
+import * as apiCatalog from "./routes/api-catalog";
 import * as apiTickets from "./routes/api-tickets";
 import * as apiBoard from "./routes/api-board";
 import * as apiAction from "./routes/api-action";
@@ -52,7 +53,7 @@ type Methods = { get?: Handler; post?: Handler };
 const API: Record<string, Methods> = {
   game: apiGame, me: apiMe, join: apiJoin, login: apiLogin, logout: apiLogout,
   turn: apiTurn, rules: apiRules, notifications: apiNotifications, board: apiBoard, action: apiAction,
-  day: apiDay, "end-turn": apiEndTurn, proposals: apiProposals, tickets: apiTickets, votes: apiVotes, ballot: apiBallot, invite: apiInvite, start: apiStart,
+  day: apiDay, "end-turn": apiEndTurn, proposals: apiProposals, tickets: apiTickets, catalog: apiCatalog, votes: apiVotes, ballot: apiBallot, invite: apiInvite, start: apiStart,
 };
 
 const secure = (res: Response) => {
@@ -163,6 +164,8 @@ async function route(request: Request, env: Env, execCtx: ExecutionContext): Pro
     ctx.params.id = segs[3];
     return run({ post: apiProposals.action(segs[4]) }, method, ctx);
   }
+  // /api/catalog/<id>: one catalog entry (rule 701.1)
+  if (sub === "api" && segs.length === 4 && segs[2] === "catalog") { ctx.params.id = segs[3]; return run({ get: apiCatalog.one }, method, ctx); }
   // /api/tickets/<W3> (the ticket page), and /api/tickets/<W3>/edit, /confirm, /reopen and /post (rules 801, 804)
   if (sub === "api" && segs[2] === "tickets" && (segs.length === 4 || segs.length === 5)) {
     ctx.params.n = segs[3];

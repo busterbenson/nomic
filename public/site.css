@@ -527,7 +527,43 @@ button.pill[aria-pressed="true"]{background:color-mix(in srgb,var(--accent) 16%,
 .tposts p{flex:1 1 100%;margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
 .plpill.npc{border:1.5px solid var(--accent);color:var(--accent);border-radius:999px;padding:1px 10px;font-weight:700;font-size:.82rem}
 .wkform,.wkpost{max-width:none}
-.wkform input,.wkform textarea,.wkpost textarea{font:inherit;color:inherit;background:var(--sea);border:1.5px solid var(--line);border-radius:10px;padding:8px;min-width:0;width:100%;box-sizing:border-box}
+.wkform input,.wkform select,.wkform textarea,.wkpost textarea{font:inherit;color:inherit;background:var(--sea);border:1.5px solid var(--line);border-radius:10px;padding:8px;min-width:0;width:100%;box-sizing:border-box}
 .wkform input[type=number]{max-width:8em}
 .wkform textarea,.wkpost textarea{resize:vertical}
+/* Catalog entries (rules 701-705): the art slot, the kind chip, attribute rows, flavor, the Makes cards and the Workshop's catalog groups. */
+.arttile{flex:none;width:72px;height:72px;border-radius:14px;background:var(--surface-2);border:1.5px solid var(--line);display:grid;place-items:center;font-family:var(--font-display);font-weight:var(--display-weight);font-size:1.9rem;line-height:1;color:var(--ink-muted)}
+.arttile.big{width:120px;height:120px;border-radius:20px;font-size:3.2rem}
+.kchip{border-color:var(--ink-muted)}
+.pill.dashed{border-style:dashed}
+.makes2{display:flex;flex-direction:column;gap:10px}
+.mkc{display:flex;gap:14px;align-items:flex-start;padding:12px;border:1.5px solid var(--line);border-radius:14px;background:var(--surface);min-width:0}
+.mkc.dim{border-style:dashed}
+.mkc.dim .arttile{opacity:.7}
+.mkb{display:flex;flex-direction:column;gap:6px;min-width:0;flex:1;align-items:flex-start}
+.mkn{margin:0;font-size:1.05rem;font-weight:700;overflow-wrap:anywhere}
+.erows{margin:0;display:flex;flex-direction:column;width:100%}
+.er{display:grid;grid-template-columns:84px minmax(0,1fr);gap:2px 12px;align-items:center;padding:5px 0;border-top:1px solid var(--line)}
+.er dt{font-family:var(--font-mono);font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-muted)}
+.er dd{margin:0;min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;overflow-wrap:anywhere}
+.eempty{color:var(--ink-muted)}
+.estate{font-family:var(--font-mono);font-size:.62rem;color:var(--ink-muted);border:1.5px dashed var(--line);border-radius:999px;padding:1px 8px;white-space:nowrap}
+.emissing{margin:0;color:var(--ink-muted);font-size:.86rem}
+.foot{flex:none}
+.foot polygon{fill:var(--accent-tint);stroke:var(--accent);stroke-width:1.5;stroke-linejoin:round}
+.cgroup{display:flex;flex-direction:column;gap:10px}
+.cgroup h3{font-family:var(--font-mono);font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-muted);margin:0;display:flex;gap:8px;align-items:baseline}
+.cgrid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px}
+.ccard{display:flex;gap:12px;align-items:flex-start;padding:12px;border:1.5px solid var(--ink);border-radius:16px;background:var(--surface);min-width:0}
+.clink{display:inline-flex;align-items:baseline;gap:8px;background:none;border:0;padding:2px 0;min-height:30px;font:inherit;color:inherit;text-align:left;cursor:pointer;max-width:100%}
+.clink:hover .mkn{text-decoration:underline}
+.eid{color:var(--ink-muted);font-size:.72rem}
+.cmade{margin:0;font-size:.7rem;color:var(--ink-muted);display:flex;gap:8px;align-items:center}
+.wkcat{gap:16px}
+.wkentry{border:1.5px dashed var(--line);border-radius:12px;padding:10px;margin:8px 0;display:flex;flex-direction:column;gap:6px;min-width:0}
+.mtop .kchip{align-self:center}
+.mcard.tk .erows{margin:10px 0 0}
+.flv .er:first-child{border-top:0}
+.flh{margin:8px 0 0;font-family:var(--font-mono);font-size:.62rem;font-weight:400;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-muted)}
+.tk .tr.stack{grid-template-columns:minmax(0,1fr)}
+.tk .tr.stack dt{padding-bottom:4px}
 .sdiff .wpill{align-self:flex-start}

@@ -1,6 +1,7 @@
 // The Workshop's tickets, the pure parts (plain JavaScript, so the Worker and the plain-node tests share ONE
 // implementation): what a ticket's fields may hold (rules 801.2, 801.3), who may post in its discussion (rule 804.1), and
 // the SQL the count runs when a commission passes or fails (rules 801.4, 803.1). src/routes/api-tickets.ts is the routes.
+import { readEntryDraft } from "./catalog.js";
 import { dayOpenSql } from "./day-gate.js";
 
 export const STATES = ["Draft", "Proposed", "Ready", "Approved", "Building", "Done", "Refused", "Failed", "Shelved"];
@@ -21,24 +22,32 @@ const clean = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 const RULE_NUM = /^\d{3}(?:\.\d{1,3})?$/;
 
 /**
- * What a ticket's `makes` holds: the catalog entries and rule numbers it will add or change. Each item is
- * {kind: "entry", name} or {kind: "rule", num}; anything else is refused with the reason. Returns {makes} or {error}.
- * @rule 801.2
+ * What a ticket's `makes` holds: the catalog entries and rules it will add or change (rules 701.2, 801.2). An entry is
+ * {kind: "entry", name} and may carry {catalogKind, attrs, flavor, needsBuild, art, copiedFrom}, checked by the catalog's guards
+ * (src/lib/catalog.js, against `ctx`: the game's registry and required lists). A rule is {kind: "rule", num}, or {kind: "rule", draft}
+ * while Chalant has not numbered it. Two entries are the same only when name and kind both match. Anything else is refused with the
+ * reason. Returns {makes} or {error}.
+ * @rule 701.2, 801.2
  */
-export function readMakes(v) {
+export function readMakes(v, ctx = {}) {
   if (!Array.isArray(v)) return { error: "What it makes must be a list." };
   if (v.length > LIMITS.makes) return { error: `A commission can name at most ${LIMITS.makes} things to make.` };
   const makes = [];
   for (const m of v) {
     if (m && m.kind === "entry") {
-      const name = clean(m.name);
-      if (!name) return { error: "A catalog entry needs a name." };
-      if (name.length > LIMITS.makeName) return { error: `A catalog entry's name is at most ${LIMITS.makeName} characters.` };
-      if (!makes.some((x) => x.kind === "entry" && x.name.toLowerCase() === name.toLowerCase())) makes.push({ kind: "entry", name });
+      const r = readEntryDraft(m, ctx);
+      if ("error" in r) return r;
+      const e = r.entry;
+      if (!makes.some((x) => x.kind === "entry" && x.name.toLowerCase() === e.name.toLowerCase() && (x.catalogKind ?? null) === (e.catalogKind ?? null))) makes.push(e);
     } else if (m && m.kind === "rule") {
       const num = clean(m.num);
-      if (!RULE_NUM.test(num)) return { error: `"${num}" is not a rule number, like 801 or 801.2.` };
-      if (!makes.some((x) => x.kind === "rule" && x.num === num)) makes.push({ kind: "rule", num });
+      const draft = clean(m.draft);
+      if (num && !RULE_NUM.test(num)) return { error: `"${num}" is not a rule number, like 801 or 801.2.` };
+      if (!num && !draft) return { error: `"${num}" is not a rule number, like 801 or 801.2.` };
+      if (draft.length > LIMITS.task) return { error: `A rule's draft is at most ${LIMITS.task} characters.` };
+      const item = num ? { kind: "rule", num } : { kind: "rule", draft };
+      if (num && draft) item.draft = draft;
+      if (!makes.some((x) => x.kind === "rule" && (num ? x.num === num : !x.num && x.draft === draft))) makes.push(item);
     } else return { error: "Each thing it makes is a catalog entry (with a name) or a rule (with a number)." };
   }
   return { makes };
@@ -46,10 +55,11 @@ export function readMakes(v) {
 
 /**
  * The fields a player may set on a draft ticket, from a request body. Only the fields present are read (an edit may change
- * one). Returns {fields} (title, brief, makes, estimate, running_cost, tasks) or {error}.
+ * one). `ctx` is the game's registry and required lists, for the entries in `makes`. Returns {fields} (title, brief, makes, estimate,
+ * running_cost, tasks) or {error}.
  * @rule 801.2
  */
-export function readFields(body) {
+export function readFields(body, ctx = {}) {
   const f = {};
   if (!body || typeof body !== "object") return { error: "Send the ticket's fields as JSON." };
   if ("title" in body) {
@@ -61,7 +71,7 @@ export function readFields(body) {
     if (f.brief.length > LIMITS.brief) return { error: `A brief is at most ${LIMITS.brief} characters.` };
   }
   if ("makes" in body) {
-    const r = readMakes(body.makes);
+    const r = readMakes(body.makes, ctx);
     if ("error" in r) return r;
     f.makes = r.makes;
   }

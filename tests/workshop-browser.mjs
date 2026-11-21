@@ -1,7 +1,7 @@
 // The Workshop tab in real Chromium (tests/browser-workshop.py): the ticket list, "Commission something" and the form, the
 // ticket page with its tasks, log and thread, posting, and the commission's row on the ballot, in light and dark at 1280 and
 // 390. A real `wrangler dev` on a throwaway LOCAL D1; the rules come from templates/RULES.md through a local stub.
-// Set WORKSHOP_SHOTS=<dir> to keep the screenshots. Run: node tests/workshop-browser.mjs
+// A second game, "catalogued", holds catalog entries (tests/browser-catalog.py). Set WORKSHOP_SHOTS=<dir> to keep the screenshots. Run: node tests/workshop-browser.mjs
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
@@ -57,6 +57,26 @@ try {
   d1(state, `WITH RECURSIVE c(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM c WHERE i < 60) INSERT INTO tickets (id, game_id, number, player_id, title, brief, state, created_at, updated_at) SELECT 'old' || i, '${gid}', 100 + i, '${id("Cy")}', 'Old ticket ' || i, 'Done long ago.', CASE WHEN i % 3 = 0 THEN 'Shelved' ELSE 'Done' END, '2026-10-01T08:00:00.000Z', '2026-10-' || printf('%02d', 1 + i / 3) || 'T08:00:00.000Z' FROM c`);
   const r2 = await promisify(execFile)("/usr/local/bin/python3", [ROOT + "/tests/browser-workshop-list.py", srv.base, shots || "-", cookie], { timeout: 240000, maxBuffer: 1 << 24 });
   process.stdout.write(r2.stdout);
+  // Then a game with a catalog (the fixture game "catalogued": the starter rules, rule 602 defining speed, seven entries in catalog.json):
+  // the Workshop's catalog groups, an entry's page with its flavor expander, a ticket whose Makes cards show a kind, attribute rows with
+  // "No rule yet", a structure's footprint and flavor, and the draft form's kind picker and required fields (tests/browser-catalog.py).
+  stub.files["/busterbenson/catalogued/main/RULES.md"] = readFileSync(ROOT + "/tests/fixtures/games/catalogued/RULES.md", "utf8");
+  const cg = await createGame(state, { slug: "catalogued", name: "The Catalog", repo: "busterbenson/catalogued", rulesBase: stub.base });
+  const eli = await join(srv.base, "catalogued", cg.code, { email: "eli@example.com", name: "Eli", color: "teal" });
+  const fay = await join(srv.base, "catalogued", cg.code, { email: "fay@example.com", name: "Fay", color: "vermilion" });
+  startPlaying(state, "catalogued");
+  const cgid = d1(state, "SELECT id FROM games WHERE slug = 'catalogued'")[0].id;
+  const CT = "/catalogued/api/tickets";
+  const fn = ok(await fay.post(CT, {}), "fay open").data.ticket;
+  ok(await fay.post(`${CT}/${fn}/edit`, { title: "A very large hat and a garden wall", brief: "A hat so large it shades the whole tile, a low stone wall for Ada's garden, and a creature that has not been given a speed.", makes: [
+    { kind: "entry", name: "Very large hat", catalogKind: "item", attrs: { acquired: "801" }, flavor: { smell: "tar" } },
+    { kind: "entry", name: "Garden wall", catalogKind: "structure", attrs: { size: "2x1" }, flavor: { material: "stone", height: "low" } },
+    { kind: "entry", name: "Wyrm", catalogKind: "creature", attrs: { hearts: 4, flies: true }, flavor: { colour: "slate", mood: "grumpy", smell: "of wet stone", habitat: "the north hill" }, needsBuild: ["flies"] },
+    { kind: "rule", num: "801.2" }, { kind: "rule", draft: "A creature that flies can cross walls." }], estimate: 1, tasks: ["Draw them"] }), "fay edit");
+  d1(state, `UPDATE tickets SET state = 'Approved', queue_pos = 1, price = 0, paid = 0, paid_at = 'x', approved_at = '2026-11-19T08:00:00.000Z' WHERE game_id = '${cgid}' AND number = ${Number(fn.slice(1))}`);
+  const ccookie = [...eli.jar].find(([k]) => k === "s|/catalogued")[1];
+  const r3 = await promisify(execFile)("/usr/local/bin/python3", [ROOT + "/tests/browser-catalog.py", srv.base, shots || "-", ccookie], { timeout: 240000, maxBuffer: 1 << 24 });
+  process.stdout.write(r3.stdout);
 } catch (e) {
   failed = true;
   if (e.stdout) process.stdout.write(e.stdout);

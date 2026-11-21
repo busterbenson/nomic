@@ -14,6 +14,9 @@
 //     `worksWith` records which other rules share each rule's hooks, both written into the bundle for rule cards
 //   * the modules load and assemble (exactly one spawn rule), and RULES.md, settings.json and the modules agree
 //     (the same check as the game's own rulebook test)
+//   * the catalog (rules 701-705): the attributes the modules export (`export const attributes`) and rule 704's required lists become
+//     the game's registry (one rule per key), catalog.json (none = no entries) is checked against them, and the three catalog claim
+//     checks pass (src/engine/claims.js catalogClaimProblems); all are written into the bundle
 //   * the game's own tests (node --test rules/*.test.ts) pass against THIS engine
 // Game code is only ever run in child processes with a scrubbed environment (no deploy token in reach), under Node's
 // permission model (read its own folder and the engine source; no writes, no processes, no workers).
@@ -32,13 +35,14 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { ENGINE_VERSION } from "../src/engine/api.js";
-import { checkFileClaims, claimMap, hookClaimProblems, knownNumbers, worksWith } from "../src/engine/claims.js";
+import { catalogClaimProblems, checkFileClaims, claimMap, hookClaimProblems, knownNumbers, worksWith } from "../src/engine/claims.js";
+import { buildRegistry, readCatalog } from "../src/lib/catalog.js";
 import { lintModule } from "../src/engine/lint.js";
 import { checkRulebook } from "../src/engine/rulesmd.js";
 import { validateSettings } from "../src/lib/settings.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const TOP_LEVEL = new Set(["RULES.md", "game.json", "settings.json", "package.json", "package-lock.json", "README.md", "AGENTS.md", "CLAUDE.md", "LICENSE", "LICENSE.md", ".gitignore", "rules", "rulings", "docs", ".github"]);
+const TOP_LEVEL = new Set(["RULES.md", "game.json", "settings.json", "catalog.json", "package.json", "package-lock.json", "README.md", "AGENTS.md", "CLAUDE.md", "LICENSE", "LICENSE.md", ".gitignore", "rules", "rulings", "docs", ".github"]);
 const MAX_RULES_BYTES = 200_000;
 const MAX_FILES = 1000, MAX_BYTES = 10_000_000;
 const SLUG = /^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/;
@@ -214,6 +218,15 @@ export function checkTree(dirIn, label, { starter = false, skipTests = false } =
   try { verdict = JSON.parse(chk.stdout.trim().split("\n").pop()); } catch { fail(`${label}: the module check did not run:\n${chk.out.slice(-1500)}`); }
   if (verdict.problems.length) fail(`${label}: ${verdict.problems.join("\n  ")}`);
   // The hooks the LOADED modules have must each be a tagged function the checker can see (closes any shape the line scan misses).
+  // The catalog (rules 701-705): the attributes the modules define and what each kind needs become the registry and the required
+  // lists; catalog.json (none = no entries) is held against them; the three catalog claim checks run on the modules' code.
+  const built = buildRegistry(verdict.exported ?? []);
+  if ("errors" in built) fail(`${label}: the catalog's attributes failed:\n  ${built.errors.join("\n  ")}`);
+  const claimProblems = catalogClaimProblems({ ...built, known, sources });
+  if (claimProblems.length) fail(`${label}: catalog claims failed:\n  ${claimProblems.join("\n  ")}`);
+  const catalogPath = join(dir, "catalog.json");
+  const read = readCatalog(existsSync(catalogPath) ? readJson(catalogPath, `${label}: catalog.json`) : [], built);
+  if ("errors" in read) fail(`${label}: ${read.errors.join("\n  ")}`);
   const hookProblems = files.flatMap((f) => hookClaimProblems(`rules/${f}`, sources[`rules/${f}`], verdict.hooks?.[parseInt(f)] ?? []));
   if (hookProblems.length) fail(`${label}: rule claims failed:\n  ${hookProblems.join("\n  ")}`);
 
@@ -225,7 +238,7 @@ export function checkTree(dirIn, label, { starter = false, skipTests = false } =
     if (!t.ok) fail(`${label}: the game's tests fail against this engine:\n${t.out.slice(-4000)}`);
     testSummary = `${t.passed} passed`;
   }
-  return { rulesMd, settings, files, tests: testSummary, claims, worksWith: worksWith(verdict.hooks ?? {}) };
+  return { rulesMd, settings, files, tests: testSummary, claims, worksWith: worksWith(verdict.hooks ?? {}), registry: built.registry, required: built.required, catalog: read.entries };
 }
 
 // ---- writing the bundle ------------------------------------------------------------------------------
@@ -250,8 +263,8 @@ export function writeBundle(out, entries, starter) {
   const engineSources = Object.fromEntries(readdirSync(eng).filter((f) => /\.(js|ts)$/.test(f) && !/\.d\.ts$/.test(f)).sort().map((f) => [`src/engine/${f}`, readFileSync(join(eng, f), "utf8")]));
   lines.push("", `// Rule number -> the functions that carry it out ("the code that does this"), for rule cards.`, `export const ENGINE_CLAIMS: Record<string, string[]> = ${JSON.stringify(claimMap(engineSources))};`);
   lines.push("", "export const GAMES: Record<string, any> = {");
-  for (const g of games) lines.push(`  ${JSON.stringify(g.e.slug)}: ${obj({ names: g.names, slug: g.e.slug, repo: g.e.repo, tag: g.e.tag, day: g.e.day, sha: g.e.sha, rulesMd: g.e.rulesMd, settings: g.e.settings, claims: g.e.claims, worksWith: g.e.worksWith })},`);
-  lines.push("};", "", `export const STARTER: any = ${obj({ names: st.names, rulesMd: st.rulesMd, settings: st.settings, claims: st.claims, worksWith: st.worksWith })};`, "");
+  for (const g of games) lines.push(`  ${JSON.stringify(g.e.slug)}: ${obj({ names: g.names, slug: g.e.slug, repo: g.e.repo, tag: g.e.tag, day: g.e.day, sha: g.e.sha, rulesMd: g.e.rulesMd, settings: g.e.settings, claims: g.e.claims, worksWith: g.e.worksWith, registry: g.e.registry, required: g.e.required, catalog: g.e.catalog })},`);
+  lines.push("};", "", `export const STARTER: any = ${obj({ names: st.names, rulesMd: st.rulesMd, settings: st.settings, claims: st.claims, worksWith: st.worksWith, registry: st.registry, required: st.required, catalog: st.catalog })};`, "");
   writeFileSync(join(out, "games.ts"), lines.join("\n"));
 }
 

@@ -21,5 +21,5 @@ test("the modules assemble: exactly one spawn rule and one order rule", () => {
 });
 test("the text still has the rules the modules belong to", () => {
   const nums = parseRulesMd(rulesMd).rules.map((r) => r.number);
-  for (const n of [107, 202, 401, 402, 504, 505]) assert.ok(nums.includes(n));
+  for (const n of [107, 202, 401, 402, 504, 505, 704]) assert.ok(nums.includes(n));
 });
