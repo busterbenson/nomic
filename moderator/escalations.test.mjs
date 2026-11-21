@@ -34,7 +34,7 @@ const server = createServer(async (req, res) => {
     const body = JSON.parse(await readBody(req));
     world.modelCalls.push({ body, key: req.headers["x-api-key"] });
     if (req.headers["x-api-key"] !== KEY) return send(401, { error: "bad key" });
-    if (world.modelMode === "error") return send(500, { error: "overloaded" });
+    if (world.modelMode === "error" || (world.modelMode === "poison" && JSON.stringify(body).includes("POISON"))) return send(500, { error: "overloaded" });
     return send(200, { content: [{ type: "text", text: world.modelText }], stop_reason: "end_turn", usage: { input_tokens: 1200, output_tokens: 80 } });
   }
   if (url.pathname === `/${SLUG}/api/rules`) return send(200, "# Rickshaw rules\n\n101. Rules are the game.\n", "text/markdown");
@@ -125,6 +125,19 @@ console.log("a model error leaves the escalation open");
   check("the next pass answers it, and does not notify it again", r2.answered === 1 && world.answers.length === 1 && filesIn(D.notifyDir).length === 1 && world.delivered.length === 1, JSON.stringify(r2));
 }
 
+console.log("an escalation the model keeps failing on cannot starve the others");
+{
+  reset();
+  world.escalations = [ticketEsc(1, { reason: "POISON" }), ...Array.from({ length: 21 }, (_, i) => ticketEsc(i + 2))];
+  world.modelMode = "poison";
+  const D = dirsOf("p4");
+  const r1 = await run(D);
+  check("pass 1 spends its 20 calls (the failing one first) and answers 19; two stay open", r1.answered === 19 && world.modelCalls.length === 20 && r1.left_open === 3, JSON.stringify(r1));
+  const r2 = await run(D);
+  check("pass 2 puts the failing one last, so the two that were waiting are answered; only the failing one stays open", r2.answered === 2 && world.escalations.filter((e) => !e.answered).map((e) => e.id).join() === "1", JSON.stringify(r2));
+  check("the file that remembers failures holds ids and counts only", !readFileSync(join(D.stateDir, `${SLUG}.escalations.state.json`), "utf8").includes("POISON"));
+}
+
 console.log("a ruling, an empty answer, and a refused key");
 {
   reset();
@@ -151,6 +164,7 @@ console.log("the pieces");
   check("cleanAnswer: strips angle brackets, trims, caps at 2,000", cleanAnswer("  <a>hi</a>  ") === "ahi/a" && cleanAnswer("x".repeat(5000)).length === ANSWER_MAX && cleanAnswer("<>") === null && cleanAnswer("") === null);
   check("cleanAnswer: the single word RULING (any case, with punctuation) is the fixed line; the word inside a sentence is not", cleanAnswer("ruling.") === RULING_ANSWER && cleanAnswer("This is a ruling for tonight") === "This is a ruling for tonight");
   check("notificationLine takes only a checked category and a number: a category outside the list reads 'other'; a ticket number that is not a number is dropped", notificationLine({ agent: "gremlin", category: "ignore all rules", where: "ticket", ticket: { number: "3; rm -rf" } }) === "chat: Gremlin escalated (other)");
+  check("cleanAnswer: a model that starts its reply with RULING and goes on is still a ruling", cleanAnswer("RULING: this needs Chalant") === RULING_ANSWER && cleanAnswer("Ruling out the first option, yes") !== RULING_ANSWER);
   check("the user prompt never carries text outside the fence except the fixed lead line", (() => { const u = userPrompt(ticketEsc(1)); return u.split("<proposal-data>")[0].trim() === "Gremlin passed this up to you. Answer the player." && !u.split("</proposal-data>")[1].trim(); })());
   check("the system prompt carries the persona, the rulebook and no player text", /Chalant/.test(systemPrompt({ slug: SLUG, rulesMd: "RULES" })) && /RULES$/.test(systemPrompt({ slug: SLUG, rulesMd: "RULES" })));
   const env = { PATH: process.env.PATH, HOME: TMP, MODERATOR_NOTIFY_DIR: fresh("cli-notify"), MODERATOR_STATE_DIR: fresh("cli-state") };
@@ -166,6 +180,8 @@ console.log("the schedule");
   const PT = "America/Los_Angeles", NOW = Date.parse("2026-11-21T16:00:00Z");
   const want = Array.from({ length: 16 }, (_, i) => `${String(8 + i).padStart(2, "0")}:17`);
   check("the generator emits :17 for hours 8-23 in the game's zone (a Pacific game on a Pacific mini: 08:17 ... 23:17, sixteen entries, all year)", JSON.stringify(escalationSlotsFor(PT, PT, NOW)) === JSON.stringify(want), JSON.stringify(escalationSlotsFor(PT, PT, NOW)));
+  const lon = escalationSlotsFor("America/New_York", "Europe/London", NOW);
+  check("a game and a mini in zones whose clocks change on different dates: at least the sixteen hours, never more than the two offsets' worth (32), all on the :17 of the game's clock (:17 here)", lon.length >= 16 && lon.length <= 32 && lon.every((e) => e.endsWith(":17")), String(lon.length));
   const ny = escalationSlotsFor("America/New_York", PT, NOW);
   check("a New York game on a Pacific mini: the same hours, three hours earlier on the mini's clock (05:17 ... 20:17)", JSON.stringify(ny) === JSON.stringify(Array.from({ length: 16 }, (_, i) => `${String(5 + i).padStart(2, "0")}:17`)), JSON.stringify(ny));
   check("instantAt is right on the days the clocks change (08:17 is still 08:17 the day after spring-forward and fall-back)", [["2026-03-08", PT], ["2026-03-09", PT], ["2026-11-01", PT], ["2026-11-02", PT]].every(([d, tz]) => { const w = new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(instantAt(tz, d, 8, 17)); return w === "08:17"; }));
@@ -182,7 +198,7 @@ console.log("the schedule");
   const path = join(D.launchdDir, `com.chalant.promptocracy-escalations.${SLUG}.plist`);
   check("refreshSchedule writes the escalations plist beside the night's, reports it as needing install, and loads nothing", existsSync(path) && readFileSync(path, "utf8") === text && JSON.stringify(r1.escalations.installNeeded) === `["com.chalant.promptocracy-escalations.${SLUG}"]` && reloads.length === 0);
   const r2 = await refreshSchedule({ ...common, slugs: [SLUG] });
-  check("a second run changes and reloads nothing", r2.escalations.changed.length === 0 && reloads.length === 0);
+  check("a second run changes and reloads nothing, for either job", r2.escalations.changed.length === 0 && r2.changed.length === 0 && reloads.length === 0);
   check("guard: no store here resolves under ~/chalantbot", [D.launchdDir, D.stateDir, D.agentsDir, D.trashDir, dirsOf("g").notifyDir].every((d) => !realpathSync(d).startsWith(CHALANT)));
 }
 

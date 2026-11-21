@@ -20,7 +20,7 @@
 //   MODERATOR_NOTIFY_DIR                  where the notification goes (default ~/chalantbot/_notifications)
 //   MODERATOR_STATE_DIR                   where the pass's log goes (default ~/chalantbot/logs/promptocracy-moderator)
 //   MODEL_BASE_URL                        the Messages API's address (default https://api.anthropic.com; tests point it at a stub)
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -79,7 +79,7 @@ export function userPrompt(item) {
 /** What the model wrote, made safe for the answer route: plain text, no angle brackets, within the limit; RULING becomes the fixed line. Null if nothing is left. @rule 106.4 */
 export function cleanAnswer(raw) {
   let t = String(raw ?? "").replace(/\r\n?/g, "\n").trim();
-  if (/^RULING\W*$/i.test(t)) return RULING_ANSWER;
+  if (/^RULING\W*$/i.test(t) || /^RULING\b/.test(t)) return RULING_ANSWER;
   t = t.replace(/[<>]/g, "").replace(/\n{3,}/g, "\n\n").trim();
   if (t.length > ANSWER_MAX) t = `${t.slice(0, ANSWER_MAX - 3).trimEnd()}...`;
   return t || null;
@@ -159,25 +159,33 @@ export async function runEscalations(opts) {
     const r = await fetchImpl(`${api}/${slug}/api/rules`, { signal: AbortSignal.timeout(API_TIMEOUT_MS) });
     if (r.ok) rulesMd = await r.text(); else await r.body?.cancel().catch(() => {});
   } catch { /* handled below */ }
-  if (!rulesMd) { log({ event: "rules_unavailable" }); return { ...out, left_open: items.length }; }
+  if (!rulesMd) { log({ event: "rules_unavailable" }); return { ...out, status: "failed", left_open: items.length }; }
   const system = systemPrompt({ slug, rulesMd });
-  for (const item of items.slice(0, MAX_ANSWERS_PER_PASS)) {
-    if (!Number.isInteger(item.id)) continue;
+  // An escalation the model keeps failing on goes to the back of the line, so it cannot hold the first 20 places every hour and starve the rest.
+  const stateFile = join(stateDir, `${slug}.escalations.state.json`);
+  let fails = {};
+  try { fails = JSON.parse(readFileSync(stateFile, "utf8")).fails ?? {}; } catch { /* none yet */ }
+  const saveFails = () => { try { writeFileSync(stateFile, JSON.stringify({ fails })); } catch { /* the order is a nicety */ } };
+  const ordered = items.filter((i) => Number.isInteger(i.id)).map((i, n) => ({ i, n })).sort((a, b) => (fails[a.i.id] ?? 0) - (fails[b.i.id] ?? 0) || a.n - b.n).map((x) => x.i);
+  for (const item of ordered.slice(0, MAX_ANSWERS_PER_PASS)) {
+    const fail = () => { fails[item.id] = (fails[item.id] ?? 0) + 1; out.left_open++; };
     const m = await askModel({ apiKey, base: opts.modelBase, system, user: userPrompt(item), model: opts.model, fetchImpl });
-    if (!m.ok) { log({ event: "model_error", id: item.id, reason: m.reason }); out.left_open++; continue; }
+    if (!m.ok) { log({ event: "model_error", id: item.id, reason: m.reason }); fail(); continue; }
     const text = cleanAnswer(m.text);
-    if (!text) { log({ event: "model_empty", id: item.id }); out.left_open++; continue; }
+    if (!text) { log({ event: "model_empty", id: item.id }); fail(); continue; }
     try {
       const r = await fetchImpl(`${api}/${slug}/api/moderator/escalations/${item.id}/answer`, {
         method: "POST", headers: { ...auth, "content-type": "application/json" }, signal: AbortSignal.timeout(API_TIMEOUT_MS),
         body: JSON.stringify({ body: text, usage: m.usage }),
       });
       await r.body?.cancel().catch(() => {});
-      if (r.ok || r.status === 409) { out.answered += r.ok ? 1 : 0; log({ event: r.ok ? "answered" : "already_answered", id: item.id, ruling: text === RULING_ANSWER }); }
-      else { log({ event: "answer_refused", id: item.id, status: r.status }); out.left_open++; }
-    } catch (e) { log({ event: "answer_failed", id: item.id, reason: e?.name || "error" }); out.left_open++; }
+      if (r.ok || r.status === 409) { out.answered += r.ok ? 1 : 0; delete fails[item.id]; log({ event: r.ok ? "answered" : "already_answered", id: item.id, ruling: text === RULING_ANSWER }); }
+      else { log({ event: "answer_refused", id: item.id, status: r.status }); fail(); }
+    } catch (e) { log({ event: "answer_failed", id: item.id, reason: e?.name || "error" }); fail(); }
   }
-  out.left_open += Math.max(0, items.length - MAX_ANSWERS_PER_PASS);
+  for (const id of Object.keys(fails)) if (!items.some((i) => String(i.id) === id)) delete fails[id];
+  saveFails();
+  out.left_open += Math.max(0, ordered.length - MAX_ANSWERS_PER_PASS);
   return out;
 }
 
