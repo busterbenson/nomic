@@ -85,7 +85,7 @@ export function view(r: any, viewerId?: string | null, electorate?: number) {
 }
 
 // Draft (rule 103.1). Returns the draft, or the refusal.
-/** @rule 103.1, 108.3 */
+/** @rule 103.1, 103.6, 108.3 */
 export async function draft(ctx: Ctx, player: any, body: any, nowMs: number): Promise<Out> {
   const { env } = ctx;
   const { game, day, turn } = await loadToday(env, ctx.data.game!, nowMs, player.id);

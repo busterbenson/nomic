@@ -101,22 +101,22 @@ export function nextClauseNum(rule) {
 }
 
 // ---- parts that are not wired yet ---------------------------------------------------------------------------------
-// No rule is untouchable. These parts are still run by the site itself
-// (an engine hook a game rule controls does not exist for them yet), so a proposal that changes one would pass and do
-// nothing. It is refused when it is drafted instead, with the reason "not wired yet": it never gets a P-number. A part leaves
-// this list in the same change that ships its hook. They are the eight parts the site used to fix, each now an ordinary rule with a
-// unanimous mark: sign-in 102.5, the proposal limit 103.2, hidden votes 104.4, votes counted by code 104.5, the lock 107.1,
-// the deadline 107.6, End turn 202.4, the day 203.1.
-const NOT_WIRED = ["102.5", "103.2", "104.4", "104.5", "107.1", "107.6", "202.4", "203.1"];
-/** The reason a refusal carries (drafting reason "not wired"; the sentence starts the same way). @rule 103.1 */
+// No rule is untouchable. These parts are still run by the site itself (no engine hook a game rule controls exists for
+// them yet), so a proposal that changes one would pass and do nothing. It is refused when it is drafted instead, with the
+// reason "not wired yet": it never gets a P-number. Rule 103.6 states this and lists the parts; a part leaves this list,
+// and 103.6, in the same change that ships its hook. They are the eight parts the site used to fix, each now an ordinary
+// rule with a unanimous mark (sign-in 102.5, the proposal limit 103.2, hidden votes 104.4, votes counted by code 104.5, the
+// lock 107.1, the deadline 107.6, End turn 202.4, the day 203.1), and 103.6 itself.
+const NOT_WIRED = ["102.5", "103.2", "103.6", "104.4", "104.5", "107.1", "107.6", "202.4", "203.1"];
+/** The reason a refusal carries (drafting reason "not wired"; the sentence starts the same way). @rule 103.6 */
 export const NOT_WIRED_REASON = "not wired";
-/** The parts of a game's rulebook that are not wired yet: the list, minus parts the game's text lacks. @rule 103.1 */
+/** The parts of a game's rulebook that are not wired yet: the list, minus parts the game's text lacks. @rule 103.6 */
 export function notWiredParts(book) {
   return NOT_WIRED.filter((p) => has(book, p)).sort();
 }
 // The not-wired parts a change to `num` would touch: the number itself, a clause inside a rule, or a rule or clause inside a
 // block.
-/** @rule 103.1 */
+/** @rule 103.6 */
 export function notWiredTouched(book, num) {
   const n = book.byNum[num];
   return notWiredParts(book).filter((p) => {
@@ -125,15 +125,15 @@ export function notWiredTouched(book, num) {
   });
 }
 // The refusal sentence: state, not helper text.
-/** @rule 103.1 */
+/** @rule 103.6 */
 export const notWiredSentence = (parts) => `Not wired yet: ${parts.map((p) => `rule ${p}`).join(", ")}.`;
 // The same refusal when the change itself is elsewhere and only collides with the part: the player is told which part.
-/** @rule 103.1 */
+/** @rule 103.6 */
 export const notWiredConflict = (parts) => `This would conflict with ${parts.map((p) => `rule ${p}`).join(", ")}, which ${parts.length > 1 ? "are" : "is"} not wired yet.`;
 // Refuse at drafting. Adding a clause or a rule changes nothing already there, and a reword that keeps the text and only
 // sets a setting the part names is allowed (a setting is data the site already reads, so that change does take effect);
 // anything else that touches a not-wired part is refused. Returns the refusal sentence, or null.
-/** @rule 103.1 */
+/** @rule 103.6 */
 export function notWiredRefusal(book, d) {
   if (d.kind === "add") return null;
   const hit = notWiredTouched(book, d.target);
@@ -263,7 +263,7 @@ export function scopeProblem(book, target, text) {
 /** @rule 103.1 */
 const tidy = (t) => String(t).replace(/\n(?=\s*(?:\*\*)?\d{3}\.\d+(?:\*\*)?\s)/g, "\n\n").split(/\n\s*\n/).map(plainTxt).filter(Boolean).join("\n\n");
 // Is this a part that is not wired yet, or a rule made only of such clauses?
-/** @rule 103.1 */
+/** @rule 103.6 */
 const notWiredWhole = (book, n) => {
   if (notWiredParts(book).includes(n)) return true;
   const r = book.byNum[n];
@@ -383,7 +383,7 @@ export function draftOf(book, req, after = null) {
 //   - settings only when they name a setting tag in the target's own text, with a value the game can run;
 //   - the text stays inside the target (scopeProblem) and really changes something (or sets a setting).
 // The text is returned in the rulebook's plain style, like the "before" text it is shown against.
-/** @rule 103.1, 108.3 */
+/** @rule 103.1, 103.6, 108.3 */
 export function readModelAnswer(book, req, raw) {
   let a = raw;
   if (typeof a === "string") {

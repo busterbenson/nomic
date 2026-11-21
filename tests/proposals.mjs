@@ -11,7 +11,7 @@ import { join as pjoin } from "node:path";
 import { ROOT, client, createGame, d1, join, migrate, newState, startPlaying, freePort, startRulesStub, startServer } from "./lib.mjs";
 import { dayOpenBinds } from "../src/lib/day-gate.js";
 import {
-  DRAFT_INSERT_SQL, WITHDRAW_SQL, answerSchema, citedIn, conflictCandidates, draftOf, markFor, modelPrompt, needsModel, nextRuleNum, notWiredParts, notWiredRefusal, parseBook, readModelAnswer, readRequest, referencesTo, settingsText, textOf,
+  DRAFT_INSERT_SQL, WITHDRAW_SQL, answerSchema, citedIn, clauseText, conflictCandidates, draftOf, markFor, modelPrompt, needsModel, nextRuleNum, notWiredParts, notWiredRefusal, parseBook, readModelAnswer, readRequest, referencesTo, settingsText, textOf,
 } from "../src/lib/proposals.js";
 
 let pass = 0, fail = 0;
@@ -72,11 +72,12 @@ console.log("the moderator's code drafts (rule 103.1), after the mockup's makeDr
 console.log("parts that are not wired yet (no untouchable rules), refused at drafting");
 {
   const refuse = (body, after = null, settings = {}) => { const r = req(body); return notWiredRefusal(B, { ...r, ...draftOf(B, r, after), settings }); };
-  const EIGHT = ["102.5", "103.2", "104.4", "104.5", "107.1", "107.6", "202.4", "203.1"];
-  check("the parts not wired yet are the eight things rule 110 used to fix (sign-in, the proposal limit, hidden votes, votes counted by code, the lock, the deadline, End turn, the day), each present in the starter rules", J(notWiredParts(B)) === J(EIGHT), J(notWiredParts(B)));
-  check("each of the eight is refused when a reword of it is drafted, with the reason 'Not wired yet' naming it, and it is the same refusal word for word",
-    EIGHT.every((t) => refuse({ kind: "amend", target: t, words: "x", prefilled: true }) === `Not wired yet: rule ${t}.`), J(EIGHT.map((t) => refuse({ kind: "amend", target: t, words: "x", prefilled: true }))));
-  check("repealing each of the eight is refused too (a repeal is a change to it)", EIGHT.every((t) => refuse({ kind: "repeal", target: t.split(".")[0] }) !== null));
+  const EIGHT = ["102.5", "103.2", "104.4", "104.5", "107.1", "107.6", "202.4", "203.1"], NINE = [...EIGHT, "103.6"].sort();
+  check("the parts not wired yet are the eight things rule 110 used to fix (sign-in, the proposal limit, hidden votes, votes counted by code, the lock, the deadline, End turn, the day) and rule 103.6 that says so, each present in the starter rules", J(notWiredParts(B)) === J(NINE), J(notWiredParts(B)));
+  check("rule 103.6 states the restriction and lists exactly those parts, so the text and the code agree (a part leaves both together)", J([...new Set(citedIn(clauseText(B.byNum["103.6"])))].filter((n) => n !== "103.6").sort()) === J(EIGHT) && /refused when it is drafted, with the reason "not wired yet"/.test(clauseText(B.byNum["103.6"])) && /and this rule\./.test(clauseText(B.byNum["103.6"])), J(citedIn(clauseText(B.byNum["103.6"]))));
+  check("each of them (103.6 too: it is not wired either) is refused when a reword of it is drafted, with the reason 'Not wired yet' naming it, and it is the same refusal word for word",
+    NINE.every((t) => refuse({ kind: "amend", target: t, words: "x", prefilled: true }) === `Not wired yet: rule ${t}.`), J(NINE.map((t) => refuse({ kind: "amend", target: t, words: "x", prefilled: true }))));
+  check("repealing each is refused too (a repeal is a change to it)", NINE.every((t) => refuse({ kind: "repeal", target: t.split(".")[0] }) !== null));
   check("repealing 107 (it holds the lock, 107.1, and the deadline, 107.6) is refused, naming both parts and no rule 110", refuse({ kind: "repeal", target: "107" }) === "Not wired yet: rule 107.1, rule 107.6." && !/110/.test(refuse({ kind: "repeal", target: "107" })));
   check("there is no rule 110 to propose on: it is not in the book, and a request naming it is an error, not a draft", !B.byNum["110"] && !B.byNum["110.1"] && /no rule 110/.test(req({ kind: "repeal", target: "110" }).error));
   check("and the number 110 is never handed to a new rule: block 100's next free number is 109, and after a 109 it is 111",
