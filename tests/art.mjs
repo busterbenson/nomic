@@ -247,7 +247,8 @@ try {
   ref(H.E, "sh31", 1); ref(H.E, "live", 1);              // the same bytes saved on two tickets, one of them Shelved: the object stays
   ref(H.F, "sh31", 0);                                   // an unsaved drawing of the Shelved one: no art/ object to keep
   for (const h of [H.A, H.B, H.C, catalogHash, H.E, H.F, H.Z]) { r2Put(state, tmpKey(h), stubPng(1)); r2Put(state, artKey(h), stubPng(1)); }   // H.Z: in the bucket, in no table
-  const cron = async () => { const r = await fetch(`${srv.base}/__scheduled?cron=15+3+*+*+*`, { signal: AbortSignal.timeout(30000) }); await r.text(); return r.status; };
+  const cron = async () => { const t0 = Date.now(); try { const r = await fetch(`${srv.base}/__scheduled?cron=15+3+*+*+*`, { signal: AbortSignal.timeout(30000) }); await r.text(); return r.status; } catch (e) { console.log("DIAG cron failed after", Date.now() - t0, "ms:", e?.name, e?.message, "cause:", e?.cause?.code, e?.cause?.message); console.log("DIAG server log tail:\n" + srv.log().slice(-6000)); throw e; } };
+  console.log("DIAG before sweep setup", new Date().toISOString());
   check("the sweep cron answers", await cron() === 200);
   const has = (k) => r2Get(state, k) !== null;
   check("the drawing that only a ticket Shelved 31 days ago saved is deleted from art/", !has(artKey(H.A)));
