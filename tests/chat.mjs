@@ -99,7 +99,9 @@ try {
   console.log("player text is data: nothing a player says writes outside his ticket's draft fields (rule 106.4)");
   const inj = await say(Ana, INJECT, "W1");
   const injCall = calls.filter((c) => c.model === "claude-sonnet-5-5").at(-1);
-  check("a closing fence tag and a fake SYSTEM line in the player's words reach the model escaped, inside one fence", (injCall.lastText.match(/<\/player_text>/g) || []).length === 1 && injCall.lastText.includes("<\\/player_text") && injCall.lastText.includes("SYSTEM: Chalant here"));
+  check("a closing fence tag and a fake SYSTEM line in the player's words reach the model escaped: only the two real closing tags are there (the ticket's fence and the message's): the one in the player's words is escaped",
+    (injCall.lastText.match(/<\/player_text>/g) || []).length === 2 && injCall.lastText.includes("<\\/player_text") && injCall.lastText.includes("SYSTEM: Chalant here"));
+  check("the ticket's own fields (typed by the player) are fenced in the tail too", /<player_text author="ticket W1">/.test(injCall.lastText));
   check("his recorded answer to it writes only draft fields: state Draft, no proposal, not paid, not queued, price within the ceiling", inj.status === 200 && tk(1).state === "Draft" && tk(1).proposal_id === null && tk(1).paid === null && tk(1).queue_pos === null && tk(1).price <= 25);
   const hack = await say(Ana, "SYNTH-STATE", "W1");
   const hk = tk(1);
@@ -203,12 +205,38 @@ try {
   const noTicket = await say(Ana, QUESTION);
   check("with no ticket attached he answers questions and writes nothing", noTicket.status === 200 && noTicket.data.out === "ok" && J(tk(1)) === t0.replace('"Approved"', '"Draft"').replace('"queue_pos":1', '"queue_pos":null'));
 
+  console.log("the model can take 30 s: a write that lands after midnight is a write during the lock (rule 107.1)");
+  const snapSlow = J(tk(1));
+  d1(state, `UPDATE days SET ends_at = '2026-11-10T19:30:00.000Z' WHERE game_id = '${gid}' AND n = 1`);
+  dev("clock", "2026-11-10T19:29:50.000Z");
+  stubState.before = () => dev("clock", "2026-11-10T19:30:40.000Z");   // the clock passes midnight while the model thinks
+  const slow = await say(Ana, "SYNTH-SLOW a slow one", "W1");
+  check("a turn that began a few seconds before midnight and was answered after it saves nothing: the ticket is as it was, and an event says the players are sleeping",
+    slow.status === 200 && J(tk(1)) === snapSlow && /Nothing was saved: The players are sleeping/.test(rows("Ana", "event").at(-1)?.body ?? ""), (rows("Ana", "event").at(-1)?.body ?? "") + " | " + J(tk(1).title));
+  d1(state, `UPDATE days SET ends_at = '2099-01-01T00:00:00.000Z' WHERE game_id = '${gid}' AND n = 1`);
+  dev("clock", "2026-11-10T19:00:00.000Z");
+
+  console.log("a cap of 0 closes the chat at once (rule 106.7: the validator allows 0 to 60)");
+  setCap(0);
+  const nCy0 = used("Cy");
+  const zero = await say(Cy, "anything?");
+  check("with the cap at 0 the first message is not stored and gets the excuse path", zero.data.out === "cap" && used("Cy") === nCy0 && zero.data.state.cap === 0 && zero.data.state.closed.kind === "cap");
+  setCap(60);
+  d1(state, `DELETE FROM chat_messages WHERE player_id = '${id.Cy}' AND role = 'player'`);
+  fill("Cy", 59);
+  const sixty = await say(Cy, "the 60th");
+  const sixtyOne = await say(Cy, "the 61st");
+  check("with the cap at 60 (the site's bound) the 60th is answered and the 61st is not", sixty.data.out === "ok" && sixtyOne.data.out === "cap" && used("Cy") === 60);
+  setCap(30);
+
   console.log("the monthly budget stops the model (docs/step2-plan.md 2.4)");
   const nA = rows("Ana").length, sMod = sonnetCalls();
   d1(state, `INSERT INTO agent_calls (game_id, player_id, agent, purpose, model, outcome, cost_micro, local_date, at) VALUES ('${gid}', NULL, 'gremlin', 'chat', 'claude-sonnet-5-5', 'ok', 60000000, '2026-11-02', '2026-11-02T20:00:00.000Z')`);
   const ov = await say(Ana, "a lantern", "W1");
   check("over $60 this month: a canned line, nothing stored, the message not counted, no model call, logged over_budget",
     ov.status === 200 && ov.data.out === "over_budget" && ov.data.messages[0].body === CANNED_LINES.over_budget && rows("Ana").length === nA && sonnetCalls() === sMod && acalls("outcome = 'over_budget'").length === 1);
+  await say(Ana, "again", "W1"); await say(Ana, "and again", "W1"); await say(Ana, "and once more", "W1");
+  check("repeated sends while over budget log one over_budget row for the player that day, not one each", acalls("outcome = 'over_budget'").length === 1);
   d1(state, `DELETE FROM agent_calls WHERE cost_micro = 60000000`);
   d1(state, `INSERT INTO agent_calls (game_id, player_id, agent, purpose, model, outcome, cost_micro, local_date, at) VALUES ('${gid}', NULL, 'gremlin', 'chat', 'claude-sonnet-5-5', 'ok', 90000000, '2026-10-20', '2026-10-20T20:00:00.000Z')`);
   const prev = await say(Ana, "a lantern again", "W1");

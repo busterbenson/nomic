@@ -71,7 +71,16 @@ with sync_playwright() as p:
         # the draft's ticket opens from the slip's pill
         page.click("#chatLog .slip .wpill"); page.wait_for_selector("#mroot .mcard")
         check(f"{tag}: the slip's W1 pill opens the ticket's card, and the card shows his price and reason", "W1" in text(page, "#mroot .mcard") and "6 points" in text(page, "#mroot .mcard") and "Charmed discount" in text(page, "#mroot .mcard"))
+        page.evaluate("document.querySelector('#mroot .wkprice').scrollIntoView({block: 'center'})"); page.wait_for_timeout(150)
+        shot(page, f"ticket-card-price-{tag}")
         page.keyboard.press("Escape"); page.wait_for_timeout(250)
+        # a hand edit of only the title keeps what Gremlin drafted
+        if scheme == "light":
+            page.click("#chatLog .slip .wpill"); page.wait_for_selector("#wfTitle")
+            page.fill("#wfTitle", "Flying dragon, by hand"); page.click('[data-w="save"]'); page.wait_for_selector("#mroot .vmsg")
+            made = page.evaluate("fetch('/shop/api/tickets/W1').then(r => r.json()).then(d => d.ticket.makes)")
+            check(f"{tag}: Save after a hand edit of only the title keeps his makes (the entry's kind and the rule's draft)", any(m.get('catalogKind') == 'creature' for m in made) and any(m.get('kind') == 'rule' and m.get('draft') for m in made), str(made))
+            page.keyboard.press("Escape"); page.wait_for_timeout(250)
         # minimize
         page.click('#chatcol [data-c="min"]')
         check(f"{tag}: minimize docks the column as the corner pill and the tab takes the full width", mode(page) == "min" and not vis(page, "#chatcol .chat") and vis(page, "#chatfab") and page.locator("#p-workshop .wk").bounding_box()["width"] > wk["width"] + 300)

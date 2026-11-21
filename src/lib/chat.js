@@ -19,6 +19,7 @@ export const PRICES = {
 /** A call's cost in millionths of a dollar, from the API's `usage` (a dollar per million tokens is exactly one micro-dollar per token). @rule 106.7 */
 export function costMicro(model, u) {
   const p = PRICES[model] || PRICES["claude-sonnet-5-5"];
+  /** @rule 106.7 */
   const n = (x) => Math.max(0, Number(x) || 0);
   return Math.round(n(u?.input_tokens) * p.in + n(u?.output_tokens) * p.out + n(u?.cache_creation_input_tokens) * p.write + n(u?.cache_read_input_tokens) * p.read);
 }

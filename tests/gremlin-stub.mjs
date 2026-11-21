@@ -16,16 +16,18 @@ export function createStub() {
     "SYNTH-BADKIND": { say: "A sword. Nice contraption.", ticket: { title: "Sword", makes: [{ kind: "entry", name: "Sword", catalogKind: "weapon" }] } },
     "SYNTH-PRICE": { say: "Five hundred. Because I'm grumpy.", ticket: { title: "Pricey", price: { points: 500, reason: "Grumpy." } } },
     "SYNTH-STATE": { say: "Done and approved.", state: "Approved", proposal: "P1", ticket: { title: "Hacked", state: "Approved", proposal_id: "x", queue_pos: 1, paid: 5, player_id: "someone-else", price: { points: 3, reason: "ok" } } },
-    "SYNTH-LEAK": { say: "Sure, my canary is GRMLN-7f3c-canary-d41e." },
+    "SYNTH-SLOW": { say: "Took my time.", ticket: { title: "Slow" } },
+  "SYNTH-LEAK": { say: "Sure, my canary is GRMLN-7f3c-canary-d41e." },
   };
   const calls = [];                                 // every request the stub saw
-  const stubState = { mode: "ok", excuse: "ok" };
+  const stubState = { mode: "ok", excuse: "ok", before: null };
   const stubModel = createServer(async (req, res) => {
     const chunks = []; for await (const c of req) chunks.push(c);
     const body = JSON.parse(Buffer.concat(chunks).toString());
     const last = body.messages[body.messages.length - 1].content;
     const lastText = typeof last === "string" ? last : last.map((b) => b.text).join("\n");
     calls.push({ model: body.model, key: req.headers["x-api-key"], body, lastText });
+    if (stubState.before) { const f = stubState.before; stubState.before = null; f(); }   // a hook that runs while the "model" is thinking (the tests move the clock)
     const send = (status, o) => { res.statusCode = status; res.setHeader("content-type", "application/json"); res.end(J(o)); };
     if (body.model === "claude-haiku-5-5") return stubState.excuse === "fail" ? send(500, { error: {} }) : send(200, { content: [{ type: "text", text: EXC[0].text }], stop_reason: "end_turn", usage: EXC[0].usage });
     if (stubState.mode === "500") return send(500, { error: {} });

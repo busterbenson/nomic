@@ -18,7 +18,7 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&
 const lines = (s) => String(s || "").split("\n").map((x) => x.trim()).filter(Boolean);
 
 export function createWorkshop({ api, me, pill, rpill, when, canCommission, refresh, cards, chat }) {
-  const S = { list: [], total: 0, counts: {}, view: "main", all: { rows: [], next: null, state: "", err: "" }, detail: {}, form: null, busy: false, err: "", note: "", openErr: "", draftPost: {} };
+  const S = { list: [], total: 0, counts: {}, view: "main", all: { rows: [], next: null, state: "", err: "" }, detail: {}, form: null, touched: new Set(), busy: false, err: "", note: "", openErr: "", draftPost: {} };
 
   /** @rule 801.2 */
   async function load() {
@@ -96,6 +96,7 @@ ${S.list.length ? `<ul class="tlist">${S.list.map((t) => rowHTML(t)).join("")}</
     const f = { n: t.n, title: t.title, brief: t.brief, entries: t.makes.filter((m) => m.kind === "entry").map((m) => m.name).join("\n"),
       rules: t.makes.filter((m) => m.kind === "rule" && m.num).map((m) => m.num).join(", "), estimate: t.estimate, running_cost: t.running_cost, tasks: t.tasks.map((x) => x.text).join("\n") };
     f.was = { entries: f.entries, rules: f.rules, held: t.makes.length };   // what the lists said when the form opened
+    S.touched = new Set();   // no field has been typed in yet
     return f;
   }
   /** @rule 801.2 */
@@ -229,6 +230,7 @@ ${editing ? formHTML(t) : factsHTML(t)}${reopenHTML(t)}${editing ? "" : tasksHTM
   function input(el) {
     if (Object.hasOwn(FIELD, el.id) && S.form) {
       S.form[FIELD[el.id]] = el.value;
+      S.touched.add(FIELD[el.id]);
       // the Put-it-on-the-ballot button follows what the form makes (rule 801.3), without redrawing under the caret
       const b = document.querySelector('#mroot [data-w="confirm"]');
       const why = document.getElementById("wfWhy"); if (why) why.hidden = !makesNothing(S.form);
@@ -242,7 +244,13 @@ ${editing ? formHTML(t) : factsHTML(t)}${reopenHTML(t)}${editing ? "" : tasksHTM
   /** A ticket page the chat window got back from a turn (Gremlin wrote the draft): the card shows it and the form is made again from it. @rule 801.2 */
   function apply(t) {
     S.detail[t.n] = t;
-    if (S.form && S.form.n === t.n) S.form = null;
+    if (S.form && S.form.n === t.n) {
+      // what the player has typed in the open form stays; every field they have not touched takes what Gremlin wrote
+      const typed = new Set(S.touched), fresh = formFrom(t);
+      for (const k of Object.keys(fresh)) if (k !== "n" && k !== "was" && !typed.has(k)) S.form[k] = fresh[k];
+      if (!typed.has("entries") && !typed.has("rules")) S.form.was = fresh.was;
+      S.touched = typed;
+    }
     if (cards.isOpen && cards.isOpen()) cards.redraw();
   }
 
