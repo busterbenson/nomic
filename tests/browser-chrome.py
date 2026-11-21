@@ -5,6 +5,7 @@
 import re, sys
 from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
+from pill_align import misaligned, npc_heights_match
 
 base, out, cookie, sam_cookie, dee_cookie, eli_cookie, lou_cookie, zed_cookie = sys.argv[1:9]
 host = urlparse(base).hostname
@@ -216,6 +217,10 @@ with sync_playwright() as pw:
     page.focus('#scores li button.prow >> nth=0'); page.keyboard.press("Enter"); page.wait_for_selector("#mroot .mcard")
     check("S1-PLY-03: Enter on a Players row opens the card", page.locator("#mroot .mcard").count() == 1)
     page.keyboard.press("Escape")
+    rows, bad = misaligned(page, "#scores li .prow")
+    check("S1-PLY-06: in the Players list each piece is centred on its name (within 2px)", len(rows) == 3 and not bad, f"{rows}")
+    rows, bad = misaligned(page, "#sballot .plpill")
+    check("S1-PLY-06: on the ballot each player pill's piece is centred on its name (within 2px)", len(rows) >= 2 and not bad, f"{rows}")
     check("S1-PLY-02: a player pill is the piece plus the name, and your own says (you)", page.locator("#sballot .plpill svg").count() >= 2 and "Bo" in text(page, "#sballot") and page.locator(".plpill", has_text="(you)").count() >= 0)
     page.locator("#scores li .prow", has_text="Bo").click(); page.wait_for_selector("#mroot .mcard")
     ct = text(page, "#mroot .mcard")

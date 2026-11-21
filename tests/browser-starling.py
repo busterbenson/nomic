@@ -64,6 +64,7 @@ with sync_playwright() as p:
         slip = text(page, "#chatLog .slip")
         check(f"{tag}: the draft slip: DRAFT, the drafter's head, the player's words, the new text, the change, the votes needed, the conflict (402), and Lock it in",
               "DRAFT" in slip and "Amend rule 401 (Points) to read:" in slip and "15 points" in slip and "Reword" in slip and "majority" in slip and "402" in slip and "Lock it in" in slip, slip)
+        check(f"{tag}: the slip shows the amendment as a diff: the old words struck (del) and the new ones marked (ins)", page.locator("#chatLog .slip del").count() >= 1 and page.locator("#chatLog .slip ins").count() >= 1, page.locator("#chatLog .slip .tx").first.inner_html())
         check(f"{tag}: Lock it in is the one filled button on the slip, and it is enabled", page.locator("#chatLog .slip .btn").count() == 1 and page.locator('#chatLog .slip [data-c="lock"]').is_enabled())
         to_book(page); shot(page, f"desktop-draft-{tag}")
         sideways(page, 1280, f"{tag} chat open")
@@ -74,6 +75,7 @@ with sync_playwright() as p:
             to_book(page); shot(page, f"desktop-locked-{tag}")
             page.click('#chatLog .slip [data-c="unlock"]'); page.wait_for_function("!document.querySelector('#chatLog .slip.locked')")
             check(f"{tag}: Unlock: the slot is free again (0 of 3) and the slip is a collapsed line stamped UNLOCKED", "0 of 3" in text(page, ".ch-today") and "UNLOCKED" in text(page, "#chatLog .slip.past"), text(page, ".ch-today"))
+            check(f"{tag}: the collapsed UNLOCKED slip keeps the diff (del and ins)", page.locator("#chatLog .slip.past del").count() >= 1 and page.locator("#chatLog .slip.past ins").count() >= 1, text(page, "#chatLog .slip.past"))
             to_book(page); shot(page, f"desktop-unlocked-{tag}")
         # a rule card's own button attaches the rule, and the message that follows carries it
         page.click('#rules [data-card="402"]'); page.wait_for_selector("#mroot .mcard")

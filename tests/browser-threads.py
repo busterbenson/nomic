@@ -9,6 +9,7 @@
 import sys
 from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
+from pill_align import misaligned, npc_heights_match
 
 base, out, cookie, stage = sys.argv[1:5]
 host = urlparse(base).hostname
@@ -59,6 +60,10 @@ with sync_playwright() as p:
         posters = page.locator("#mroot .tposts li").count()
         if stage == "answered":
             check(f"{tag}: the thread shows Bo's post, Ada's and Gremlin's reply under the Gremlin pill", posters >= 3 and page.locator("#mroot .tposts .plpill.npc", has_text="Gremlin").count() >= 1 and "Sitting isn't moving" in card, card[:300])
+            rows, bad = misaligned(page, "#mroot .tposts .plpill:not(.npc)")
+            check(f"{tag}: in the thread each player pill's piece is centred on its name (within 2px)", len(rows) >= 1 and not bad, f"{rows}")
+            hh, same = npc_heights_match(page)
+            check(f"{tag}: the Gremlin/Chalant pills are as tall as a player pill", same, f"{hh}")
             check(f"{tag}: no Escalated chip on the card", "escalated" not in text(page, "#mroot .tsec h3").lower())
             if w == 1280 and scheme == "light":
                 n0 = posters

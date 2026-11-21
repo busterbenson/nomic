@@ -67,6 +67,8 @@ export async function release(env: Env, drawId: number) { await env.DB.prepare("
 /** Is the game over its month's model budget? Drawings count in it (ART_COST_MICRO each), so they stop with the agents' words. @rule 106.7 */
 export async function overBudget(env: Env, game: any, tz: string, nowMs: number) { return (await monthSpend(env, game, tz, nowMs)).over; }
 
+/** The most first drawings one turn queues; the next turn draws the entries still undrawn. */
+const MAX_NEW_PER_TURN = 6;
 /**
  * The first drawings of a turn (rule 801.2): each entry that carries an art prompt Gremlin has not drawn yet (no draw and no drawing for that
  * exact prompt) gets one. They cost no message: they are part of the turn that wrote the prompt. Runs in ctx.waitUntil.
@@ -74,7 +76,8 @@ export async function overBudget(env: Env, game: any, tz: string, nowMs: number)
 export async function queueNew(ctx: Ctx, game: any, player: any, ticket: any, makes: any[], tz: string, nowMs: number) {
   const jobs: Draw[] = [];
   if (await overBudget(ctx.env, game, tz, nowMs)) return 0;
-  for (const e of entriesOf(makes).slice(0, 6)) {
+  for (const e of entriesOf(makes)) {
+    if (jobs.length >= MAX_NEW_PER_TURN) break;   // the cap is on the draws queued, so entries already drawn or reserved do not use it up
     if (!e.prompt) continue;
     const had: any = await ctx.env.DB.prepare("SELECT 1 AS x FROM art_draws WHERE ticket_id = ? AND lower(entry_name) = lower(?) AND prompt = ? UNION ALL SELECT 1 FROM art_refs WHERE ticket_id = ? AND lower(entry_name) = lower(?) AND prompt = ? LIMIT 1")
       .bind(ticket.id, e.name, e.prompt, ticket.id, e.name, e.prompt).first();

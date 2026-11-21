@@ -110,6 +110,15 @@ try {
   check("the page shows the entry's drawing: ready, the hash shown, one unsaved drawing", a1.state === "ready" && a1.shown === h1 && J(a1.drawings) === J([{ hash: h1, saved: false, default: false }]) && a1.prompt === "a small green frog sitting on a lily pad", J(a1));
   const again = await Ana.post(CH, { ticket: "W1", body: "SYNTH-ART same frog, a bit more chat" });
   check("a turn that sends the same prompt again makes no new drawing", again.status === 200 && draws(1).length === 1 && refs(1).length === 1);
+  // the cap is 6 NEW draws a turn, counted on the draws queued: a ticket of 8 entries gets 6 on its first turn and the other 2 on its second
+  const o8 = await Bo.post(T, {}), n8 = Number(o8.data.ticket.slice(1));
+  const t8 = await Bo.post(CH, { ticket: o8.data.ticket, body: "SYNTH-ART8 eight creatures" });
+  check("a ticket of 8 entries: the first turn queues 6 drawings, not 8", t8.status === 200 && t8.data.out === "ok" && JSON.parse(tk(n8).makes).length === 8 && draws(n8).length === 6, `${draws(n8).length}`);
+  await until(() => draws(n8).every((d) => d.state !== "pending"));
+  const t8b = await Bo.post(CH, { ticket: o8.data.ticket, body: "SYNTH-ART8 again, the same eight" });
+  const names8 = draws(n8).map((d) => d.entry_name).sort();
+  check("the second turn queues the remaining 2 (entries 7 and 8), none twice: 8 draws for 8 different entries", t8b.status === 200 && draws(n8).length === 8 && new Set(names8).size === 8 && names8.includes("Pond 7") && names8.includes("Pond 8"), J(names8));
+  check("a third turn with nothing left to draw queues nothing", (await Bo.post(CH, { ticket: o8.data.ticket, body: "SYNTH-ART8 once more" })).status === 200 && draws(n8).length === 8);
 
   console.log("who can see a draft's picture");
   const mine = await bytesOf(Ana, h1);
