@@ -159,6 +159,11 @@ async function route(request: Request, env: Env, execCtx: ExecutionContext): Pro
   // The moderator's routes (bearer token; src/routes/api-moderator.ts)
   if (sub === "api" && segs.length === 4 && segs[2] === "moderator" && segs[3] === "pending") return run({ get: apiModerator.pending }, method, ctx);
   if (sub === "api" && segs.length === 4 && segs[2] === "moderator" && segs[3] === "agents") return run({ get: apiModerator.agents }, method, ctx);
+  if (sub === "api" && segs.length === 4 && segs[2] === "moderator" && segs[3] === "escalations") return run({ get: apiModerator.escalations }, method, ctx);
+  if (sub === "api" && segs.length === 6 && segs[2] === "moderator" && segs[3] === "escalations" && /^\d{1,9}$/.test(segs[4]) && (segs[5] === "answer" || segs[5] === "delivered")) {
+    ctx.params.id = segs[4];
+    return run({ post: segs[5] === "answer" ? apiModerator.answer : apiModerator.delivered }, method, ctx);
+  }
   if (sub === "api" && segs.length === 6 && segs[2] === "moderator" && segs[3] === "days" && segs[5] === "claim" && /^\d{1,6}$/.test(segs[4])) {
     ctx.params.n = segs[4];
     return run({ post: apiModerator.claim }, method, ctx);

@@ -12,6 +12,7 @@
 import { Player, getPlayer } from "../lib/auth";
 import { EXCUSE_SQL, HISTORY_FOR_MODEL, PLAYER_MESSAGE_SQL, historyPage, rowView, usedToday } from "../lib/chat.js";
 import { agentsReady, callModel, logCall, monthSpend } from "../lib/agent";
+import { escalate } from "../lib/escalate.js";
 import { clockNow, isLocked, loadToday, lockMessage, settingsOf, timeZoneOf } from "../lib/day";
 import { lockOpenBinds, localDate } from "../lib/day-gate.js";
 import {
@@ -176,7 +177,7 @@ export async function turn(ctx: Ctx, player: Player, body: any, nowMs: number): 
     const dateL = localDate(tz, later), atL = nowIso(later);
     await logCall(env, game, tz, nowMs, { player_id: player.id, agent: AGENT, purpose: "chat", model: MODEL, outcome, usage: r.usage, ms: r.ms, reason });   // first: the budget counts the call whatever happens to the row
     const res = await env.DB.prepare("INSERT INTO chat_messages (game_id, player_id, agent, local_date, day, role, body, ticket_id, meta, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .bind(game.id, player.id, AGENT, dateL, game.day || null, role, bodyText, ticket?.id ?? null, JSON.stringify(meta), atL).run();
+      .bind(game.id, player.id, AGENT, dateL, game.day || null, role, bodyText, ticket?.id ?? null, JSON.stringify({ ...meta, turn: myId }), atL).run();   // `turn`: the player's message this line answers (two tabs can interleave turns; the escalation's reply is found by it, not by position)
     return viewOf(Number(res.meta.last_row_id), role, bodyText, dateL, game.day || null, atL, ticket?.number ?? null, meta);
   };
   /** @rule 106.3 */
@@ -202,7 +203,15 @@ export async function turn(ctx: Ctx, player: Player, body: any, nowMs: number): 
   if (a.rejected.length) meta.rejected = a.rejected;
   if (a.notes.length) meta.notes = a.notes;
   if (a.refusal) meta.refusal = a.refusal;
-  lines.push(await reply("agent", a.say, meta, a.refusal ? "refused" : "ok", a.refusal ? "commission refused" : [a.clamped ? "price clamped" : "", a.unbuiltPrice ? "price without a build" : ""].filter(Boolean).join("; ") || null));
+  // What he can't settle goes to Chalant (rule 106.4): the escalation holds this turn's message; a second one while one is open in this chat, or a
+  // sixth today, is dropped and logged on the call's row. His words to the player stand either way.
+  let escNote = "";
+  if (a.escalate && !a.refusal) {
+    const got = await escalate(env.DB, { gameId: game.id, agent: AGENT, playerId: player.id, chatMessageId: myId, category: a.escalate.category, reason: a.escalate.reason, date: localDate(tz, later), at: nowIso(later) });
+    escNote = got === "stored" ? "escalated" : `escalation dropped: ${got}`;
+    if (got === "stored") meta.escalated = a.escalate.category;
+  }
+  lines.push(await reply("agent", a.say, meta, a.refusal ? "refused" : "ok", a.refusal ? "commission refused" : [a.clamped ? "price clamped" : "", a.unbuiltPrice ? "price without a build" : "", escNote].filter(Boolean).join("; ") || null));
   if (wrote.length && !saved) {
     const fresh: any = ticket ? await env.DB.prepare("SELECT state FROM tickets WHERE id = ?").bind(ticket.id).first() : null;
     const again = await loadToday(env, ctx.data.game!, later, player.id);

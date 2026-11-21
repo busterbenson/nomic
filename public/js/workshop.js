@@ -53,6 +53,23 @@ export function createWorkshop({ api, me, pill, rpill, when, canCommission, refr
   }
   const player = () => !!(me() && me().player);
 
+  // After a post, Gremlin answers in the background (rule 804.1): the page asks again every 2.5 s, up to 30 s, while a reply is pending, then stops.
+  // A "no reply" answer ends the wait with nothing new, which is fine. Stops when the card is closed or shows another ticket.
+  const WAIT = { n: null, until: 0 };
+  /** @rule 804.1 */
+  function waitForReply(n) {
+    WAIT.n = n; WAIT.until = Date.now() + 30000;
+    const tick = async () => {
+      if (WAIT.n !== n) return;
+      const cur = cards.current();
+      if (!cur || cur.kind !== "ticket" || cur.key !== n || Date.now() > WAIT.until) { WAIT.n = null; return; }
+      await loadOne(n);
+      cards.redraw();
+      if (S.detail[n] && S.detail[n].reply_pending) setTimeout(tick, 2500); else WAIT.n = null;
+    };
+    setTimeout(tick, 2500);
+  }
+
   /** @rule 801.2 */
   async function open(n, push) {
     S.err = ""; S.note = "";
@@ -61,6 +78,7 @@ export function createWorkshop({ api, me, pill, rpill, when, canCommission, refr
     await loadOne(n);
     S.form = null;
     cards.redraw();
+    if (S.detail[n] && S.detail[n].reply_pending) waitForReply(n);
   }
 
 
@@ -141,8 +159,10 @@ ${attrsHTML(v)}${flavorHTML(v, open)}${more ? `<div class="row">${more}</div>` :
   /** @rule 801.2, 801.4 */
   function rowHTML(t, dense) {
     return `<li class="trow" id="wk-${esc(t.n)}"><span class="tmain"><button type="button" class="tlink" data-ticket="${esc(t.n)}" aria-haspopup="dialog"><span class="wpill">${esc(t.n)}</span><span class="tt">${esc(t.title || "Untitled")}</span></button></span>
-<span class="tmeta">${pill(t.by, t.mine)}<span class="pill tstate" data-state="${esc(t.state)}">${esc(t.state)}</span><span class="tnum mono">${esc(nights(t.estimate))}</span><span class="tnum mono">${esc(points(t.price))}</span>${dense ? `<span class="tnum mono">${esc(when(t.changed_at))}</span>` : ""}</span></li>`;
+<span class="tmeta">${pill(t.by, t.mine)}<span class="pill tstate" data-state="${esc(t.state)}">${esc(t.state)}</span>${escalatedChip(t)}<span class="tnum mono">${esc(nights(t.estimate))}</span><span class="tnum mono">${esc(points(t.price))}</span>${dense ? `<span class="tnum mono">${esc(when(t.changed_at))}</span>` : ""}</span></li>`;
   }
+  /** The chip a ticket with an open escalation wears (rule 106.4): Gremlin passed something on and Chalant hasn't answered. It is not a state. @rule 106.4 */
+  const escalatedChip = (t) => (t.escalated ? `<span class="pill tstate" data-state="Escalated" title="Gremlin passed this to Chalant">Escalated</span>` : "");
   /** @rule 801.1, 801.2 */
   function commissionButton() {
     if (!player()) return "";
@@ -271,7 +291,8 @@ ${row("Price", `${esc(points(t.price))}${t.price_reason ? `<span class="mnote"> 
     // the lock (rule 107.1) keeps the form but turns it off, with the lock's sentence; a visitor has no form
     const can = t.can.post, off = S.busy || !can.allowed;
     const form = can.allowed || can.locked ? `<div class="pf wkpost"><label for="wkPost">Post</label><textarea id="wkPost" rows="3" maxlength="2000"${off ? " disabled" : ""}>${esc(S.draftPost[t.n] || "")}</textarea>${can.locked ? `<p class="mnote">${esc(can.reason)}</p>` : ""}${S.err && !t.can.edit.allowed ? `<p class="notice err" role="alert">${esc(S.err)}</p>` : ""}<div class="row"><button class="btn small" type="button" data-w="post"${off ? " disabled" : ""}>Post</button></div></div>` : "";
-    return `<section class="tsec"><h3>Discussion</h3>${posts}${form}</section>`;
+    const wait = t.reply_pending ? `<p class="mnote gwait" role="status">Gremlin is looking at it…</p>` : "";
+    return `<section class="tsec"><h3>Discussion ${escalatedChip(t)}</h3>${posts}${wait}${form}</section>`;
   }
   /** A refused or failed ticket of yours can be reopened as a draft (rule 801.5); the lock turns the button off with its sentence. @rule 801.5 */
   function reopenHTML(t) {
@@ -357,7 +378,7 @@ ${editing ? formHTML(t) : factsHTML(t)}${reopenHTML(t)}${editing ? "" : tasksHTM
         const body = ta ? ta.value : "";
         S.draftPost[n] = body;
         const r = await api(`/api/tickets/${encodeURIComponent(n)}/post`, { body });
-        if (r.ok) { S.detail[n] = r.data.ticket; S.draftPost[n] = ""; } else S.err = (r.data && r.data.error) || "Something went wrong.";
+        if (r.ok) { S.detail[n] = r.data.ticket; S.draftPost[n] = ""; if (r.data.ticket.reply_pending) waitForReply(n); } else S.err = (r.data && r.data.error) || "Something went wrong.";
       }
     } finally { S.busy = false; cards.redraw(); }
   }

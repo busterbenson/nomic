@@ -7,7 +7,7 @@ Every function that carries out the game should say which rule it implements, wi
 `src/` is only reported for now: these functions have no claim yet. Site plumbing such as sign-in and email goes
 under rule 101 or 102; a follow-up change claims them and moves `src/` into the strict set.
 
-140 of 382 functions outside `src/engine/` are unclaimed.
+145 of 403 functions outside `src/engine/` are unclaimed.
 
 ## src/index.ts (5)
 
@@ -15,7 +15,7 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 - line 72: `notFound`
 - line 78: `run`
 - line 83: `route`
-- line 185: `fetch`
+- line 190: `fetch`
 
 ## src/lib/auth.ts (6)
 
@@ -47,6 +47,10 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 - line 20: `parseFrom`
 - line 25: `sendEmail`
 
+## src/lib/escalate.js (1)
+
+- line 31: `line`
+
 ## src/lib/geometry.js (13)
 
 - line 15: `validCoord`
@@ -63,9 +67,12 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 - line 64: `chartedAround`
 - line 69: `islandCoords`
 
-## src/lib/gremlin.js (1)
+## src/lib/gremlin.js (4)
 
-- line 288: `def`
+- line 225: `answerSchema`
+- line 300: `def`
+- line 340: `readGremlinAnswer`
+- line 456: `clip`
 
 ## src/lib/links.ts (2)
 
@@ -116,18 +123,18 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/lib/settings.js (12)
 
-- line 49: `validTimeZone`
-- line 56: `isInt`
-- line 57: `isObj`
-- line 58: `evenInt`
-- line 62: `max_players`
-- line 66: `mcp_enabled`
-- line 74: `exactly`
-- line 83: `spawnSpots`
-- line 84: `inside`
-- line 92: `validateSettings`
-- line 112: `getSettings`
-- line 126: `settingsForSize`
+- line 52: `validTimeZone`
+- line 59: `isInt`
+- line 60: `isObj`
+- line 61: `evenInt`
+- line 65: `max_players`
+- line 69: `mcp_enabled`
+- line 78: `exactly`
+- line 87: `spawnSpots`
+- line 88: `inside`
+- line 96: `validateSettings`
+- line 116: `getSettings`
+- line 130: `settingsForSize`
 
 ## src/lib/tickets.js (1)
 
@@ -169,7 +176,7 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/routes/api-chat.ts (1)
 
-- line 171: `stateNow`
+- line 172: `stateNow`
 
 ## src/routes/api-day.ts (1)
 
@@ -183,9 +190,10 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 - line 4: `get`
 
-## src/routes/api-moderator.ts (1)
+## src/routes/api-moderator.ts (2)
 
-- line 35: `unauthorized`
+- line 44: `unauthorized`
+- line 209: `num`
 
 ## src/routes/api-notifications-read.ts (1)
 
@@ -206,9 +214,9 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/routes/api-tickets.ts (3)
 
-- line 30: `out`
-- line 285: `undo`
-- line 354: `need`
+- line 31: `out`
+- line 294: `undo`
+- line 366: `need`
 
 ## src/routes/landing.ts (2)
 
