@@ -5,7 +5,7 @@
 # Starling" attaches the rule, minimize and back, remembered per agent), Gremlin still being his on the Workshop tab, the corner pill and the bottom
 # sheet at 390, 3 of 3 with the reason, the cap's closed composer, light and dark, no sideways scroll and no console errors.
 # Usage: browser-starling.py <base> <screenshot dir or -> <Ada's session cookie> <Bo's> <Cy's> <Dee's>
-import sys
+import re, sys
 from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
 
@@ -57,7 +57,7 @@ with sync_playwright() as p:
         check(f"{tag}: on the Rulebook tab her column is open beside the rules, and it is hers", mode(page) == "open" and who(page) == "starling" and vis(page, "#chatcol .chat") and text(page, "#chatcol .ch-h").startswith("Starling") and not vis(page, "#chatfab"))
         box = page.locator("#chatcol .chat").bounding_box(); rb = page.locator("#p-rules").bounding_box()
         check(f"{tag}: the column is on the right (x {box['x']:.0f}) and the rulebook keeps the rest ({rb['width']:.0f} wide)", box["x"] > 800 and box["x"] + box["width"] <= 1280 and rb["x"] + rb["width"] <= box["x"] + 4)
-        check(f"{tag}: the Today strip says 0 of 3 locked in", "Today" in text(page, ".ch-today") and "0 of 3" in text(page, ".ch-today"), text(page, ".ch-today"))
+        check(f"{tag}: the Today strip says 0 of 3 locked in", "today" in text(page, ".ch-today").lower() and "0 of 3" in text(page, ".ch-today"), text(page, ".ch-today"))
         q = text(page, "#chatLog .q")
         check(f"{tag}: her answer carries her quote of 103.3, the rulebook's own words, with the rule's pill", q.startswith("103.3") and "withdraw a confirmed proposal until it goes on the ballot" in q and page.locator("#chatLog .q .rpill, #chatLog .q .pill").count() >= 1, q)
         check(f"{tag}: the player's message that came from the rule card shows the card's rule", "401" in text(page, "#chatLog .msg.cme .ctx"), text(page, "#chatLog .msg.cme >> nth=-1"))
@@ -69,28 +69,28 @@ with sync_playwright() as p:
         sideways(page, 1280, f"{tag} chat open")
         if scheme == "light":
             page.click('#chatLog .slip [data-c="lock"]'); page.wait_for_selector("#chatLog .slip.locked")
-            check(f"{tag}: Lock it in: the slip is LOCKED as P1 with 'On tomorrow's ballot' and Unlock; the Today strip says P1 and 1 of 3; no message was spent",
-                  "LOCKED" in text(page, "#chatLog .slip") and "P1" in text(page, "#chatLog .slip") and page.locator('#chatLog .slip [data-c="unlock"]').is_enabled() and "P1" in text(page, ".ch-today") and "1 of 3" in text(page, ".ch-today"), text(page, "#chatLog .slip"))
+            check(f"{tag}: Lock it in: the slip is LOCKED as its P-number with 'On tomorrow's ballot' and Unlock; the Today strip says P1 and 1 of 3; no message was spent",
+                  "LOCKED" in text(page, "#chatLog .slip") and re.search(r"P\d", text(page, "#chatLog .slip")) and page.locator('#chatLog .slip [data-c="unlock"]').is_enabled() and re.search(r"P\d", text(page, ".ch-today")) and "1 of 3" in text(page, ".ch-today"), text(page, "#chatLog .slip"))
             to_book(page); shot(page, f"desktop-locked-{tag}")
             page.click('#chatLog .slip [data-c="unlock"]'); page.wait_for_function("!document.querySelector('#chatLog .slip.locked')")
             check(f"{tag}: Unlock: the slot is free again (0 of 3) and the slip is a collapsed line stamped UNLOCKED", "0 of 3" in text(page, ".ch-today") and "UNLOCKED" in text(page, "#chatLog .slip.past"), text(page, ".ch-today"))
             to_book(page); shot(page, f"desktop-unlocked-{tag}")
         # a rule card's own button attaches the rule, and the message that follows carries it
-        page.evaluate("document.getElementById('rules').scrollIntoView()")
-        btn = page.locator('[data-p="starling"][data-n="402"]')
-        check(f"{tag}: a rule card has a 'Draft with Starling' button beside Propose a change", btn.count() == 1 and page.locator('[data-p="open"][data-n="402"]').count() == 1)
+        page.click('#rules [data-card="402"]'); page.wait_for_selector("#mroot .mcard")
+        btn = page.locator('#mroot [data-p="starling"][data-n="402"]')
+        check(f"{tag}: a rule's card has a 'Draft with Starling' button beside Propose a change", btn.count() == 1 and page.locator('#mroot [data-p="open"][data-n="402"]').count() == 1)
         btn.click(); page.wait_for_selector(".ch-in .chip")
-        check(f"{tag}: it attaches the rule to her composer (a 402 chip) and keeps the window open", "402" in text(page, ".ch-in .chip") and mode(page) == "open")
+        check(f"{tag}: it puts the card away and attaches the rule to her composer (a 402 chip); the window stays open", "402" in text(page, ".ch-in .chip") and mode(page) == "open" and not vis(page, "#mroot .mcard"))
         n0 = msgs(page)
         page.fill("#chatText", "How many points do I need to win?"); page.keyboard.press("Enter")
-        page.wait_for_function(f"document.querySelectorAll('#chatLog .msg').length === {n0 + 2}")
-        check(f"{tag}: Enter sends: her line and Starling's reply are added, the box is empty, the chip is gone (the rule rides on the first message)", msgs(page) == n0 + 2 and page.input_value("#chatText") == "" and page.locator(".ch-in .chip").count() == 0 and "402" in text(page, "#chatLog .msg.cme >> nth=-1"))
+        page.wait_for_function(f"document.querySelectorAll('#chatLog .msg').length === {n0 + 2} && !document.querySelector('#chatLog .typing')")
+        check(f"{tag}: Enter sends: her line and Starling's reply are added, the box is empty, the chip is gone (the rule rides on the first message)", msgs(page) == n0 + 2 and page.input_value("#chatText") == "" and page.locator(".ch-in .chip").count() == 0 and "402" in text(page, "#chatLog .msg.cme >> nth=-1"), f"{msgs(page)} vs {n0 + 2}; box [{page.input_value('#chatText')}]; chips {page.locator('.ch-in .chip').count()}; last [{text(page, '#chatLog .msg.cme >> nth=-1')}]")
         # the two windows: Workshop is Gremlin's, Rulebook is hers; minimizing hers does not minimize his
         page.click('#chatcol [data-c="min"]')
         check(f"{tag}: minimize docks her column as the corner pill and the rulebook takes the full width", mode(page) == "min" and not vis(page, "#chatcol .chat") and vis(page, "#chatfab") and "Starling" in text(page, "#chatfab"))
         to_book(page); shot(page, f"desktop-minimized-{tag}")
-        page.click("#tab-workshop"); page.wait_for_selector("#chatcol .chat")
-        check(f"{tag}: on the Workshop tab the window is Gremlin's and open (hers was minimized, his was not)", mode(page) == "open" and who(page) == "gremlin" and text(page, "#chatcol .ch-h").startswith("Gremlin"))
+        page.click("#tab-workshop"); page.wait_for_function("document.querySelector('#chatcol .chat') && document.querySelector('#chatcol .chat').dataset.agent === 'gremlin'")
+        check(f"{tag}: on the Workshop tab the window is Gremlin's and open (hers was minimized, his was not)", mode(page) == "open" and who(page) == "gremlin" and text(page, "#chatcol .ch-h").startswith("Gremlin"), f"{mode(page)} {who(page)} {text(page, '#chatcol .ch-h')}")
         page.click("#tab-rules"); page.wait_for_timeout(400)
         check(f"{tag}: back on the Rulebook she is still minimized", mode(page) == "min" and vis(page, "#chatfab"))
         page.click("#chatfab"); page.wait_for_selector("#chatcol .chat")

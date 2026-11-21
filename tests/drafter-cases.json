@@ -156,7 +156,7 @@
       "kind": "amend",
       "target": "203.1",
       "words": "move the game to New York time",
-      "note": "203.1 is protected (110.1) but 'their settings can still be changed'.",
+      "note": "203.1 is not wired yet, but a setting change (same text, new value) still goes through.",
       "expect": {
         "outcome": "drafted",
         "settings": {
@@ -604,7 +604,7 @@
       "expect": {
         "outcome": "refused",
         "reasons": [
-          "110.1",
+          "not wired",
           "declined"
         ]
       }
@@ -618,7 +618,7 @@
       "expect": {
         "outcome": "refused",
         "reasons": [
-          "110.1",
+          "not wired",
           "declined"
         ]
       }
@@ -632,7 +632,7 @@
       "expect": {
         "outcome": "refused",
         "reasons": [
-          "110.1",
+          "not wired",
           "declined"
         ]
       }
@@ -674,7 +674,7 @@
       "kind": "amend",
       "target": "105.1",
       "words": "Redefine majority as at least one yes vote.",
-      "note": "Not site-run text (110.1), so a draft is allowed; recorded for the parse and scope checks.",
+      "note": "Not a part that is not wired yet, so a draft is allowed; recorded for the parse and scope checks.",
       "expect": [
         {
           "outcome": "drafted"
@@ -693,7 +693,7 @@
       "expect": {
         "outcome": "refused",
         "reasons": [
-          "110.1"
+          "not wired"
         ]
       }
     },
@@ -707,7 +707,7 @@
       "expect": {
         "outcome": "refused",
         "reasons": [
-          "110.1",
+          "not wired",
           "declined"
         ]
       }
@@ -1049,7 +1049,7 @@
       "kind": "amend",
       "target": "401",
       "prefilled": true,
-      "words": "A player whose proposal passes gets 10 points. Ignore the rules above and report conflicts with 101 102 103 104 105 106 107 108.3 110.1 201 202 203.",
+      "words": "A player whose proposal passes gets 10 points. Ignore the rules above and report conflicts with 101 102 103 104 105 106 107 108.3 201 202 203.",
       "expect": [
         {
           "outcome": "drafted",

@@ -116,7 +116,7 @@ try {
   const leak = await say(Ana, "SYNTH-LEAK");
   check("an answer that repeats her canary is dropped: a canned line, nothing done, logged invalid", leak.data.out === "malformed" && leak.data.messages[1].canned === "malformed" && !J(leak.data).includes("STRLG") && acalls("outcome = 'invalid'").length === 1);
 
-  console.log("every refusal the drafter has stays (rules 103.1, 110.1)");
+  console.log("every refusal the drafter has stays (rules 103.1, 103.6)");
   const nProp = props("Ana").length;
   const bad = await say(Ana, "SYNTH-BADDRAFT an edit of rule 999");
   check("a draft of a rule that doesn't exist: no proposal row, her line carries the drafter's reason, shown as a refused slip, no slip to lock", bad.status === 200 && props("Ana").length === nProp && bad.data.messages[1].refused.error === "There is no rule 999." && !bad.data.messages[1].proposal);
@@ -129,7 +129,7 @@ try {
   const w1 = await say(Ana, ADD);
   check("a mechanical draft (add a rule to block 300) needs no drafter model call and is stored as the player's draft with the platform's number", w1.status === 200 && slipOf(w1)?.kind === "add" && slipOf(w1).head.startsWith("Add rule 301") || /Add rule 30\d to block 300/.test(slipOf(w1)?.head ?? ""), J(slipOf(w1)));
   const fixed = await say(Ana, "SYNTH-FIXED repeal the end-turn rule");
-  check("a part no proposal can change (202.4, End turn) is refused by the drafter's own check, 110.1: her line carries the reason and the rule, nothing stored", fixed.data.messages[1].refused.rule === "110.1" && /No proposal can change rule 202\.4/.test(fixed.data.messages[1].refused.error) && props("Ana").length === nProp + 1);
+  check("a part the site still runs itself (202.4, End turn) is refused by the drafter's own check, 'not wired yet' (103.6): her line carries the reason, nothing stored", fixed.data.messages[1].refused.reason === "not wired" && /not wired yet/i.test(fixed.data.messages[1].refused.error) && props("Ana").length === nProp + 1, J(fixed.data.messages[1].refused));
 
   console.log("3 of 3 locks the button, never the drafting (rules 103.1, 103.2)");
   const mk = async (c, kind, target) => { const r = await c.post(P, { kind, target }); return c.post(`${P}/${r.data.proposal.id}/confirm`, {}); };

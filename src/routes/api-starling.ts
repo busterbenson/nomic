@@ -91,7 +91,7 @@ export const get = async (ctx: Ctx) => {
 };
 
 // One turn.
-/** @rule 103.1, 106.2, 106.4, 106.7 */
+/** @rule 103.1, 103.6, 106.2, 106.4, 106.7 */
 export async function turn(ctx: Ctx, player: Player, body: any, nowMs: number) {
   const { env } = ctx;
   const text = String(body?.body ?? "").replace(/\r\n?/g, "\n").trim();
@@ -189,7 +189,7 @@ export async function turn(ctx: Ctx, player: Player, body: any, nowMs: number) {
     else {
       const d = await draft(ctx, player, { kind: a.draft.kind, target: a.draft.target, words: a.draft.words, to: a.draft.to }, later, { atLimit: true });
       if (d.body?.ok && d.body.proposal?.id) { proposalId = d.body.proposal.id; }
-      else { meta.refused = { error: String(d.body?.error ?? "The draft was refused.").slice(0, 400), ...(d.body?.rule ? { rule: d.body.rule } : {}) }; notes.push(`draft refused: ${d.body?.drafting || d.status}`); }
+      else { meta.refused = { error: String(d.body?.error ?? "The draft was refused.").slice(0, 400), ...(d.body?.reason ? { reason: String(d.body.reason).slice(0, 40) } : {}) }; notes.push(`draft refused: ${d.body?.drafting || d.status}`); }
     }
   }
   const line = await reply("agent", a.say, meta, "ok", notes.length ? notes.join("; ").slice(0, 190) : null, proposalId);

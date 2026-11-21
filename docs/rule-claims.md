@@ -17,7 +17,7 @@ actionAllowed(ctx, actor, action) { ... }
 - It goes on every function: declarations, `const f = (...) =>`, methods (hooks), route handlers. A callback passed
   inline (`.map((x) => ...)`) belongs to the function around it.
 - Site plumbing with no rule of its own (the engine's helpers, routing, sign-in, email) goes under **101** (follow the
-  rules) or **102** (players) for now. `docs/rules-reorg.md` retires 302 and gives the site's own code rules 102 to 110;
+  rules) or **102** (players) for now. `docs/rules-reorg.md` retires 302 and gave the site's own code rules 102 to 110 (110 retired 2026-11-20);
   tags move to those numbers when that text lands, in the step PRs. A function claimed by more than 3 rules is reported
   as a warning: it probably does several jobs.
 - Rule numbers follow `docs/rules-reorg.md`: the modules claim `202.2` (the turn's parts, once a day for the move),

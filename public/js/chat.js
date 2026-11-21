@@ -226,7 +226,7 @@ ${sl.after_text ? `<div class="tx">${esc(sl.after_text)}</div>` : sl.before_text
     if (S.tab !== agent.tab) S.sheet = false;
     place();
     if (player() && S.tab === agent.tab) {
-      if (!S.loaded && !S.loading) await load();
+      if (!S.loaded && !S.loading) { draw(); await load(); }   // the empty window first: the other agent's must not stay on screen while this one loads
       else if (entering || reread) await readState();   // the day, the lock or the cap may have changed since this was drawn
       else draw(true);
     }

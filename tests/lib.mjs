@@ -10,6 +10,28 @@ import { join as pjoin, dirname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const ROOT = pjoin(dirname(fileURLToPath(import.meta.url)), "..");
+
+// d1() below blocks the event loop (execFileSync of `wrangler d1 execute`, seconds each under load, 17 s for five in a
+// row). After a gap past ~15 s `wrangler dev` has dropped the idle keep-alive socket, the blocked client never saw it
+// close, and the next fetch reused it: instant ECONNRESET, "TypeError: fetch failed", with the server healthy
+// (tests/moderator.mjs failed this way at its third cron; a 16 s sleep between two fetches reproduces it, a 13 s one does not).
+// Every test fetch therefore asks for `connection: close`: a new socket per request, nothing pooled to go stale.
+const realFetch = globalThis.fetch;
+globalThis.fetch = (input, init) => {
+  const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+  headers.set("connection", "close");
+  return realFetch(input, { ...init, headers });
+};
+// The python that runs the Playwright browser checks (tests/browser-*.py, screenshot.py). PYTHON wins when set (CI sets it);
+// otherwise the first of /usr/local/bin/python3 (the Mac mini's, which has playwright) and `python3` that can import
+// playwright, otherwise plain `python3` (the check then fails or skips with a clear message). Resolved once, here.
+export const PYTHON = (() => {
+  if (process.env.PYTHON) return process.env.PYTHON;
+  for (const py of ["/usr/local/bin/python3", "python3"]) {
+    try { execFileSync(py, ["-c", "import playwright"], { stdio: "ignore", timeout: 20000 }); return py; } catch {}
+  }
+  return "python3";
+})();
 const WRANGLER = pjoin(ROOT, "node_modules", ".bin", "wrangler");
 // GAMES_SOURCE: wrangler's [build] step (scripts/bundle-games.mjs) reads the fixture games in tests/fixtures/games
 // instead of fetching real ones from GitHub, so tests never reach the network. BUNDLE_SKIP_TESTS: the bundle's own

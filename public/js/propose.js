@@ -10,7 +10,7 @@
 //   P.load()             fetch GET /api/proposals
 //   P.attach({ RB, redraw, openAdd, openPick, closeAdd })   rulebook.js: the parsed rules, a redraw, and how to open the "add a rule" and "which block" cards
 // Drafting is free and repeatable; only confirming counts. Nothing here decides what is allowed: the server's answers
-// (draft errors, the 110.1 refusal, the lock, one a day) are shown as they come.
+// (draft errors, the not-wired refusal, the lock, one a day) are shown as they come.
 
 import { commissionHTML, wPill } from "./commission.js";
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -63,8 +63,8 @@ export function wordDiff(a, b) {
 /** @rule 103.1 */
 export const diffOf = (p) => wordDiff(p.before_text || "", p.after_text || "");
 
-// The settings a reword sets (rule 110.1: a part's settings can still be changed), shown with the text change.
-/** @rule 110.1 */
+// The settings a reword sets, shown with the text change.
+/** @rule 103.1 */
 const settingsHTML = (p) => {
   const e = Object.entries(p.settings || {});
   return e.length ? `<p class="setline mono">${e.map(([k, v]) => `Sets <b>${esc(k)}</b> to <b>${esc(typeof v === "object" ? JSON.stringify(v) : String(v))}</b>`).join("<br>")}</p>` : "";
@@ -256,7 +256,7 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
     S.ui = mkUi({ rule: block, step: "write", kind: "add", target: block, words: "", prefilled: false, err: "" });
   }
 
-  /** @rule 103.1, 110.1 */
+  /** @rule 103.1 */
   async function draft() {
     const u = S.ui;
     const ta = document.getElementById("pfWords"); if (ta) u.words = ta.value;

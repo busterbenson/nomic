@@ -7,7 +7,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdirSync, rmSync } from "node:fs";
 import { createStarlingStub } from "./starling-stub.mjs";
-import { ROOT, createGame, d1, freePort, join, migrate, newState, startPlaying, startRulesStub, startServer } from "./lib.mjs";
+import { PYTHON, ROOT, createGame, d1, freePort, join, migrate, newState, startPlaying, startRulesStub, startServer } from "./lib.mjs";
 import { readFileSync } from "node:fs";
 
 const shots = process.env.STARLING_SHOTS || "";
@@ -49,10 +49,11 @@ try {
   const heard = ["Take it back? Take it back! 103.3 says until the ballot.", "First to 100 points. Word for word, 100.", "Points for trying! Ooh.", "Fifteen! Fifteen! Drafting it.", "No spam! No spam!", "Votes needed. Majority or everyone."];
   const rows = Array.from({ length: 60 }, (_, i) => [`'${gid}', '${pid("Bo")}', 'starling', '${today}', 1, 'player', '${said[i % said.length]}', '${at}'`, `'${gid}', '${pid("Bo")}', 'starling', '${today}', 1, 'agent', '${heard[i % heard.length]}', '${at}'`]).flat();
   d1(state, rows.map((v) => `INSERT INTO chat_messages (game_id, player_id, agent, local_date, day, role, body, at) VALUES (${v})`).join(";\n"));
-  const r61 = ok(await bo.post(CH, { body: "one more" }), "bo 61st");
+  const again = (f) => f().catch(() => f());   // a kept-alive socket the dev server closed during the long d1 call above: EPIPE on reuse, once
+  const r61 = ok(await again(() => bo.post(CH, { body: "one more" })), "bo 61st");
   if (r61.data.out !== "cap") throw new Error("Bo is not at the cap: " + r61.text);
   const cookie = (c) => [...c.jar].find(([k]) => k === "s|/shop")[1];
-  const r = await promisify(execFile)("/usr/local/bin/python3", [ROOT + "/tests/browser-starling.py", srv.base, shots || "-", cookie(ada), cookie(bo), cookie(cy), cookie(dee)], { timeout: 280000, maxBuffer: 1 << 22 });
+  const r = await promisify(execFile)(PYTHON, [ROOT + "/tests/browser-starling.py", srv.base, shots || "-", cookie(ada), cookie(bo), cookie(cy), cookie(dee)], { timeout: 280000, maxBuffer: 1 << 22 });
   process.stdout.write(r.stdout);
 } catch (e) {
   failed = true;
