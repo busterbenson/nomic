@@ -85,6 +85,8 @@ ${refused ? `<div class="tx">${esc(last.refusal)}</div>` : ""}
   function lineHTML(m, prev) {
     if (m.role === "event") return `<div class="ev">${esc(m.body)}</div>`;
     if (m.role === "player") return `<div class="msg cme"><div class="bub">${esc(m.body)}</div></div>`;
+    // Chalant's answer to an escalated turn (rule 106.4): his own line, named, not Gremlin's portrait
+    if (m.role === "chalant") return `<div class="msg cher chalant"><div class="bub"><b class="who">Chalant</b>${textHTML(m.body)}</div></div>`;
     const cont = prev && (prev.role === "agent" || prev.role === "excuse") && prev.date === m.date;
     return `<div class="msg cher${cont ? " cont" : ""}">${cont ? "" : portrait(true)}<div class="bub">${textHTML(m.body)}</div></div>`;
   }

@@ -5,13 +5,22 @@
 //   GET  /<slug>/api/moderator/pending           the night in progress (processing or deploying), its passed proposals in
 //                                                the order the game's rules apply them (107.2), and every not-applied
 //                                                proposal (for the moderator to reconcile the repo with, 107.7)
+//   GET  /<slug>/api/moderator/escalations      what Gremlin passed to Chalant and nobody has answered (rule 106.4): each with its category, the
+//                                                agent's reason, and the ticket's thread or the one escalated chat turn, plus `notification`, the
+//                                                metadata-only text for the always-on session (category, ticket number, link: no player text)
+//   POST /<slug>/api/moderator/escalations/:id/delivered    marks it as notified (so the next tick lists only new ones in `notification`)
+//   POST /<slug>/api/moderator/escalations/:id/answer       {body, usage?}: Chalant's answer, plain text up to 2000 characters, posted in the
+//                                                ticket's thread (or, for a chat turn, in that player's private chat); once only
 //   POST /<slug>/api/moderator/days/:n/claim      {sha, outcomes: [{number, seq, applied: true, commit} | {number, seq,
 //                                                applied: false, reason}], notes?: [{number, body}]}: accepted only while
 //                                                day n is processing and before its deadline (107.6); the day goes to
 //                                                deploying. seq is the order the moderator applied them in (1..n, each
 //                                                once); the enactment follows it (107.2).
-import { monthSpend } from "../lib/agent";
+import { logCall, monthSpend } from "../lib/agent";
+import { PRICES } from "../lib/chat.js";
 import { clockNow, deployDeadline, notAppliedStatements, timeZoneOf } from "../lib/day";
+import { localDate } from "../lib/day-gate.js";
+import { notificationText } from "../lib/escalate.js";
 import { orderPassed } from "../engine/host";
 import { Ctx, json, nowIso, readJson, sha256Hex } from "../lib/util";
 
@@ -142,4 +151,95 @@ export const claim = async (ctx: Ctx) => {
   const after: any = await env.DB.prepare("SELECT status, commit_sha, deadline_at FROM days WHERE game_id = ? AND n = ?").bind(game.id, n).first();
   if (after?.status !== "deploying" || after.commit_sha !== body.sha) return json({ error: `Day ${n} was not claimed (the deadline passed or another claim landed first).` }, 409);
   return json({ status: "deploying", deploy_deadline_at: nowIso(deployDeadline(Date.parse(after.deadline_at))) });
+};
+
+
+// ---- escalations (rule 106.4) -------------------------------------------------------------------------------------------------------
+// The Mac mini's job polls these (the Worker can't reach it). Player text goes out through GET /escalations ONLY for an escalated turn or
+// ticket and only to the bearer-token holder; the job puts it in a tool-less model call as fenced data and posts one plain-text answer back.
+const ANSWER_MAX = 2000, THREAD_SHOWN = 30;
+/** @rule 106.4 */
+const asId = (raw: string) => (/^\d{1,9}$/.test(raw) && Number(raw) > 0 ? Number(raw) : null);
+
+/** @rule 106.4 */
+export const escalations = async (ctx: Ctx) => {
+  if (!(await authorized(ctx))) return unauthorized();
+  const { env } = ctx;
+  const game = ctx.data.game!;
+  const open = (await env.DB.prepare(
+    `SELECT e.id, e.agent, e.category, e.reason, e.ticket_id, e.chat_message_id, e.created_at, e.delivered_at, p.display_name AS player
+     FROM escalations e JOIN players p ON p.game_id = e.game_id AND p.id = e.player_id WHERE e.game_id = ? AND e.answered_at IS NULL ORDER BY e.id LIMIT 50`,
+  ).bind(game.id).all()).results as any[];
+  const items: any[] = [];
+  for (const e of open) {
+    const base = { id: e.id, agent: e.agent, category: e.category, reason: e.reason, player: e.player, created_at: e.created_at, delivered_at: e.delivered_at };
+    if (e.ticket_id) {
+      const t: any = await env.DB.prepare("SELECT number, title, brief, state, makes, estimate, price, price_reason FROM tickets WHERE id = ?").bind(e.ticket_id).first();
+      const posts = ((await env.DB.prepare(
+        `SELECT x.id, x.author_kind, x.body, x.at, p.display_name AS name FROM ticket_posts x LEFT JOIN players p ON p.game_id = x.game_id AND p.id = x.player_id WHERE x.ticket_id = ? ORDER BY x.id DESC LIMIT ${THREAD_SHOWN}`,
+      ).bind(e.ticket_id).all()).results as any[]).reverse().map((x) => ({ id: x.id, author: x.author_kind, by: x.author_kind === "player" ? x.name : x.author_kind, body: x.body, at: x.at }));
+      items.push({ ...base, where: "ticket", ticket: t ? { number: t.number, title: t.title, brief: t.brief, state: t.state, makes: JSON.parse(t.makes || "[]"), estimate: t.estimate, price: t.price, price_reason: t.price_reason } : null, posts });
+    } else {
+      // a private chat: ONLY the escalated turn (the player's message and Gremlin's answer to it), never the rest of the history
+      const m: any = await env.DB.prepare("SELECT c.id, c.body, c.player_id, t.number AS ticket_number FROM chat_messages c LEFT JOIN tickets t ON t.id = c.ticket_id WHERE c.id = ? AND c.game_id = ?").bind(e.chat_message_id, game.id).first();
+      const reply: any = m ? await env.DB.prepare("SELECT body FROM chat_messages WHERE game_id = ? AND player_id = ? AND agent = ? AND role = 'agent' AND id > ? ORDER BY id LIMIT 1").bind(game.id, m.player_id, e.agent, m.id).first() : null;
+      items.push({ ...base, where: "chat", ticket_number: m?.ticket_number ?? null, turn: m ? { message: m.body, reply: reply?.body ?? null } : null });
+    }
+  }
+  // the notification: only for escalations not yet delivered, built from category and ticket number alone
+  const fresh = items.filter((i) => !i.delivered_at).map((i) => ({ id: i.id, agent: i.agent, category: i.category, ticket: i.where === "ticket" ? i.ticket?.number ?? null : null }));
+  return json({ escalations: items, notification: fresh.length ? { ids: fresh.map((f) => f.id), text: notificationText(game, fresh) } : null });
+};
+
+/** @rule 106.4 */
+export const delivered = async (ctx: Ctx) => {
+  if (!(await authorized(ctx))) return unauthorized();
+  const id = asId(ctx.params.id);
+  if (id === null) return json({ error: "Bad escalation." }, 400);
+  const res = await ctx.env.DB.prepare("UPDATE escalations SET delivered_at = ? WHERE id = ? AND game_id = ? AND delivered_at IS NULL AND answered_at IS NULL").bind(nowIso(await clockNow(ctx.env)), id, ctx.data.game!.id).run();
+  return json({ ok: true, marked: (res?.meta?.changes ?? 0) > 0 });
+};
+
+/** The usage the job reports for its model call, checked: known fields, whole non-negative numbers. @rule 106.7 */
+function readUsage(u: any): { model: string; usage: any; ms: number } | null | "bad" {
+  if (u === undefined || u === null) return null;
+  if (typeof u !== "object" || Array.isArray(u)) return "bad";
+  const num = (x: any) => (x === undefined ? 0 : Number.isInteger(x) && x >= 0 && x <= 10_000_000 ? x : NaN);
+  const model = typeof u.model === "string" && Object.hasOwn(PRICES, u.model) ? u.model : null;
+  const usage = { input_tokens: num(u.input_tokens), output_tokens: num(u.output_tokens), cache_creation_input_tokens: num(u.cache_creation_input_tokens), cache_read_input_tokens: num(u.cache_read_input_tokens) };
+  const ms = num(u.ms);
+  if (!model || Object.values(usage).some(Number.isNaN) || Number.isNaN(ms) || Object.keys(u).some((k) => !["model", "input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "ms"].includes(k))) return "bad";
+  return { model, usage, ms };
+}
+
+/** @rule 106.4 */
+export const answer = async (ctx: Ctx) => {
+  if (!(await authorized(ctx))) return unauthorized();
+  const { env } = ctx;
+  const game = ctx.data.game!;
+  const id = asId(ctx.params.id);
+  if (id === null) return json({ error: "Bad escalation." }, 400);
+  const body = await readJson(ctx.request);
+  // plain text only: a body and, optionally, the call's usage; no fields, no state, no markup
+  if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some((k) => k !== "body" && k !== "usage")) return json({ error: "Send {body} and nothing else (and optionally {usage})." }, 400);
+  const text = typeof body.body === "string" ? body.body.replace(/\r\n?/g, "\n").trim() : "";
+  if (!text || text.length > ANSWER_MAX) return json({ error: `An answer is 1 to ${ANSWER_MAX} characters of plain text.` }, 400);
+  if (/[<>]/.test(text)) return json({ error: "An answer is plain text: no markup." }, 400);
+  const u = readUsage(body.usage);
+  if (u === "bad") return json({ error: "usage is {model, input_tokens, output_tokens, cache_creation_input_tokens?, cache_read_input_tokens?, ms?} with whole numbers." }, 400);
+  const e: any = await env.DB.prepare("SELECT * FROM escalations WHERE id = ? AND game_id = ?").bind(id, game.id).first();
+  if (!e) return json({ error: "No such escalation." }, 404);
+  if (e.answered_at) return json({ error: "Already answered." }, 409);
+  const nowMs = await clockNow(env);
+  const now = nowIso(nowMs);
+  // The mark and the post go in as one batch: the post goes in only if THIS request's UPDATE took the open row (changes() is that statement's), so
+  // two answers racing post once.
+  const post = e.ticket_id
+    ? env.DB.prepare("INSERT INTO ticket_posts (ticket_id, game_id, author_kind, player_id, body, at) SELECT ?, ?, 'chalant', NULL, ?, ? WHERE changes() > 0").bind(e.ticket_id, game.id, text, now)
+    : env.DB.prepare("INSERT INTO chat_messages (game_id, player_id, agent, local_date, day, role, body, ticket_id, at) SELECT ?, ?, ?, ?, ?, 'chalant', ?, (SELECT ticket_id FROM chat_messages WHERE id = ?), ? WHERE changes() > 0")
+      .bind(game.id, e.player_id, e.agent, localDate(timeZoneOf(game), nowMs), game.day || null, text, e.chat_message_id, now);
+  const res = await env.DB.batch([env.DB.prepare("UPDATE escalations SET answered_at = ? WHERE id = ? AND game_id = ? AND answered_at IS NULL").bind(now, id, game.id), post]);
+  if (!((res[0] as any)?.meta?.changes > 0)) return json({ error: "Already answered." }, 409);
+  if (u) await logCall(env, game, timeZoneOf(game), nowMs, { player_id: e.player_id, agent: "chalant", purpose: "escalation", model: u.model, outcome: "ok", usage: u.usage, ms: u.ms });
+  return json({ ok: true, where: e.ticket_id ? "ticket" : "chat" });
 };

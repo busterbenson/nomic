@@ -499,6 +499,7 @@ button.wpill:hover{background:var(--surface-2)}
 .tstate[data-state="Ready"],.tstate[data-state="Approved"],.tstate[data-state="Building"],.tstate[data-state="Done"]{border-color:var(--accent);color:var(--accent)}
 .tstate[data-state="Draft"],.tstate[data-state="Ready"],.tstate[data-state="Shelved"]{border-style:dashed}
 .tstate[data-state="Refused"],.tstate[data-state="Failed"]{border-color:var(--err);color:var(--err)}
+.tstate[data-state="Escalated"]{background:var(--warm1);border-color:var(--warm-line);color:var(--ink)}
 .tfilter{display:flex;flex-wrap:wrap;gap:6px;padding:4px 0 8px}
 button.pill{background:none;cursor:pointer;min-height:30px;font:inherit;font-family:var(--font-mono);font-size:.6rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:3px 9px}
 button.pill[aria-pressed="true"]{background:color-mix(in srgb,var(--accent) 16%,transparent)}
@@ -557,7 +558,8 @@ button.pill[aria-pressed="true"]{background:color-mix(in srgb,var(--accent) 16%,
 .chat .msg{display:flex;gap:7px;align-items:flex-end;max-width:100%}
 .chat .msg .bub{padding:8px 12px;border-radius:16px;font-size:.92rem;line-height:1.45;min-width:0;overflow-wrap:anywhere;white-space:pre-wrap}
 .chat .msg.cher .bub{background:var(--sea);border:1.5px solid var(--ink);border-bottom-left-radius:4px;max-width:88%}
-.chat .msg.cher.cont{padding-left:35px}
+.chat .msg.cher.cont,.chat .msg.chalant{padding-left:35px}
+.chat .msg .who{display:block;font-weight:700;font-size:.78rem;color:var(--accent);margin-bottom:2px}
 .chat .msg.cme{justify-content:flex-end}
 .chat .msg.cme .bub{background:var(--accent-tint);border-bottom-right-radius:4px;max-width:82%}
 .chat .ev{align-self:center;font-family:var(--font-mono);font-size:.6rem;color:var(--ink-muted);display:flex;gap:6px;align-items:center;padding:2px 10px;border-radius:999px;border:1px solid var(--line);background:var(--chat);text-align:center}

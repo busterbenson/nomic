@@ -3,7 +3,8 @@
 import { Ctx, colorOf } from "./util";
 
 export const FROM = `FROM tickets t JOIN players p ON p.game_id = t.game_id AND p.id = t.player_id LEFT JOIN proposals q ON q.id = t.proposal_id`;
-export const COLS = `t.*, p.display_name AS name, p.color, q.number AS pnumber, q.status AS pstatus`;
+// `escalated`: an open escalation on the ticket (rule 106.4), derived from the escalations table; it is not a ticket state.
+export const COLS = `t.*, p.display_name AS name, p.color, q.number AS pnumber, q.status AS pstatus, EXISTS (SELECT 1 FROM escalations e WHERE e.ticket_id = t.id AND e.answered_at IS NULL) AS escalated`;
 
 // A ticket as the list and the ballot row show it. A whitelist: no row id, no player id.
 /** @rule 801.2, 801.4, 803.1 */
@@ -14,6 +15,7 @@ export function ticketView(r: any, viewerId?: string | null) {
     estimate: r.estimate, running_cost: r.running_cost,
     price: r.price, price_reason: r.price_reason, paid: r.paid ?? null,
     state: r.state,
+    escalated: !!r.escalated,
     proposal: r.pnumber ? `P${r.pnumber}` : null,
     queue: r.queue_pos ?? null,
     by: { name: r.name, color: colorOf(r.color) },

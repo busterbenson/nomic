@@ -66,6 +66,7 @@ export function rowView(r) {
   if (meta.refusal) out.refusal = meta.refusal;
   if (meta.canned) out.canned = meta.canned;
   if (meta.price !== undefined) out.price = meta.price;
+  if (meta.escalated) out.escalated = meta.escalated;
   return out;
 }
 // One page of a player's own history, newest rows first by id; `before` is the cursor (an id). Only this player's rows with this agent.
