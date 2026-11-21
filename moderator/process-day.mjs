@@ -25,8 +25,9 @@ import { isMainRun } from "./schedule.mjs";
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const ROOT = resolve(HERE, "..");
 // The only paths a night may change in a game repo (AGENTS.md; rule 107.4). game.json is rewritten by this script
-// (its module list follows rules/), never by the model.
-export const ALLOWED = [/^RULES\.md$/, /^settings\.json$/, /^rules\/[A-Za-z0-9_.-]+$/, /^rulings\/[A-Za-z0-9_./-]+$/];
+// (its module list follows rules/), never by the model. catalog.json (the game's catalog entries, rule 701.1) is allowed so the night's
+// commissions can write it (step 3); a proposal to change a rule never changes it (checked below).
+export const ALLOWED = [/^RULES\.md$/, /^settings\.json$/, /^catalog\.json$/, /^rules\/[A-Za-z0-9_.-]+$/, /^rulings\/[A-Za-z0-9_./-]+$/];
 export const RESULT_FILE = "MODERATOR-RESULT.json";
 export const MAX_FIXES = 2;
 export const CLAIM_MARGIN_MIN = 5; // stop applying this long before the deadline, so the claim lands in time
@@ -237,7 +238,7 @@ export function scopeProblems({ beforeMd, afterMd, beforeSettings, afterSettings
       out.push("rules/rulebook.test.ts changed beyond the lines for the rules this proposal changes");
       continue;
     }
-    if (f.startsWith("rules/") || f.startsWith("rulings/")) out.push(`${f} is not part of the rule this proposal changes`);
+    if (f.startsWith("rules/") || f.startsWith("rulings/") || f === "catalog.json") out.push(`${f} is not part of the rule this proposal changes`);
   }
   if (!markChange) for (const n of rules) if (a[`r${n}`] && b[`r${n}`] && markOf(beforeMd, n) !== markOf(afterMd, n)) out.push(`rule ${n}'s mark changed`);
   if (markChange) {

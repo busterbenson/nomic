@@ -23,6 +23,8 @@ import { refusalBody, turnBlock } from "../lib/turn";
 import { COLS, FROM, ticketView } from "../lib/ticket-view";
 import { Ctx, colorOf, json, nowIso, readJson } from "../lib/util";
 import { bookFor, confirm as confirmProposal } from "./api-proposals";
+import { catalogFor, viewContext } from "./api-catalog";
+import { entryView } from "../lib/catalog.js";
 
 type Out = { status: number; body: any };
 const out = (body: any, status = 200): Out => ({ status, body });
@@ -131,8 +133,12 @@ async function page(ctx: Ctx, r: any, player: any, nowMs: number) {
     const { game: g, day } = await loadToday(env, game, nowMs);
     if (g.status === "playing" && day && isLocked(g, day, nowMs)) post = { allowed: false, reason: lockMessage(day.n), locked: true };
   }
+  // each entry it makes comes with the view a card shows (rules 701.1, 704.2): its kind, attribute rows and flavor, in the order of the entries in `makes`
+  const view = ticketView(r, player?.id);
+  const cat = viewContext(catalogFor(game));
   return {
-    ...ticketView(r, player?.id),
+    ...view,
+    entry_views: view.makes.filter((m: any) => m.kind === "entry").map((m: any) => entryView(m, cat)),
     tasks: (tasks.results as any[]).map((t) => ({ text: t.text, done: !!t.done, done_day: t.done_day ?? null })),
     log: (log.results as any[]).map((l) => ({ day: l.day ?? null, kind: l.kind, text: l.text, at: l.at })),
     posts: (posts.results as any[]).map((x) => ({
@@ -194,7 +200,8 @@ export async function edit(ctx: Ctx, player: any, raw: unknown, body: any, nowMs
   const m = await mine(ctx, player, raw, nowMs);
   if ("status" in m) return m;
   const { t, game } = m;
-  const r = readFields(body);
+  const cat = catalogFor(game);
+  const r = readFields(body, { registry: cat.registry, required: cat.required });
   if ("error" in r) return out({ error: r.error }, 400);
   const f = r.fields as any;
   const now = nowIso(nowMs);
