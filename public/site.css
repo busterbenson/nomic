@@ -532,6 +532,7 @@ button.pill[aria-pressed="true"]{background:color-mix(in srgb,var(--accent) 16%,
 .wkform textarea,.wkpost textarea{resize:vertical}
 .sdiff .wpill{align-self:flex-start}
 
+/* ==== The chat window ==== */
 /* The chat window (rules 106.3, 106.7): one component for the agents (Gremlin now, Starling in step 2b), written by public/js/chat.js.
    Desktop: a sticky column beside the tab; minimize docks it as the corner pill and the tab reflows. Phone: the corner pill opens a
    bottom sheet over a dim. The wrapper #bwrap says which: data-chat = off | open | min, data-sheet = open | closed. */
@@ -609,3 +610,4 @@ button.pill[aria-pressed="true"]{background:color-mix(in srgb,var(--accent) 16%,
   body.chat-sheet{overflow:hidden}
 }
 .wkprice{margin:0}
+/* ==== end of the chat window ==== */

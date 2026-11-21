@@ -43,7 +43,7 @@ export function createChat({ api, root, me, slug, agent = AGENTS.gremlin, rpill,
   const desktop = () => !!(window.matchMedia && matchMedia("(min-width: 900px)").matches);
   const reduced = () => !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
   const player = () => (me() && me().player) || null;
-  const key = () => `promptocracy:chat:${slug}:${player() ? player().id || player().name || "p" : "x"}:${agent.key}`;
+  const key = () => `promptocracy:chat:${slug}:${player() && player().color ? player().color.key : "x"}:${agent.key}`;   // /api/me names no id: a color is one player in a game
   const remembered = () => { try { return localStorage.getItem(key()) !== "min"; } catch { return true; } };
   const remember = (open) => { try { localStorage.setItem(key(), open ? "open" : "min"); } catch {} };
 

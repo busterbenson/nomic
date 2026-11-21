@@ -156,7 +156,10 @@ check("the board's size rule applies to the board svg only, not to the svg each 
 const sizing = read("public/site.css");
 check("no size rule reaches an svg through a descendant selector (each piece is an svg nested in the board, the preview, a thumbnail or a players-list icon, and keeps its own width and height)", !/\.(pv|prow|opt \.face|board-wrap) svg\s*\{/.test(sizing) && /\.pv>svg\s*\{/.test(sizing) && /\.opt \.thumb>svg\s*\{/.test(sizing) && /\.prow>svg\s*\{/.test(sizing));
 check("a recently changed rule's warm sand is a token with a dark value too (no color lives outside theme.css)", /--warm1:/.test(css.slice(0, css.indexOf("@media"))) && /--warm1:/.test(dark) && !/#F2DFB4|#4C4023/i.test(read("public/site.css")));
-check("the page has no sticky or fixed elements except the card layer (S1-SUM-07)", !/position:\s*sticky/.test(read("public/site.css")) && (read("public/site.css").match(/position:\s*fixed/g) || []).length === 2);
+// The chat window (rules 106.3, 106.7: a sticky column, a corner pill and a phone's sheet, the Starling mockup's design) is the one other thing that is
+// sticky or fixed, and its CSS sits between two markers; everything outside them keeps S1-SUM-07.
+const siteCss = read("public/site.css"), chatCss = siteCss.slice(siteCss.indexOf("/* ==== The chat window ==== */"), siteCss.indexOf("/* ==== end of the chat window ==== */")), plainCss = siteCss.replace(chatCss, "");
+check("the page has no sticky or fixed elements except the card layer (S1-SUM-07) and the chat window's column, pill and sheet", chatCss.length > 500 && !/position:\s*sticky/.test(plainCss) && (plainCss.match(/position:\s*fixed/g) || []).length === 2 && /position:\s*sticky/.test(chatCss));
 check("the pages no longer ship the WebGL board: no three.js in public/ or the Worker's routes", !readdirSync(pjoin(ROOT, "public")).includes("vendor") && !/three/i.test(read("src/index.ts")));
 
 console.log("citations link to their rule, in both voices");
