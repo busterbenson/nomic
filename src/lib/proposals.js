@@ -25,11 +25,6 @@ const settingValue = (v) => (v && typeof v === "object" ? Object.values(v).join(
 /** The settings a draft sets, as plain text: "board.island = 10x10, mcp_enabled = off". @rule 103.1 */
 export const settingsText = (settings) => Object.entries(settings || {}).map(([k, v]) => `${k} = ${settingValue(v)}`).join(", ");
 
-// The Champion's change (402.4) and the Era's naming (402.3) are the site's to enforce only while the game's rules still say so.
-/** @rule 402.3, 402.4 */
-export const hasChampionChange = (book) => has(book, "402.4");
-/** @rule 402.3 */
-export const hasEraNaming = (book) => has(book, "402.3");
 export const KINDS = ["amend", "addclause", "add", "repeal", "move", "mark"];
 // The words the API also accepts for a kind ("reword" is what the menu calls "amend").
 const KIND_ALIASES = { reword: "amend", edit: "amend", lock: "mark", unlock: "mark", remove: "repeal" };

@@ -49,6 +49,9 @@ export type Hooks = {
   applyOrder?(ctx: Ctx, passed: unknown[]): unknown[];
   onEnacted?(ctx: Ctx, proposal: unknown): Effect[];
   dayEnd?(ctx: Ctx, results: unknown): Effect[];
+  /** Whether the Champion (rule 402.4) may draft their change: null, or a refusal. A game with no module for this hook has no
+   *  Champion's change. */
+  championChange?(ctx: Ctx, champion: Actor): Refusal | null;
 };
 export type RuleModule = { rule: number } & Hooks;
 

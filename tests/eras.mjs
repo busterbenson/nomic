@@ -4,9 +4,6 @@
 // tests/moderator.mjs. Run: node tests/eras.mjs. Real `wrangler dev`, LOCAL D1 only.
 import { createGame, d1, join, migrate, newState, startPlaying, freePort, startRulesStub, startServer } from "./lib.mjs";
 import { CHAMPION_NO_VOTE, resultSentence, tally } from "../src/lib/votes.js";
-import { hasChampionChange, hasEraNaming, parseBook } from "../src/lib/proposals.js";
-import { readFileSync } from "node:fs";
-import { ROOT } from "./lib.mjs";
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = "") => {
@@ -31,14 +28,6 @@ console.log("the count of the Champion's change (rule 402.4)");
   check("the totals say how many others there are and the sentence reads as the reverse rule", count([v("b", "no")]).needed === 3 && resultSentence(count([v("b", "no")])) === "1 of 3 other players voted no; it fails only if all 3 do." && resultSentence(tally({ mark: "majority", electorate: 1, electors: ["a"], votes: [], champion: true, proposer: "a" })) === "There are no other players, so it takes effect.");
   const plain = tally({ mark: "majority", electorate: 4, electors: E, votes: [v("a", "yes"), v("b", "yes")] });
   check("an ordinary proposal is counted as before: not voting counts as no, and it needs more than half", plain.passed === false && plain.needed === 3 && tally({ mark: "majority", electorate: 4, electors: E, votes: [v("a", "yes"), v("b", "yes"), v("c", "yes")] }).passed === true && resultSentence(plain) === "2 of 4 voted yes; it needed 3.");
-}
-
-console.log("the site enforces the Champion's change only while the rules still say so (rule 2 of AGENTS.md)");
-{
-  const md = readFileSync(`${ROOT}/templates/RULES.md`, "utf8");
-  const without = md.replace(/\*\*402\.4\*\*[\s\S]*?(?=### 403)/, "").replace(/\*\*402\.3\*\*[\s\S]*?(?=### 403)/, "");
-  check("the starter rules have 402.3 and 402.4; the same rules with the two clauses repealed do not, and the helpers say so",
-    hasChampionChange(parseBook(md)) && hasEraNaming(parseBook(md)) && !hasChampionChange(parseBook(without)) && !hasEraNaming(parseBook(without)));
 }
 
 // ---------------------------------------------------------------- the running site
@@ -145,6 +134,8 @@ try {
   check("the ballot row says it is the Champion's change; for the Champion the vote is refused with the reason, for Bo it is open; 'of' counts the other players",
     rowAna.champion === true && rowAna.own_champion === true && rowAna.can_vote.allowed === false && rowAna.can_vote.reason === CHAMPION_NO_VOTE && rowAna.turnout.of === 2 &&
     rowBo.champion === true && rowBo.own_champion === false && rowBo.can_vote.allowed === true && rowBo.threshold_rule === "402.4" && rowBo.needs.champion === true && rowBo.needs.needed === 2, J([rowAna, rowBo]));
+  const dayBallot = async (c) => (await c.get("/era/api/day")).data.ballot;
+  check("/api/day counts the ballot items you can vote on: 0 for the Champion (only her own change is on it), 1 for Bo and for a visitor", (await dayBallot(P.Ana)) === 0 && (await dayBallot(P.Bo)) === 1 && (await fetch(`${A}/era/api/day`).then((r) => r.json())).ballot === 1);
   check("the Champion's 'N of M' leaves her own change out", bAna.you.of === 0 && bBo.you.of === 1, J([bAna.you, bBo.you]));
   const vAna = await P.Ana.post("/era/api/votes", { proposal: "P9", vote: "yes" }), vBo = await P.Bo.post("/era/api/votes", { proposal: "P9", vote: "no" });
   check("the Champion's vote on it is refused (403) and nothing is written; Bo's vote is taken",

@@ -70,7 +70,7 @@ const settingsHTML = (p) => {
   return e.length ? `<p class="setline mono">${e.map(([k, v]) => `Sets <b>${esc(k)}</b> to <b>${esc(typeof v === "object" ? JSON.stringify(v) : String(v))}</b>`).join("<br>")}</p>` : "";
 };
 /** @rule 105.1, 402.4 */
-const needText = (p) => (p.needs && p.needs.champion ? (p.needs.needed ? `Champion's change · stopped only if all ${p.needs.needed} others vote no` : "Champion's change · no one else to vote no")
+const needText = (p) => (p.needs && p.needs.champion ? (p.needs.needed ? `Champion's change · stopped at ${p.needs.needed} of ${p.needs.needed} against` : "Champion's change")
   : p.needs ? `${p.needs.mark} · needs ${p.needs.needed} of ${p.needs.of}` : p.mark || "");
 
 export function createProposer({ api, me, day, refresh, pill, vote }) {

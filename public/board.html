@@ -275,8 +275,8 @@ import { createWorkshop } from "/js/workshop.js";
     const r = n => PROP.rpill(String(n));
     const k = p.kind, t = String(p.target);
     const what = k === "commission" ? `a commission ${p.ticket ? wPill(p.ticket.n) : ""}` : k === "amend" ? `a change to ${t.includes(".") ? "clause" : "rule"} ${r(t)}` : k === "addclause" ? `a new clause for rule ${r(t.split(".")[0])}` : k === "add" ? `a new rule${p.new_num ? " " + r(p.new_num) : ""}` : k === "repeal" ? `to repeal ${t.includes(".") ? "clause" : "rule"} ${r(t)}` : k === "move" ? `to move rule ${r(t)}` : k === "mark" ? `a change to how ${BOOK && BOOK.rulebook.byNum[t] && BOOK.rulebook.byNum[t].kind === "block" ? "block" : "rule"} ${r(t)} is changed` : "a change";
-    const need = p.needs && p.needs.champion ? (p.needs.needed ? `Stopped only if all ${p.needs.needed} others vote no.` : "") : p.needs ? (p.needs.mark === "unanimous" ? `It needs all ${p.needs.of} votes to pass.` : `It needs ${p.needs.needed} of ${p.needs.of} votes to pass.`) : "";
-    return `${p.champion ? "made the Champion's change: " : "proposed "}${what}. ${need}`;
+    const need = p.needs && p.needs.champion ? (p.needs.needed ? `Stopped at ${p.needs.needed} of ${p.needs.needed} against.` : "") : p.needs ? (p.needs.mark === "unanimous" ? `It needs all ${p.needs.of} votes to pass.` : `It needs ${p.needs.needed} of ${p.needs.of} votes to pass.`) : "";
+    return `${p.champion ? `made the Champion's change ${r("402.4")}: ` : "proposed "}${what}. ${need}`;
   }
   const ballotList = () => (PROP ? PROP.onBallot() : []);
   const votable = () => (BAL && BAL.hasYou() ? BAL.total() : ballotList().length);   // today's ballot items you can vote on

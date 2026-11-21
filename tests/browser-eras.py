@@ -47,7 +47,7 @@ with sync_playwright() as p:
             check(f"{tag}: Bo's Summary shows the Era's number and name and who the Champion is", re.match(r"Era 2 · The Long Dusk\s*Champion\s*Ada", era) is not None, era)
             check(f"{tag}: Bo is not the Champion, so there is no naming form", page.locator("#era-name").count() == 0)
             row = text(page, "#sb-P1")
-            check(f"{tag}: the Champion's change reads as such on the ballot: it is the Champion's change, with the change and how it is stopped", "made the Champion's change: a change to rule 401" in row and "Stopped only if all 2 others vote no." in row and "15 points" in row, row)
+            check(f"{tag}: the Champion's change reads as such on the ballot: it is the Champion's change, with the change and how it is stopped", "made the Champion's change 402.4: a change to rule 401" in row and "Stopped at 2 of 2 against." in row and "15 points" in row, row)
             check(f"{tag}: the ordinary proposal beside it reads as before, with its votes needed", "proposed a new clause for rule 503. It needs 2 of 3 votes to pass." in text(page, "#sb-P2"), text(page, "#sb-P2"))
             check(f"{tag}: Bo can vote on the Champion's change (his Yes is marked)", page.locator('#sb-P1 [data-vote="yes"]').is_enabled() and page.locator('#sb-P1 [data-vote="yes"]').get_attribute("aria-pressed") == "true")
             check(f"{tag}: the Champion's change shows its turnout of the other players", "1 of 2 voted" in row, row)

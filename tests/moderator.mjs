@@ -145,7 +145,6 @@ try {
   check("the claimed commit live only at 2:40 am (past 2:30 and the next tick): not applied, no points, the lock ends", prop(p9).status === "not_applied" && prop(p9).not_applied_reason === DEPLOY_REASON && score("Cy") === 0 && day(6).status === "timed_out" && game().phase === "open", J([prop(p9), day(6)]));
 
   console.log("winning (rule 402)");
-  d1(state, `DELETE FROM eras WHERE game_id = '${gid}'`);   // a game that began before migration 0011 has no Era row yet: the night makes it (Era 1, from day 1)
   d1(state, `UPDATE players SET score = 95 WHERE id = '${id.Ana}'; UPDATE players SET score = 98 WHERE id = '${id.Bo}'`);
   const p6 = ballot(7, "Ana", "401.1"), p7 = ballot(7, "Bo", "402.1");
   await midnight();
@@ -158,7 +157,7 @@ try {
   const eraRows = d1(state, `SELECT n, name, started_day, ended_day, champion_id, final_scores FROM eras WHERE game_id = '${gid}' ORDER BY n`);
   check("two pass 100 the same night: the first given points wins the Era (402.2), in the order the moderator applied them (P7 seq 1, so Bo, though P6 has the lower number); Bo is the Champion", ended.length === 1 && ended[0].player_id === id.Bo && eraRows[0].champion_id === id.Bo, J([ended, eraRows]));
   check("the Era's final scores are kept (Ana 105, Bo 108, Cy 0) and everyone's points go back to 0 (402.3); the game is still playing", J(JSON.parse(eraRows[0].final_scores)) === J({ [id.Ana]: 105, [id.Bo]: 108, [id.Cy]: 0 }) && score("Ana") === 0 && score("Bo") === 0 && score("Cy") === 0 && game().status === "playing", J([eraRows[0].final_scores, game()]));
-  check("Era 1 started on day 1 (Start) and ended on day 7; Era 2 opened on day 8, unnamed, with no end", eraRows.length === 2 && eraRows[0].n === 1 && eraRows[0].started_day === 1 && eraRows[0].ended_day === 7 && eraRows[1].n === 2 && eraRows[1].started_day === 8 && eraRows[1].ended_day === null && eraRows[1].name === null && game().day === 8, J([eraRows, game()]));
+  check("Era 1 (opened by Start) began on day 1 and ended on day 7; Era 2 opened on day 8, unnamed, with no end", eraRows.length === 2 && eraRows[0].n === 1 && eraRows[0].started_day === 1 && eraRows[0].ended_day === 7 && eraRows[1].n === 2 && eraRows[1].started_day === 8 && eraRows[1].ended_day === null && eraRows[1].name === null && game().day === 8, J([eraRows, game()]));
   check("History says so: the Era, the Champion, how, and the final scores", /^Era 1 ended\. Bo reached 108 points and is the Champion\. Final scores: Bo 108, Ana 105, Cy 0\.$/.test(ended[0].text), ended[0].text);
   check("the claim's sequence is stored with each proposal (apply_seq)", J(d1(state, `SELECT number, apply_seq FROM proposals WHERE game_id = '${gid}' AND number IN (${p6}, ${p7}) ORDER BY apply_seq`).map((r) => [r.number, r.apply_seq])) === J([[p7, 1], [p6, 2]]));
   const night7 = d1(state, `SELECT kind, player_id, night_seq FROM events WHERE game_id = '${gid}' AND day = 7 AND phase = 'night' ORDER BY night_seq`);

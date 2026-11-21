@@ -5,13 +5,14 @@
 //   processing_day, message   while locked: the day being processed, and the sentence every write answers with
 //   failed      while locked: the last processing attempt failed (the lock stays on until it succeeds)
 //   deadline_at while processing: the 2 am deadline (rule 107.6), when play resumes at the latest
-//   ballot      how many items today's ballot has
+//   ballot      how many items today's ballot has that you can vote on (the Champion does not vote on their own change, 402.4)
 //   players     each player's name, color and what they have done today (moved, proposed, ended, and on how many
 //               ballot items they have voted: never how, rule 104.4)
 //   you         (signed in) moved / proposed / proposals {made, limit: proposals.per_day, rule 103.2} / ended / voted, and can: {move, propose, end_turn, vote} each
 //               {allowed, reason?}, the same answers the write routes give (turnBlock)
 import { getPlayer } from "../lib/auth";
 import { clockNow, electorsOf, isLocked, loadToday, lockMessage, settingsOf, timeZoneOf } from "../lib/day";
+import { checkChampionChange, lightContext } from "../engine/host";
 import { eraView } from "../lib/eras";
 import { proposalLimitMessage } from "../lib/proposals.js";
 import { turnBlock } from "../lib/turn";
@@ -65,7 +66,11 @@ export const get = async (ctx: Ctx) => {
     you: player ? {
       moved: !!turn?.moved_at, proposed: !!mine?.proposed, proposals: { made: mine?.proposed ?? 0, limit: perDay }, ended: !!turn?.ended_at, voted: mine?.voted ?? 0,
       can: { move: can("move"), propose: can("propose"), end_turn: can("end_turn"), vote: can("vote") },
-      champion: era?.you.champion ? { change: { allowed: !era.you.change_used, reason: era.you.change_used ? "You've made your change this Era (402.4)." : undefined } } : null,
+      champion: era?.you.champion ? (() => {
+        const no = checkChampionChange(game, lightContext(game), { ref: player!.id });   // a game whose rules have no Champion's change offers none
+        const used = era.you.change_used;
+        return { change: { allowed: !used && !no, reason: used ? "You've made your change this Era (402.4)." : no ? no.error : undefined } };
+      })() : null,
     } : null,
   });
 };

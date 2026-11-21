@@ -36,6 +36,10 @@ export const HOOKS = Object.freeze({
   applyOrder: { mode: "decide", wired: true },
   onEnacted: { mode: "sequence", wired: true },
   dayEnd: { mode: "sequence", wired: true },
+  // The Champion's change (rule 402.4). A veto hook with one difference: a game whose rules have NO module for it has no such
+  // change at all (the site refuses the draft), so repealing the rule that carries it removes the capability, wherever that
+  // rule is numbered. A module answers null (allowed) or refuses with a reason.
+  championChange: { mode: "veto", wired: true },
 });
 
 export const ACTION_KINDS = Object.freeze(["move", "propose", "vote", "end_turn"]);
@@ -271,6 +275,22 @@ export function assembleRules(modules, { label = "rules" } = {}) {
         if (r === null || r === undefined) continue;
         if (typeof r?.error !== "string" || !r.error || (r.status !== undefined && !REFUSAL_STATUSES.includes(r.status))) {
           throw new RuleError(m.rule, "actionAllowed", new Error("must return null or {error, status?}"));
+        }
+        return { error: r.error, status: r.status ?? 400, rule: m.rule };
+      }
+      return null;
+    },
+    // null, or {error, status, rule}: whether the Champion may draft their change (rule 402.4). With no module for the hook the
+    // game has no Champion's change, and the answer is a refusal; otherwise the first refusal in rule order wins, as above.
+    /** @rule 402.4 */
+    championChange(ctx, champion) {
+      const mods = implementers("championChange");
+      if (!mods.length) return { error: "The game's rules have no Champion's change.", status: 409, rule: 0 };
+      for (const m of mods) {
+        const r = call(m, "championChange", [ctx, champion]);
+        if (r === null || r === undefined) continue;
+        if (typeof r?.error !== "string" || !r.error || (r.status !== undefined && !REFUSAL_STATUSES.includes(r.status))) {
+          throw new RuleError(m.rule, "championChange", new Error("must return null or {error, status?}"));
         }
         return { error: r.error, status: r.status ?? 400, rule: m.rule };
       }

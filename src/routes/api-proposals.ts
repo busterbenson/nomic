@@ -10,7 +10,7 @@
 // Every write goes through the day's gate (rule 107.1 the lock, rule 202.4 End turn), in the handler and again in the
 // SQL of the write itself. Mechanical kinds are drafted by code (src/lib/proposals.js); rewording in the player's own
 // words by a small model (src/lib/drafter.ts).
-import { bundleFor } from "../engine/host";
+import { bundleFor, checkChampionChange, lightContext } from "../engine/host";
 import { getPlayer } from "../lib/auth";
 import { clockNow, dayOpenBinds, loadToday, settingsOf } from "../lib/day";
 import { championId, changeUsed } from "../lib/eras";
@@ -18,7 +18,7 @@ import { DrafterError, draftRewording, drafterReady } from "../lib/drafter";
 import { notify } from "../lib/notify";
 import { commissionsFor } from "../lib/ticket-view";
 import { COMMISSION_SNAPSHOT_SQL } from "../lib/tickets.js";
-import { CONFIRMED_TODAY_SQL, CONFIRM_SQL, DRAFT_INSERT_SQL, WITHDRAW_SQL, conflictSentence, draftOf, fixedRefusal, hasChampionChange, markFor, needsModel, neededOf, parseBook, proposalLimitMessage, readRequest } from "../lib/proposals.js";
+import { CONFIRMED_TODAY_SQL, CONFIRM_SQL, DRAFT_INSERT_SQL, WITHDRAW_SQL, conflictSentence, draftOf, fixedRefusal, markFor, needsModel, neededOf, parseBook, proposalLimitMessage, readRequest } from "../lib/proposals.js";
 import { refusalBody, turnBlock } from "../lib/turn";
 import { Ctx, colorOf, json, nowIso, readJson, sha256Hex, siteUrl, who } from "../lib/util";
 
@@ -100,7 +100,8 @@ export async function draft(ctx: Ctx, player: any, body: any, nowMs: number): Pr
   // the Champion and not having made it this Era does. Drafted through the same checks as any proposal below.
   const asChampion = body?.champion === true;
   if (asChampion) {
-    if (!hasChampionChange((await bookFor(game)).book)) return out({ error: "The game's rules have no Champion's change (rule 402.4)." }, 409);
+    const no = checkChampionChange(game, lightContext(game), { ref: player.id });
+    if (no) return out({ error: no.error }, no.status);
     if ((await championId(env, game.id)) !== player.id) return out({ error: "Only the Champion can make a Champion's change (rule 402.4)." }, 403);
     if (await changeUsed(env, game.id, player.id)) return out({ error: "You've made your change this Era (rule 402.4)." }, 409);
   } else if (made >= limit) return out({ error: proposalLimitMessage(made) }, 409);

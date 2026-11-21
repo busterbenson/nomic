@@ -77,6 +77,20 @@ export function checkAction(game: any, ctx: any, actor: { ref: string }, action:
   }
 }
 
+// Runs the game's championChange hook: may the Champion draft their change (rule 402.4)? null, or the refusal the route sends. A
+// game whose rules have no module for it answers a refusal, so the capability goes with the rule that carries it.
+/** @rule 402.4 */
+export function checkChampionChange(game: any, ctx: any, champion: { ref: string }): Refusal | null {
+  try {
+    const r = rulesFor(game).championChange(ctx, champion);
+    return r && { error: r.error, status: r.status, rule: r.rule };
+  } catch (e) {
+    if (!(e instanceof RuleError)) throw e;
+    console.error(e.message);
+    return { error: "A rule could not be checked. Try again later.", status: 500, rule: e.rule };
+  }
+}
+
 // Runs the game's afterAction hooks and turns the effects into D1 statements for the action's own batch.
 /** @rule 504 */
 export function afterActionStatements(env: Env, game: any, ctx: any, actor: { ref: string }, action: any, now = nowIso()) {

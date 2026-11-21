@@ -273,7 +273,14 @@ check("hookClaimProblems: every hook the LOADED module has must be a tagged func
 }
 
 console.log("how rules share a hook");
-check("every wired hook declares one combine mode: veto (can-I), sequence (effects), decide (one handler)", J(Object.fromEntries(Object.entries(HOOKS).filter(([, h]) => h.wired).map(([k, h]) => [k, h.mode]))) === '{"actionAllowed":"veto","afterAction":"sequence","spawnTile":"decide","applyOrder":"decide","onEnacted":"sequence","dayEnd":"sequence"}' && Object.values(HOOKS).every((h) => ["veto", "sequence", "decide"].includes(h.mode)));
+check("every wired hook declares one combine mode: veto (can-I), sequence (effects), decide (one handler)", J(Object.fromEntries(Object.entries(HOOKS).filter(([, h]) => h.wired).map(([k, h]) => [k, h.mode]))) === '{"actionAllowed":"veto","afterAction":"sequence","spawnTile":"decide","applyOrder":"decide","onEnacted":"sequence","dayEnd":"sequence","championChange":"veto"}' && Object.values(HOOKS).every((h) => ["veto", "sequence", "decide"].includes(h.mode)));
+check("championChange (402.4): a game with no module for it has no Champion's change (a refusal); with one it is allowed; any module may refuse, with its rule named; a bad answer is a RuleError", (() => {
+  const none = assembleRules([one, order]).championChange(ctx, A);
+  const yes = assembleRules([one, order, m(402, { championChange: () => null })]).championChange(ctx, A);
+  const no = assembleRules([one, order, m(402, { championChange: () => null }), m(406, { championChange: () => refuse("not this Era", 409) })]).championChange(ctx, A);
+  const bad = throws(() => assembleRules([one, order, m(402, { championChange: () => ({ status: 409 }) })]).championChange(ctx, A));
+  return none && none.status === 409 && /no Champion's change/.test(none.error) && yes === null && no && no.rule === 406 && no.error === "not this Era" && no.status === 409 && bad instanceof RuleError && bad.rule === 402;
+})(), "");
 check("veto: a refusal names the rule that made it", (() => {
   const r = assembleRules([m(202, { actionAllowed: () => null }), m(504, { actionAllowed: () => refuse("no", 409) }), one, order]).actionAllowed(ctx, A, { kind: "move" });
   return r.rule === 504 && r.status === 409;

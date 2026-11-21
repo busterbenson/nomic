@@ -3,8 +3,6 @@
 // src/lib/votes.js; this file reads the state and runs the one write a Champion has besides a proposal: naming the Era.
 import { getPlayer } from "./auth";
 import { clockNow, dayOpenBinds, dayOpenSql, loadToday } from "./day";
-import { bundleFor } from "../engine/host";
-import { hasEraNaming, parseBook } from "./proposals.js";
 import { refusalBody, turnBlock } from "./turn";
 import { Ctx, Env, colorOf, json, nowIso, readJson, who } from "./util";
 
@@ -65,7 +63,6 @@ export const post = async (ctx: Ctx) => {
   const { game, day, turn } = await loadToday(env, ctx.data.game!, nowMs, player.id);
   const blocked = turnBlock(game, day, turn, player, "end_turn", nowMs); // the day's gates only: naming is not a proposal
   if (blocked) return json(refusalBody(blocked), blocked.status);
-  if (!hasEraNaming(parseBook(bundleFor(game).bundle.rulesMd))) return json({ error: "The game's rules have no naming of Eras (rule 402.3)." }, 409);
   if ((await championId(env, game.id)) !== player.id) return json({ error: "Only the Champion names the Era (rule 402.3)." }, 403);
   const era = await openEra(env, game.id);
   if (!era) return json({ error: "There is no Era yet." }, 409);
