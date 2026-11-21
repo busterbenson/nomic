@@ -263,7 +263,7 @@ async function notApplyRemaining(env: Env, game: any, day: DayRow, nowMs: number
   await enactActions(env, game, day, nowMs);
 }
 
-// The passed actions of a night are applied (rule 103.7): each whose type the rules still have, in the game's own order, its points given
+// The passed actions of a night are applied (rule 103.7): each the rules still allow (their type, their details), in the game's own order, its points given
 // and its record written (host.ts enactStatements). One that fails past the 2 am deadline plus the deploy grace is not applied (rule 107.7)
 // so the night can end; before it, the failure keeps the lock and the next tick tries again, like any other part of the night.
 /** @rule 103.7, 107.6, 107.7 */

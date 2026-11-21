@@ -182,7 +182,10 @@ export async function enactStatements(env: Env, game: any, n: number, nowMs: num
     // An action also does its own thing (rule 103.7): the points its type's rule gives, after the proposal's own (401).
     const act = q.kind === "action" ? JSON.parse(q.action) : null;
     const applied = act ? rules.applyAction(ctx, { type: act.type, params: act.params, number: q.number, player: q.player_id }) : [];
-    const done = Array.isArray(applied) ? applied : [];   // a refused or unknown action was sent back before this (refusedActions)
+    // A refused or unknown action was sent back before this (refusedActions). applyAction must answer the same twice: one that refuses only now
+    // fails the night (the next tick asks again, and past the deadline the action is not applied) instead of being recorded as applied with nothing given.
+    if (act && !Array.isArray(applied)) throw new RuleError(act.rule ?? 0, "applyAction", new Error("refused after it was checked: applyAction must give the same answer each time"));
+    const done = Array.isArray(applied) ? applied : [];
     if (act) stmts.push(actionRecord(env, game, n, q, act, now, stillPassed));
     for (const e of [...rules.onEnacted(ctx, { number: q.number, player: q.player_id, target: q.target, kind: q.kind }), ...done]) {
       if (!known.has(e.player)) continue; // onEnacted can only return points (hooks.js refuses anything else)
