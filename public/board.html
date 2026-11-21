@@ -239,7 +239,7 @@ import { createChat } from "/js/chat.js";
     showNotice();
     CARDS = createCards({ root: $("mroot"), describe });   // closing a card keeps what you were writing: it is there when the card opens again
     BAL = createBallot({ api, pill: by => pill(by, false), refreshed: refresh, player: () => !!(ME && ME.player) });
-    WS = createWorkshop({ api, me: () => ME, pill, rpill: n => PROP.rpill(n), when: whenText, canCommission: () => PROP.canPropose(), refresh: async () => { await refresh(); loadNotes(); }, cards: CARDS, chat: () => CHAT });
+    WS = createWorkshop({ api, me: () => ME, pill, rpill: n => PROP.rpill(n), when: whenText, canCommission: () => PROP.canCommission(), refresh: async () => { await refresh(); loadNotes(); }, cards: CARDS, chat: () => CHAT });
     CHAT = createChat({ api, root: $("bwrap"), me: () => ME, slug: SLUG, rpill: n => PROP.rpill(n), wpill: wPill,
       onTicket: async t => { WS.apply(t); await WS.load(); drawBook(); } });
     PROP = createProposer({ api, me: () => ME, day: () => DAY, pill, vote: n => BAL.box(n), refresh: async () => { await refresh(); loadNotes(); } });

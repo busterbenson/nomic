@@ -208,7 +208,7 @@ export async function countBallot(env: Env, game: any, day: DayRow, nowMs: numbe
 // the day goes processing -> deploying, with the commit the day-N tag points at. This step then:
 //   processing, before the deadline              wait for the claim
 //   processing, at the deadline (no claim)       every passed proposal not applied (rule 107.6), timed_out
-//   deploying, the deployed bundle is that commit the night takes effect: points (rule 401), the win (rule 402), done
+//   deploying, the deployed bundle is that commit the night takes effect: points (rule 401), the Era won (rule 402), done
 //   deploying, 30 minutes past the deadline      the applied ones not applied either (they never went live), timed_out
 // Decided by what is stored (passed proposals still waiting), not by this run's copy of the day, so overlapping runs
 // agree. Every write is guarded by status, so a second run changes nothing and notifies nobody twice. finalizeDay also

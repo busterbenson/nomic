@@ -1,5 +1,5 @@
 -- The chat window and Gremlin's commission chat (rules 106.3, 106.7, 801.2-801.4).
--- Numbered 0013 while the Eras (0011) and actions (0012) PRs are open: it renumbers to the next free number at merge.
+-- Numbered 0013: after Eras (0011) and the actions (0012).
 --
 -- chat_messages: one row per line in a player's chat with an agent (Gremlin now, Starling in step 2b). PRIVATE: only that player
 -- reads it (src/routes/api-chat.ts selects on the signed-in player's id and nothing else); Chalant's night read sees counts and

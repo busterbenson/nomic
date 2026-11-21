@@ -2,7 +2,7 @@
 -- (block 900) instead of changing the rules. The row keeps what it will do in `action`, a JSON object fixed when it is drafted:
 --   {type, name, rule, touches: [rule numbers], params: {key: value} (a player's id for a player param), shown: [[label, text], ...]}
 -- Its target is the rule that defines the type (901 for "grant"), so the rule's own mark and the marks of `touches` are what the
--- vote needs (rule 103.6). A kind of its own, and not an amend that carries parameters: every kind the moderator knows is a change
+-- vote needs (rule 103.7). A kind of its own, and not an amend that carries parameters: every kind the moderator knows is a change
 -- it applies to the rules, and an action posing as one would be applied as that change (the same reason 0010 gave for commissions).
 --
 -- Why a rebuild: the kind list is a CHECK, which SQLite cannot change in place, so `proposals` is rebuilt with the list widened

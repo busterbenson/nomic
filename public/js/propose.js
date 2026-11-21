@@ -272,7 +272,7 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
     const said = ms.length ? `<p>You proposed ${ms.map(pPill).join(" ")} today${pr ? ` (${esc(pr.made)} of ${esc(pr.limit)})` : ""}. On tomorrow's ballot (rule ${rpill("103.2")}).</p>` : "";
     let html = said;
     if (!c.allowed) html += ms.length && pr && pr.made >= pr.limit ? "" : `<p>${esc(c.reason || "You can't propose right now.")}</p>`;
-    else html += `${ms.length ? "" : `<p><b>You haven't proposed a change today.</b></p>`}<button type="button" class="btn ghost small" data-p="pickblock">Propose a new rule</button>${S.actions.length ? `<button type="button" class="btn ghost small" data-p="action" aria-expanded="${!!(S.ui && S.ui.kind === "action")}">Propose an action</button>` : ""}`;
+    else html += `${ms.length ? "" : `<p><b>You haven't proposed a change today.</b></p>`}<button type="button" class="btn ghost small" data-p="pickblock">Propose a new rule</button>${S.actions.length && base().allowed ? `<button type="button" class="btn ghost small" data-p="action" aria-expanded="${!!(S.ui && S.ui.kind === "action")}">Propose an action</button>` : ""}`;
     return `<div class="rbanner${!c.allowed ? " done" : ""}" id="rb-banner">${html}${c.allowed && S.ui && S.ui.kind === "action" ? flowHTML() : ""}</div>`;
   }
 
@@ -299,7 +299,7 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
     if (["amend", "addclause", "add"].includes(u.kind)) body.words = u.words;
     if (u.kind === "amend" && u.prefilled) body.prefilled = true;
     if (u.kind === "move") body.to = u.to;
-    if (u.champion) body.champion = true;
+    if (u.champion && u.kind !== "action") body.champion = true;
     const r = await api("/api/proposals", body);
     u.busy = false;
     if (r.ok && r.data && r.data.proposal) { u.draft = r.data.proposal; u.step = "slip"; }
@@ -341,7 +341,7 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
       u.champion = !!el.checked;
     } else if (a === "action") {
       if (u && u.kind === "action") S.ui = null;
-      else S.ui = mkUi({ rule: "actions", step: "write", kind: "action", type: S.actions[0] && S.actions[0].type, params: {}, err: "" });
+      else S.ui = mkUi({ rule: "actions", step: "write", kind: "action", type: S.actions[0] && S.actions[0].type, params: {}, err: "", champion: false });   // an action changes no rule: never the Champion's change (rule 103.5)
     } else if (a === "scope") {
       u.scope = el.dataset.s || null; u.step = el.dataset.s ? "menu" : "scope";
     } else if (a === "kind") {
@@ -379,7 +379,7 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
 
   return {
     load, click, input, mineTouches, bannerHTML, proposeHTML, blockMarksHTML, addCardHTML, addFlowHTML, pickHTML, boxHTML, ageChip, onBallotRule,
-    chgFor: chgHTML, actionBody: actionHTML, cardKey, rpill, pPill, mineList, onBallot: () => onBallot(), canPropose: () => can(),
+    chgFor: chgHTML, actionBody: actionHTML, cardKey, rpill, pPill, mineList, onBallot: () => onBallot(), canPropose: () => can(), canCommission: () => base(),
     ghostsOf: (sec) => ghosts(sec),
     ghostCount: () => (S.RB ? S.RB.sections.reduce((n, s) => n + ghosts(s).length, 0) : 0),
     attach({ RB, redraw, openAdd, openPick, closeAdd }) { S.RB = RB; S.redraw = redraw; S.openAdd = openAdd || S.openAdd; S.openPick = openPick || S.openPick; S.closeAdd = closeAdd || S.closeAdd; },
