@@ -179,5 +179,7 @@ check("(b) a regex literal holding a quote, or an attr() inside a template's ${}
 check("(b) an attr import renamed with as is a problem: the renamed call could not be read", attrCalls('import { attr as a } from "promptocracy/engine";\na(e, "x");').some((c) => c.problem));
 check("a draft's art key must read as a saved drawing's key does (letters, digits and . _ / -, no ..): one pattern for the draft and for catalog.json", /art key/.test(bad({ kind: "entry", name: "x", catalogKind: "tile", art: { key: "my pic:1.png" } })) && /art key/.test(bad({ kind: "entry", name: "x", catalogKind: "tile", art: { key: "../x.png" } })) && ok({ kind: "entry", name: "x", catalogKind: "tile", art: { key: "tiles/bog-1.png" } }).art.key === "tiles/bog-1.png");
 
+check("a size a rule stopped requiring is kept as flavor text, not refused: catalog.json and a draft read the {w, h} an entry holds as 2x1", (() => { const none = { registry: {}, required: {} }; const c = readCatalog([{ id: "S1", name: "Wall", kind: "structure", attrs: { size: { w: 2, h: 1 } } }], none); const d = readEntryDraft({ kind: "entry", name: "Wall", catalogKind: "structure", attrs: { size: { w: 2, h: 1 } } }, none); return !c.error && c.entries?.[0]?.flavor?.size === "2x1" && !d.error && d.entry?.flavor?.size === "2x1"; })(), JSON.stringify([readCatalog([{ id: "S1", name: "Wall", kind: "structure", attrs: { size: { w: 2, h: 1 } } }], { registry: {}, required: {} }).error]));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

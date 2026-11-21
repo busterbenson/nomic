@@ -187,7 +187,7 @@ ${catalogHTML()}</div></div>`;
           vals: Object.fromEntries(Object.entries(m.attrs || {}).filter(([k]) => mine.has(k)).map(([k, v]) => [k, fieldValue(v)])),
           keep: { attrs: Object.fromEntries(Object.entries(m.attrs || {}).filter(([k]) => !mine.has(k))), flavor: m.flavor, needsBuild: m.needsBuild, art: m.art, copiedFrom: m.copiedFrom } };
       }),
-      rules: t.makes.filter((m) => m.kind === "rule" && m.num).map((m) => m.num).join(", "), drafts: t.makes.filter((m) => m.kind === "rule" && !m.num).map((m) => m.draft),
+      rules: t.makes.filter((m) => m.kind === "rule" && m.num).map((m) => m.num).join(", "), numDrafts: Object.fromEntries(t.makes.filter((m) => m.kind === "rule" && m.num && m.draft).map((m) => [m.num, m.draft])), drafts: t.makes.filter((m) => m.kind === "rule" && !m.num).map((m) => m.draft),
       estimate: t.estimate, running_cost: t.running_cost, tasks: t.tasks.map((x) => x.text).join("\n") };
   }
   /** One entry of the form as a `makes` item: the kind's required fields that are filled, plus what the form keeps. @rule 701.2, 704.1 */
@@ -207,7 +207,7 @@ ${catalogHTML()}</div></div>`;
   function bodyOf(f) {
     return {
       title: f.title, brief: f.brief, estimate: Number(f.estimate), running_cost: f.running_cost, tasks: lines(f.tasks),
-      makes: [...f.entries.filter((e) => e.name.trim()).map(entryBody), ...String(f.rules || "").split(/[\s,]+/).filter(Boolean).map((num) => ({ kind: "rule", num })), ...f.drafts.map((draft) => ({ kind: "rule", draft }))],
+      makes: [...f.entries.filter((e) => e.name.trim()).map(entryBody), ...String(f.rules || "").split(/[\s,]+/).filter(Boolean).map((num) => ({ kind: "rule", num, ...(Object.hasOwn(f.numDrafts || {}, num) ? { draft: f.numDrafts[num] } : {}) })), ...f.drafts.map((draft) => ({ kind: "rule", draft }))],
     };
   }
   /** @rule 801.3 */

@@ -80,6 +80,7 @@ try {
   ok(await eli.post(`${CT}/${en}/edit`, { title: "Things the form keeps", brief: "A draft with data the form does not show.", makes: [
     { kind: "entry", name: "Dragon", catalogKind: "creature", attrs: { hearts: 4, size: "2x1" }, flavor: { mood: "grumpy" }, needsBuild: ["size"], copiedFrom: "C2" },
     { kind: "entry", name: "Thing", attrs: { hearts: 3 } },
+    { kind: "rule", num: "801.2", draft: "A numbered rule that keeps its proposed wording." },
     { kind: "rule", draft: "A creature that flies can cross walls." }], estimate: 1 }), "eli edit");
   const ccookie = [...eli.jar].find(([k]) => k === "s|/catalogued")[1];
   const r3 = await promisify(execFile)("/usr/local/bin/python3", [ROOT + "/tests/browser-catalog.py", srv.base, shots || "-", ccookie, en], { timeout: 240000, maxBuffer: 1 << 24 });

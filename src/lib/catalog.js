@@ -136,6 +136,11 @@ function readScalar(raw) {
   return { error: "must be a number, yes or no, or some text" };
 }
 
+/** A value that was an attribute and is flavor now (a rule stopped defining it): a size {w, h} becomes its text, 2x1; anything else reads as a flavor value. @rule 705.2 */
+function readFlavor(raw) {
+  return isObject(raw) && Number.isInteger(raw.w) && Number.isInteger(raw.h) && Object.keys(raw).length === 2 ? readScalar(`${raw.w}x${raw.h}`) : readScalar(raw);
+}
+
 /**
  * Sorts an entry's attributes and flavor into what each is (rules 703.1, 704.2, 705.1, 705.2): a key a rule defines or the kind
  * needs is read as its type; a key the ticket will build stays in attrs; anything else is flavor. A flavor key a rule now defines
@@ -162,7 +167,7 @@ function sortAttrs(kind, attrsIn, flavorIn, needsBuild, ctx, drafting) {
       const d = definitionOf(ctx, kind, key);
       const r = readValue(d.type, v, d);
       if (r.error) {
-        if (!drafting && from === "flavor") { if (!Object.hasOwn(flavor, key) && !Object.hasOwn(attrs, key)) { const f = readScalar(v); if (f.error) return { error: `${key} ${f.error}` }; flavor[key] = f.value; } continue; }
+        if (!drafting && from === "flavor") { if (!Object.hasOwn(flavor, key) && !Object.hasOwn(attrs, key)) { const f = readFlavor(v); if (f.error) return { error: `${key} ${f.error}` }; flavor[key] = f.value; } continue; }
         return { error: `${key} ${r.error}` };
       }
       if (from === "attrs" || !Object.hasOwn(attrs, key)) attrs[key] = r.value;
@@ -172,7 +177,7 @@ function sortAttrs(kind, attrsIn, flavorIn, needsBuild, ctx, drafting) {
       if (r.error) return { error: `${key} ${r.error}` };
       if (from === "attrs" || !Object.hasOwn(attrs, key)) attrs[key] = r.value;
     } else if (!Object.hasOwn(attrs, key)) {
-      const r = readScalar(v);
+      const r = readFlavor(v);
       if (r.error) return { error: `${key} ${r.error}` };
       flavor[key] = r.value;
     }

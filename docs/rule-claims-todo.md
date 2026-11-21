@@ -7,7 +7,7 @@ Every function that carries out the game should say which rule it implements, wi
 `src/` is only reported for now: these functions have no claim yet. Site plumbing such as sign-in and email goes
 under rule 101 or 102; a follow-up change claims them and moves `src/` into the strict set.
 
-139 of 312 functions outside `src/engine/` are unclaimed.
+139 of 313 functions outside `src/engine/` are unclaimed.
 
 ## src/index.ts (5)
 
@@ -35,7 +35,7 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/lib/catalog.js (1)
 
-- line 270: `bad`
+- line 275: `bad`
 
 ## src/lib/drafter.ts (1)
 
