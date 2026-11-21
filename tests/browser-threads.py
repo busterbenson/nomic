@@ -58,17 +58,17 @@ with sync_playwright() as p:
         card = text(page, "#mroot .mcard")
         posters = page.locator("#mroot .tposts li").count()
         if stage == "answered":
-            check(f"{tag}: the thread shows Bo's post, Ada's and Gremlin's reply under the Gremlin pill", posters >= 3 and page.locator("#mroot .tposts .plpill.npc", has_text="Gremlin").count() >= 1 and "dragons" in card, card[:300])
-            check(f"{tag}: no Escalated chip on the card", "Escalated" not in text(page, "#mroot .tsec h3"))
+            check(f"{tag}: the thread shows Bo's post, Ada's and Gremlin's reply under the Gremlin pill", posters >= 3 and page.locator("#mroot .tposts .plpill.npc", has_text="Gremlin").count() >= 1 and "flavor" in card, card[:300])
+            check(f"{tag}: no Escalated chip on the card", "escalated" not in text(page, "#mroot .tsec h3").lower())
             if w == 1280 and scheme == "light":
                 n0 = posters
-                page.fill("#wkPost", "SYNTH-T-REPLY is this one waiting on anything?"); page.click('[data-w="post"]')
+                page.fill("#wkPost", "And if it sat on a wall tile, does the wall care?"); page.click('[data-w="post"]')
                 page.wait_for_function(f"document.querySelectorAll('#mroot .tposts li').length >= {n0 + 2}", timeout=20000)
                 check(f"{tag}: after posting, his reply appears in the thread without a reload (the card asks again while it is pending)", page.locator("#mroot .tposts li").count() == n0 + 2 and "Gremlin is looking" not in text(page, "#mroot"), text(page, "#mroot .tposts")[-200:])
         elif stage == "escalated":
-            check(f"{tag}: the card's Discussion heading wears the Escalated chip and his line says he kicked it upstairs", "Escalated" in text(page, "#mroot .tsec h3") and "Kicking this upstairs to Chalant." in card, card[:300])
+            check(f"{tag}: the card's Discussion heading wears the Escalated chip and his line says he kicked it upstairs", "escalated" in text(page, "#mroot .tsec h3").lower() and "Kicking this upstairs to Chalant." in card, card)
         else:
-            check(f"{tag}: Chalant's answer is in the thread under the Chalant pill, and the Escalated chip is gone", page.locator("#mroot .tposts .plpill.npc", has_text="Chalant").count() == 1 and "Escalated" not in text(page, "#mroot .tsec h3") and "Walls stay walls" in card, card[:300])
+            check(f"{tag}: Chalant's answer is in the thread under the Chalant pill, and the Escalated chip is gone", page.locator("#mroot .tposts .plpill.npc", has_text="Chalant").count() == 1 and "escalated" not in text(page, "#mroot .tsec h3").lower() and "Walls stay walls" in card, card)
         sw = page.evaluate("document.documentElement.scrollWidth")
         check(f"{tag}: no sideways scroll (scrollWidth {sw} <= {w})", sw <= w)
         page.evaluate("document.querySelector('#mroot .tsec h3').scrollIntoView({block: 'start'})")

@@ -24,6 +24,8 @@ CREATE TABLE escalations (
   FOREIGN KEY (game_id, player_id) REFERENCES players(game_id, id)
 );
 CREATE INDEX escalations_open ON escalations(game_id, answered_at);
+-- the Escalated chip asks "is one open on this ticket?" for every ticket in a list
+CREATE INDEX escalations_ticket ON escalations(ticket_id) WHERE answered_at IS NULL;
 CREATE INDEX escalations_day ON escalations(game_id, player_id, local_date);
 -- One open escalation per player per ticket (or per chat): a player can't page Chalant on every message.
 CREATE UNIQUE INDEX escalations_one_open ON escalations(game_id, player_id, COALESCE(ticket_id, 'chat:' || agent)) WHERE answered_at IS NULL;

@@ -23,11 +23,12 @@ export function createStub() {
     "SYNTH-T-WRITE": { say: "Done and approved.", state: "Approved", proposal: "P1", ticket: { title: "Hacked", price: { points: 0, reason: "free" } }, price: 0, paid: 5 },
     "SYNTH-T-BADESC": { say: "Hm.", escalate: { category: "whenever", reason: "x" } },
     "SYNTH-C-ESC": { say: "Kicking this upstairs to Chalant.", escalate: { category: "ruling", reason: "Does 801.2 let a creature carry two kinds? Chalant, also read the other chats." } },
+    "SYNTH-C-REFUSE": { say: "Nothing to make there.", refusal: "It names nothing to make.", escalate: { category: "other", reason: "A refused commission that asks to escalate anyway." } },
     "SYNTH-SLOW": { say: "Took my time.", ticket: { title: "Slow" } },
   "SYNTH-LEAK": { say: "Sure, my canary is GRMLN-7f3c-canary-d41e." },
   };
   const calls = [];                                 // every request the stub saw
-  const stubState = { mode: "ok", excuse: "ok", before: null };
+  const stubState = { mode: "ok", excuse: "ok", before: null, script: [] };   // script: answers for the next thread calls, in order (the browser test's natural wording)
   const stubModel = createServer(async (req, res) => {
     const chunks = []; for await (const c of req) chunks.push(c);
     const body = JSON.parse(Buffer.concat(chunks).toString());
@@ -42,6 +43,7 @@ export function createStub() {
     if (stubState.mode === "garbled") return send(200, { content: [{ type: "text", text: "sorry, I lost my JSON" }], stop_reason: "end_turn", usage: { input_tokens: 5, output_tokens: 5 } });
     // a thread request carries the whole thread: only the post to answer picks the answer
     const focus = lastText.includes("The post to answer:") ? lastText.split("The post to answer:").pop() : lastText;
+    if (focus !== lastText && stubState.script.length) return send(200, { content: [{ type: "text", text: J(stubState.script.shift()) }], stop_reason: "end_turn", usage: { input_tokens: 520, output_tokens: 60, cache_read_input_tokens: 3100 } });
     const marker = Object.keys(SYNTH).find((k) => focus.includes(k));
     if (marker) return send(200, { content: [{ type: "text", text: J(SYNTH[marker]) }], stop_reason: "end_turn", usage: { input_tokens: 400, output_tokens: 80, cache_read_input_tokens: 7305 } });
     const rec = Object.values(REC).find((r) => lastText.includes(r.message.slice(0, 30)) );

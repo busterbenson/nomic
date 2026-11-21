@@ -31,16 +31,20 @@ try {
   const settled = async () => { for (let i = 0; i < 100; i++) { if (d1(state, "SELECT COUNT(*) AS n FROM agent_calls WHERE outcome = 'pending'")[0].n === 0) return; await new Promise((r) => setTimeout(r, 150)); } };
   const now = new Date().toISOString();
   d1(state, `INSERT INTO tickets (id, game_id, number, player_id, title, brief, makes, estimate, price, price_reason, state, created_at, updated_at) VALUES ('tk-1', '${gid}', 1, '${pid("Bo")}', 'A bog frog', 'A frog that sits on the wall and croaks at night.', '[{"kind":"entry","name":"Bog frog","catalogKind":"creature","attrs":{},"flavor":{"sound":"croak"}}]', 1, 0, 'Flavor only.', 'Proposed', '${now}', '${now}')`);
-  ok(await bo.post("/shop/api/tickets/W1/post", { body: "Does the frog count as a creature that moves? It only sits." }), "bo post");
-  ok(await ada.post("/shop/api/tickets/W1/post", { body: "SYNTH-T-REPLY it sits, so no moves, right?" }), "ada post");
+  // Bo's post is seeded (two players talking: Gremlin would stay quiet); Ada's gets his reply, in the stub's scripted words
+  d1(state, `INSERT INTO ticket_posts (ticket_id, game_id, author_kind, player_id, body, at) VALUES ('tk-1', '${gid}', 'player', '${pid("Bo")}', 'Does the frog count as a creature that moves? It only sits.', '${now}')`);
+  stubState.script.push({ say: "Sitting isn't moving, so a frog that only sits is flavor: free, nothing to build. Bo can say so on the ticket." });
+  ok(await ada.post("/shop/api/tickets/W1/post", { body: "It sits, so no moves, right? Then it needs no rule." }), "ada post");
   await settled();
   const cookie = (c) => [...c.jar].find(([k]) => k === "s|/shop")[1];
   const run = async (stage) => {
     const r = await promisify(execFile)(PYTHON, [ROOT + "/tests/browser-threads.py", srv.base, shots || "-", cookie(ada), stage], { timeout: 280000, maxBuffer: 1 << 24 });
     process.stdout.write(`-- ${stage}\n${r.stdout}`);
   };
+  stubState.script.push({ say: "Still flavor. Walls don't care who sits on them." });   // the answer to the question the page posts itself
   await run("answered");
-  ok(await ada.post("/shop/api/tickets/W1/post", { body: "SYNTH-T-ESC what if the frog sits on a wall tile, does that change the wall?" }), "ada escalates");
+  stubState.script.push({ say: "Kicking this upstairs to Chalant.", escalate: { category: "ruling", reason: "Asks whether a creature on a wall tile changes what the wall does." } });
+  ok(await ada.post("/shop/api/tickets/W1/post", { body: "What if the frog sits on a wall tile? Does the wall count it as blocked?" }), "ada escalates");
   await settled();
   await run("escalated");
   const TOKEN = "thread-shot-token-0123456789abcdefg";

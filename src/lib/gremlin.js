@@ -16,7 +16,7 @@ export const EXCUSE_INPUT_CAP_TOKENS = 2_000, EXCUSE_OUTPUT_CAP_TOKENS = 120, EX
 export const SAY_MAX = 1_200, PRICE_REASON_MAX = 140, REFUSAL_MAX = 300;
 export const MESSAGE_MAX = 2_000;
 // Thread replies (rule 804.1): a short answer, a small call. Escalation (rule 106.4): what he can pass on, and how often a player can page Chalant.
-export const THREAD_OUTPUT_CAP_TOKENS = 600, THREAD_TIMEOUT_MS = 25_000, THREAD_POSTS_SHOWN = 30, THREAD_POST_CLIP = 700;
+export const THREAD_OUTPUT_CAP_TOKENS = 600, THREAD_TIMEOUT_MS = 20_000, THREAD_POSTS_SHOWN = 30, THREAD_POST_CLIP = 700;
 export const ESCALATION_CATEGORIES = ["conflict", "sizing", "loophole", "ruling", "other"];
 export const ESCALATIONS_PER_DAY = 5, ESCALATE_REASON_MAX = 300;
 /** A rough count: four characters to a token, rounded up and padded, so the cap is never exceeded by a lucky estimate. @rule 106.7 */

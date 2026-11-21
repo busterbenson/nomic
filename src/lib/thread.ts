@@ -71,7 +71,7 @@ export async function finishReply(env: Env, game: any, player: { id: string }, t
       posts: rows, post: { by: mine.name, body: mine.body },
     });
     const r = await callModel(env, { model: MODEL, system: req.system, messages: req.messages, maxTokens: THREAD_OUTPUT_CAP_TOKENS, timeoutMs: THREAD_TIMEOUT_MS, schema: threadAnswerSchema(), effort: "low" });
-    const later = await clockNow(env);   // the call can take 25 s: the reply's lock guard and day use the clock NOW
+    const later = await clockNow(env);   // the call can take 20 s: the reply's lock guard and day use the clock NOW
     if (!r.ok) { await settle(env, id, r.code, r.reason, r); return; }
     const a = readThreadAnswer(r.text, { systemText: threadSystemStatic() });
     if (!a.ok) { await settle(env, id, a.code, a.reason, r); return; }

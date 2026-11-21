@@ -30,5 +30,6 @@ export async function escalate(db, { gameId, agent, playerId, ticketId = null, c
 export function notificationText(game, rows) {
   const line = (r) => `${r.ticket ? `W${r.ticket}` : "a chat"}: ${r.agent === "starling" ? "Starling" : "Gremlin"} escalated (${r.category})`;
   const link = `/${game.slug}/`;
-  return `${game.name || game.slug}: ${rows.length === 1 ? line(rows[0]) : `${rows.length} escalations: ${rows.map(line).join("; ")}`}. ${link}`;
+  // the game's slug, not its name: a name is typed by a person, a slug is a fixed token; the link is relative, the job puts the site's address in front
+  return `${game.slug}: ${rows.length === 1 ? line(rows[0]) : `${rows.length} escalations: ${rows.map(line).join("; ")}`}. ${link}`;
 }
