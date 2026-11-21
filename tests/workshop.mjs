@@ -106,7 +106,7 @@ try {
 
   console.log("catalog entries on a ticket and the catalog's routes (rules 701.1, 701.2, 704.1)");
   {
-    const before = J(tk(1).makes), pageOf = async () => (await Ana.get(`${T}/W1`)).data.ticket;
+    const before = J(JSON.parse(tk(1).makes)), pageOf = async () => (await Ana.get(`${T}/W1`)).data.ticket;
     const ce = await Ana.post(`${T}/W1/edit`, { makes: [
       { kind: "entry", name: "Garden wall", catalogKind: "structure", attrs: { size: "2x1" }, flavor: { material: "stone" } },
       { kind: "entry", name: "Wyrm", catalogKind: "creature", attrs: { hearts: "4" } },
@@ -129,9 +129,10 @@ try {
     const cat = (await visitor.get("/wk/api/catalog")).data;
     check("GET /api/catalog is public and answers from the game's bundle: five kinds in order, the required lists (creature hearts, item acquired, structure size), no registry and no entries yet",
       J(cat.kinds.map((k) => k.id)) === J(["item", "creature", "tile", "structure", "feature"]) && J(cat.required) === J({ creature: [{ key: "hearts", type: "number" }], item: [{ key: "acquired", type: "rule" }], structure: [{ key: "size", type: "size" }] }) && J(cat.registry) === "{}" && cat.entries.length === 0, J(cat));
-    check("an entry that does not exist is a 404 (whether it is shaped like an id or not)", (await visitor.get("/wk/api/catalog/I1")).status === 404 && (await visitor.get("/wk/api/catalog/banana")).status === 404 && (await visitor.post("/wk/api/catalog", {})).status === 405);
+    const miss = [(await visitor.get("/wk/api/catalog/I1")).status, (await visitor.get("/wk/api/catalog/banana")).status, (await visitor.post("/wk/api/catalog", {})).status];
+    check("an entry that does not exist is a 404 (whether it is shaped like an id or not), and so is a method the route does not answer (the site's router answers a missing handler with 404, as for every route)", miss.join() === "404,404,404", miss.join());
     const back = await Ana.post(`${T}/W1/edit`, { makes: JSON.parse(before) });
-    check("(the draft is put back as it was for the sections below)", back.status === 200 && J(back.data.ticket.makes) === before);
+    check("(the draft is put back as it was for the sections below)", back.status === 200 && J(back.data.ticket.makes) === before, back.text?.slice(0, 300) + " before=" + before);
   }
 
   // The edit's own write re-checks the whole day gate: an End turn that lands after the route's read still stops the edit.

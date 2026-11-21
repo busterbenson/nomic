@@ -564,7 +564,9 @@ button.pill[aria-pressed="true"]{background:color-mix(in srgb,var(--accent) 16%,
 .mtop .kchip{align-self:center}
 .mcard.tk .erows{margin:10px 0 0}
 .flv .er:first-child{border-top:0}
-.flh{margin:8px 0 0;font-family:var(--font-mono);font-size:.62rem;font-weight:400;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-muted)}
+.flw{display:flex;flex-direction:column;gap:4px;width:100%;min-width:0}
+.mcard.tk .flw .erows{margin:0}
+.flh{margin:0;font-family:var(--font-mono);font-size:.62rem;font-weight:400;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-muted)}
 .tk .tr.stack{grid-template-columns:minmax(0,1fr)}
 .tk .tr.stack dt{padding-bottom:4px}
 .sdiff .wpill{align-self:flex-start}

@@ -93,7 +93,7 @@ export function createWorkshop({ api, me, pill, rpill, when, canCommission, refr
   /** Flavor rows: values only, no rules; the card shows the first 3, the page all of them behind a button (rule 705.1). @rule 705.1 */
   function flavorHTML(v, all) {
     const rows = all ? v.flavor : v.flavorTop;
-    return rows.length ? `<h4 class="flh">Flavor</h4><dl class="erows flv">${rows.map((f) => `<div class="er"><dt>${esc(f.label)}</dt><dd><span class="eval">${esc(f.shown)}</span></dd></div>`).join("")}</dl>` : "";
+    return rows.length ? `<div class="flw"><h4 class="flh">Flavor</h4><dl class="erows flv">${rows.map((f) => `<div class="er"><dt>${esc(f.label)}</dt><dd><span class="eval">${esc(f.shown)}</span></dd></div>`).join("")}</dl></div>` : "";
   }
   /** A Makes card on a ticket: art slot, name, kind chip, attribute rows, the first 3 flavor rows. Dim until the entry is live. @rule 701.1 */
   function makesCard(v, dim) {
