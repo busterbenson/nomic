@@ -1,0 +1,52 @@
+name: test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: test-${{ github.ref }}
+  # a newer push to a branch or PR supersedes the older run; main runs are never cancelled
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    # ubuntu-latest is 26.04 now, which Playwright 1.58 cannot install Chromium on; pinned to a supported image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      # The suite stubs every model call (MODEL_BASE_URL) and every rules fetch; it needs no secret.
+      PYTHON: python3
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install playwright==1.58.0
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          # the key hashes this file, which pins playwright (the pin names the Chromium build): bumping the pin refreshes the cache
+          key: playwright-${{ runner.os }}-${{ hashFiles('.github/workflows/test.yml') }}
+
+      - name: Install Chromium (browsers and system libraries)
+        run: python -m playwright install --with-deps chromium
+
+      - run: npm test
