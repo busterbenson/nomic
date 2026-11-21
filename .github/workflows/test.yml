@@ -1,10 +1,15 @@
 name: test
 
+# Tiers (Buster 2026-11-20: the suite was too heavy to run whole on every push):
+#   fast  - every PR push, drafts included: rule claims, design, engine (~2 min, no server, no browser)
+#   test  - the full suite split across 3 machines by measured minutes (scripts/ci-shard.mjs): on PRs that are ready
+#           (not drafts; marking a draft ready runs it), on every push to main, and by hand. Merge gate: all 3 green.
 on:
   workflow_dispatch:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
   group: test-${{ github.ref }}
@@ -15,10 +20,27 @@ permissions:
   contents: read
 
 jobs:
+  fast:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node scripts/ci-shard.mjs --fast
+
   test:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     # ubuntu-latest is 26.04 now, which Playwright 1.58 cannot install Chromium on; pinned to a supported image
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
     env:
       # The suite stubs every model call (MODEL_BASE_URL) and every rules fetch; it needs no secret.
       PYTHON: python3
@@ -49,4 +71,4 @@ jobs:
       - name: Install Chromium (browsers and system libraries)
         run: python -m playwright install --with-deps chromium
 
-      - run: npm test
+      - run: node scripts/ci-shard.mjs ${{ matrix.shard }} 3
