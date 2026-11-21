@@ -215,6 +215,9 @@ try {
   const cyHist = (await Cy.get(CH)).data.messages, anaHist = (await Ana.get(CH)).data.messages;
   check("an answer to a chat escalation lands in that player's private chat as Chalant's line, and never in any thread", ansC.status === 200 && ansC.data.where === "chat" && chats.length === 1 && chats[0].player_id === id.Cy && cyHist.at(-1).role === "chalant" && cyHist.at(-1).body.startsWith("Chalant here.") && !anaHist.some((m) => m.role === "chalant") && d1(state, "SELECT COUNT(*) AS n FROM ticket_posts WHERE body LIKE 'Chalant here. A creature%'")[0].n === 0);
   check("an answered escalation leaves the list", (await mod("GET", "escalations")).data.escalations.length === 3);
+  await say(Cy, "thanks, so one kind then?");
+  const follow = calls.filter((c) => c.model === "claude-sonnet-5-5").at(-1);
+  check("Chalant's answer in the chat is in Gremlin's history on the player's next turn, so a follow-up finds it", J(follow.body.messages).includes("Chalant, the moderator, answered the player here: Chalant here. A creature carries one kind (701)."), J(follow.body.messages).slice(0, 400));
   await post(Cy, 15, "SYNTH-T-ESC it comes up again");
   await settled();
   check("an answered escalation still counts toward the day's five: Cy's sixth, on the ticket just answered, is dropped", escs().filter((x) => x.player_id === id.Cy).length === 5 && tcalls("Cy").at(-1).reason === "escalation dropped: cap");
@@ -225,6 +228,17 @@ try {
   const nChalant = posts(15).filter((p) => p.author_kind === "chalant").length;
   const race = await Promise.all([mod("POST", `escalations/${boEsc.id}/answer`, { body: "Chalant here. First answer." }), mod("POST", `escalations/${boEsc.id}/answer`, { body: "Chalant here. Second answer." })]);
   check("two answers racing for one escalation: one is accepted, the other refused, and exactly one post is made", J(race.map((x) => x.status).sort()) === J([200, 409]) && posts(15).filter((p) => p.author_kind === "chalant").length === nChalant + 1, J(race.map((x) => x.status)));
+
+  console.log("an escalated chat turn is paired with ITS reply, not the next line (two tabs can interleave turns)");
+  d1(state, `INSERT INTO chat_messages (game_id, player_id, agent, local_date, day, role, body, at) VALUES ('${gid}', '${id.Bo}', 'gremlin', '2026-11-10', 1, 'player', 'TURN-A question', '2026-11-10T19:00:00.000Z')`);
+  const idA = d1(state, "SELECT MAX(id) AS id FROM chat_messages")[0].id;
+  d1(state, `INSERT INTO chat_messages (game_id, player_id, agent, local_date, day, role, body, at) VALUES ('${gid}', '${id.Bo}', 'gremlin', '2026-11-10', 1, 'player', 'TURN-B question', '2026-11-10T19:00:01.000Z')`);
+  const idB = d1(state, "SELECT MAX(id) AS id FROM chat_messages")[0].id;
+  d1(state, `INSERT INTO chat_messages (game_id, player_id, agent, local_date, day, role, body, meta, at) VALUES ('${gid}', '${id.Bo}', 'gremlin', '2026-11-10', 1, 'agent', 'REPLY-TO-A', '{"turn":${idA}}', '2026-11-10T19:00:02.000Z'), ('${gid}', '${id.Bo}', 'gremlin', '2026-11-10', 1, 'agent', 'REPLY-TO-B', '{"turn":${idB}}', '2026-11-10T19:00:03.000Z')`);
+  d1(state, `INSERT INTO escalations (game_id, agent, player_id, chat_message_id, category, reason, local_date, created_at) VALUES ('${gid}', 'gremlin', '${id.Bo}', ${idB}, 'ruling', 'overlap', '2026-11-10', '2026-11-10T19:00:04.000Z')`);
+  const ov2 = (await mod("GET", "escalations")).data.escalations.find((x) => x.where === "chat" && x.reason === "overlap");
+  check("replies A and B arrived after messages A and B: escalating B returns reply B and never reply A", ov2.turn.message === "TURN-B question" && ov2.turn.reply === "REPLY-TO-B", J(ov2.turn));
+  d1(state, `DELETE FROM escalations WHERE reason = 'overlap'`);
 
   console.log("over the month's budget: a post is stored, no reservation, no call");
   d1(state, `INSERT INTO agent_calls (id, game_id, player_id, agent, purpose, model, outcome, cost_micro, local_date, at) VALUES (9100, '${gid}', NULL, 'gremlin', 'chat', 'claude-sonnet-5-5', 'ok', 60000000, '2026-11-10', '2026-11-10T08:00:00.000Z')`);

@@ -158,12 +158,13 @@ export function systemBlocks({ ceiling, rulesMd, mood, localDate, catalogNote })
  * player and agent rows are sent. @rule 106.3
  */
 export function buildMessages({ history, tail, budget }) {
-  let rows = history.filter((r) => r.role === "player" || r.role === "agent");
+  // player, his own lines, and Chalant's answers to an escalated turn (rule 106.4): a player who follows up on what Chalant said must find it in the history
+  let rows = history.filter((r) => r.role === "player" || r.role === "agent" || r.role === "chalant");
   // a trailing player row has no answer (a call that failed): it travels in the tail, so the roles alternate
   const dangling = [];
   while (rows.length && rows[rows.length - 1].role === "player") dangling.unshift(rows.pop());
   /** @rule 106.3 */
-  const asText = (r) => (r.role === "player" ? fence("you", r.body) : r.body);
+  const asText = (r) => (r.role === "player" ? fence("you", r.body) : r.role === "chalant" ? `[Chalant, the moderator, answered the player here: ${r.body}]` : r.body);
   const tailText = [...(dangling.length ? [`Earlier messages that got no answer:\n${dangling.map((r) => fence("player", r.body)).join("\n")}`] : []), tail].join("\n\n");
   let used = estimateTokens(tailText);
   const keep = [];
@@ -178,7 +179,7 @@ export function buildMessages({ history, tail, budget }) {
   for (const r of keep) {
     const text = asText(r);
     const last = msgs[msgs.length - 1];
-    const role = r.role === "player" ? "user" : "assistant";   // the API's two roles
+    const role = r.role === "player" ? "user" : "assistant";   // the API's two roles (his lines and Chalant's are both the assistant's side)
     if (last && last.role === role) last.content[0].text += `\n${text}`; else msgs.push({ role, content: [{ type: "text", text }] });
   }
   if (msgs.length) msgs[msgs.length - 1].content[0].cache_control = { type: "ephemeral" };

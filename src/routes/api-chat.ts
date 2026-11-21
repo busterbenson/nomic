@@ -176,7 +176,7 @@ export async function turn(ctx: Ctx, player: Player, body: any, nowMs: number): 
     const dateL = localDate(tz, later), atL = nowIso(later);
     await logCall(env, game, tz, nowMs, { player_id: player.id, agent: AGENT, purpose: "chat", model: MODEL, outcome, usage: r.usage, ms: r.ms, reason });   // first: the budget counts the call whatever happens to the row
     const res = await env.DB.prepare("INSERT INTO chat_messages (game_id, player_id, agent, local_date, day, role, body, ticket_id, meta, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .bind(game.id, player.id, AGENT, dateL, game.day || null, role, bodyText, ticket?.id ?? null, JSON.stringify(meta), atL).run();
+      .bind(game.id, player.id, AGENT, dateL, game.day || null, role, bodyText, ticket?.id ?? null, JSON.stringify({ ...meta, turn: myId }), atL).run();   // `turn`: the player's message this line answers (two tabs can interleave turns; the escalation's reply is found by it, not by position)
     return viewOf(Number(res.meta.last_row_id), role, bodyText, dateL, game.day || null, atL, ticket?.number ?? null, meta);
   };
   /** @rule 106.3 */

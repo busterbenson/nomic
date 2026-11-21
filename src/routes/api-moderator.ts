@@ -182,7 +182,8 @@ export const escalations = async (ctx: Ctx) => {
     } else {
       // a private chat: ONLY the escalated turn (the player's message and Gremlin's answer to it), never the rest of the history
       const m: any = await env.DB.prepare("SELECT c.id, c.body, c.player_id, t.number AS ticket_number FROM chat_messages c LEFT JOIN tickets t ON t.id = c.ticket_id WHERE c.id = ? AND c.game_id = ?").bind(e.chat_message_id, game.id).first();
-      const reply: any = m ? await env.DB.prepare("SELECT body FROM chat_messages WHERE game_id = ? AND player_id = ? AND agent = ? AND role = 'agent' AND id > ? ORDER BY id LIMIT 1").bind(game.id, m.player_id, e.agent, m.id).first() : null;
+      // his answer to THAT message, by the `turn` he stored on it (the first agent line after it can belong to another turn when two tabs overlap); none found = no reply shown
+      const reply: any = m ? await env.DB.prepare("SELECT body FROM chat_messages WHERE game_id = ? AND player_id = ? AND agent = ? AND role = 'agent' AND json_extract(meta, '$.turn') = ? ORDER BY id LIMIT 1").bind(game.id, m.player_id, e.agent, m.id).first() : null;
       items.push({ ...base, where: "chat", ticket_number: m?.ticket_number ?? null, turn: m ? { message: m.body, reply: reply?.body ?? null } : null });
     }
   }
