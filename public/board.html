@@ -240,13 +240,13 @@ import { createChat, AGENTS } from "/js/chat.js";
     CARDS = createCards({ root: $("mroot"), describe });   // closing a card keeps what you were writing: it is there when the card opens again
     BAL = createBallot({ api, pill: by => pill(by, false), refreshed: refresh, player: () => !!(ME && ME.player) });
     WS = createWorkshop({ api, me: () => ME, pill, rpill: n => PROP.rpill(n), when: whenText, canCommission: () => PROP.canCommission(), refresh: async () => { await refresh(); loadNotes(); }, cards: CARDS, chat: () => CHAT });
-    CHAT = createChat({ api, root: $("bwrap"), me: () => ME, slug: SLUG, rpill: n => PROP.rpill(n), wpill: wPill,
+    CHAT = createChat({ api, root: $("bwrap"), me: () => ME, started: () => gameStarted(), slug: SLUG, rpill: n => PROP.rpill(n), wpill: wPill,
       onTicket: async t => { WS.apply(t); await WS.load(); drawBook(); } });
     // Starling shares the column and the pill with Gremlin: only the window whose tab is showing draws (public/js/chat.js)
-    STAR = createChat({ api, root: $("bwrap"), me: () => ME, slug: SLUG, agent: AGENTS.starling, rpill: n => PROP.rpill(n), wpill: wPill,
+    STAR = createChat({ api, root: $("bwrap"), me: () => ME, started: () => gameStarted(), slug: SLUG, agent: AGENTS.starling, rpill: n => PROP.rpill(n), wpill: wPill,
       onProposals: async () => { await refresh(); loadNotes(); } });
     // her window: a rule card's "Draft with Starling" puts the card away first, since it would cover her
-    PROP = createProposer({ api, me: () => ME, day: () => DAY, pill, vote: n => BAL.box(n), starling: () => STAR && ({ ready: () => STAR.ready(), attachRule: async (n, o) => { CARDS.close(); if (TAB !== "rules") setTab("rules"); await STAR.attachRule(n, o); } }), refresh: async () => { await refresh(); loadNotes(); } });
+    PROP = createProposer({ api, me: () => ME, day: () => DAY, pill, vote: n => BAL.box(n), starling: () => STAR && ({ ready: () => STAR.ready() && gameStarted(), attachRule: async (n, o) => { CARDS.close(); if (TAB !== "rules") setTab("rules"); await STAR.attachRule(n, o); } }), refresh: async () => { await refresh(); loadNotes(); } });
     drawTabs(); drawBook();
     loadMe();
     const [g] = await Promise.all([api("/api/game"), loadDay()]);
@@ -271,6 +271,8 @@ import { createChat, AGENTS } from "/js/chat.js";
       + (TAB === "summary" || !DAY || !DAY.day ? "" : `<span class="bday">Day ${esc(DAY.day)}</span>`);
   }
   // Both chat windows hear about the tab and the day: each one draws only while its own tab is showing
+  /** Has the host pressed Start (rule 203.1)? Until the game's state has loaded, no. */
+  const gameStarted = () => !!(DATA && DATA.game && DATA.game.status !== "setup");
   function syncChats(reread) { if (CHAT) CHAT.sync(TAB, reread); if (STAR) STAR.sync(TAB, reread); }
   function setTab(k, scroll) {
     TAB = k;

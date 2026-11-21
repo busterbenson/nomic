@@ -660,6 +660,11 @@ button.pill[aria-pressed="true"]{background:color-mix(in srgb,var(--accent) 16%,
   .bwrap[data-sheet="open"] .chat .ch-x[data-c="min"]{display:none}
   .bwrap[data-sheet="open"]::before{content:"";position:fixed;inset:0;background:var(--scrim);z-index:60}
   body.chat-sheet{overflow:hidden}
+  /* iOS Safari zooms the page into any field under 16px when it takes focus, and a fixed sheet then runs off the visual viewport's right edge (the close and send buttons cut off). 16px stops the zoom; the sheet is also held to the screen's width. */
+  .chat .ch-in textarea{font-size:16px}
+  .bwrap[data-sheet="open"] .chatcol{width:100%;max-width:100vw;overflow:hidden}
+  .chat{min-width:0;max-width:100%}
+  .chat .ch-log{overflow-x:hidden}
 }
 .wkprice{margin:0}
 /* Starling (rules 103.1, 106.2): the Rulebook's agent in the same window. Her slip is a draft proposal; past slips collapse to a line. */

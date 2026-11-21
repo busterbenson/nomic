@@ -8,6 +8,7 @@
 //     api(path, body?)    the page's fetch helper -> { ok, status, data }
 //     root                the wrapper that holds the tab and the chat (#bwrap); the component writes data-chat and data-sheet on it
 //     me()                the last /api/me; the window exists only for a signed-in player
+//     started()           the game has started (rule 203.1); before Start there is no window
 //     rpill(num)          a rule pill for a rule number (plain text when the rulebook has none)
 //     wpill(n)            a ticket pill
 //     onTicket(page)      called with the ticket page a turn returned (the Workshop redraws its card and list)
@@ -50,7 +51,7 @@ let ACTIVE = null;
 export const settingsLine = (settings) => Object.entries(settings || {}).map(([k, v]) => `${k} = ${v && typeof v === "object" ? Object.values(v).join("x") : typeof v === "boolean" ? (v ? "on" : "off") : String(v)}`).join(", ");
 const LEFT_SHOWN = 10;   // "N left" appears in the last ten messages of the day
 
-export function createChat({ api, root, me, slug, agent = AGENTS.gremlin, rpill, wpill, onTicket, onProposals }) {
+export function createChat({ api, root, me, slug, agent = AGENTS.gremlin, rpill, wpill, onTicket, onProposals, started = () => true }) {
   const S = { msgs: [], next: null, state: null, ticket: null, rule: null, live: null, slips: {}, lockErr: {}, slip: null, busy: false, draft: "", err: "", sheet: false, open: true, loaded: false, loading: false, tab: "", note: "" };
   const col = root.querySelector("#chatcol"), fab = root.querySelector("#chatfab");
   const mine = () => ACTIVE === agent.key;
@@ -58,6 +59,8 @@ export function createChat({ api, root, me, slug, agent = AGENTS.gremlin, rpill,
   const desktop = () => !!(window.matchMedia && matchMedia("(min-width: 900px)").matches);
   const reduced = () => !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
   const player = () => (me() && me().player) || null;
+  /** The window exists for a player of a game that has started, nobody else (rules 106.3, 203.1); the server refuses the rest. */
+  const live = () => !!player() && started();
   const key = () => `promptocracy:chat:${slug}:${player() && player().color ? player().color.key : "x"}:${agent.key}`;   // /api/me names no id: a color is one player in a game
   const remembered = () => { try { return localStorage.getItem(key()) !== "min"; } catch { return true; } };
   const remember = (open) => { try { localStorage.setItem(key(), open ? "open" : "min"); } catch {} };
@@ -215,7 +218,7 @@ ${sl.after_text ? `<div class="tx">${esc(sl.after_text)}</div>` : sl.before_text
   /** The wrapper's state: off (not this tab, or not a player), open (the column), min (the pill); the phone's sheet is separate. @rule 106.3 */
   function place() {
     if (ACTIVE && ACTIVE !== agent.key) return;   // the other window's tab is showing: the column and the pill are theirs
-    const on = !!player() && S.tab === agent.tab;
+    const on = live() && S.tab === agent.tab;
     root.dataset.chat = !on ? "off" : S.open ? "open" : "min";
     root.dataset.sheet = on && S.sheet ? "open" : "closed";
     if (fab) fab.hidden = !on;
@@ -231,7 +234,7 @@ ${sl.after_text ? `<div class="tx">${esc(sl.after_text)}</div>` : sl.before_text
     S.open = remembered();
     if (S.tab !== agent.tab) S.sheet = false;
     place();
-    if (player() && S.tab === agent.tab) {
+    if (live() && S.tab === agent.tab) {
       if (!S.loaded && !S.loading) { draw(); await load(); }   // the empty window first: the other agent's must not stay on screen while this one loads
       else if (entering || reread) await readState();   // the day, the lock or the cap may have changed since this was drawn
       else draw(true);
@@ -259,7 +262,7 @@ ${sl.after_text ? `<div class="tx">${esc(sl.after_text)}</div>` : sl.before_text
   // ---- loading and sending --------------------------------------------------------------------------------------------------------
   /** Your history with him, and the window's state. @rule 106.7 */
   async function load() {
-    if (!player()) return;
+    if (!live()) return;
     S.loading = true;
     const r = await api(`/api/chat/${agent.path}`);
     S.loading = false;
