@@ -7,7 +7,7 @@
 // saved on two tickets). Run: node tests/art.mjs
 import { createHash } from "node:crypto";
 import { createStub } from "./gremlin-stub.mjs";
-import { client, createGame, d1, freePort, join, migrate, newState, r2Get, r2Put, startRulesStub, startServer } from "./lib.mjs";
+import { client, createGame, d1, freePort, join, migrate, newState, r2Delete, r2Get, r2Put, startRulesStub, startServer } from "./lib.mjs";
 import { readFileSync } from "node:fs";
 import { join as pjoin } from "node:path";
 import { ROOT } from "./lib.mjs";
@@ -61,7 +61,7 @@ const MODEL_PORT = await freePort(), SRV_PORT = await freePort();
 await new Promise((r) => stubModel.listen(MODEL_PORT, "127.0.0.1", r));
 const state = newState();
 let srv = null, rules = null;
-const startSrv = (mode) => startServer(state, SRV_PORT, ["DEV_MODE=1", `SITE_URL=http://localhost:${SRV_PORT}`, `RULES_BASE_URL=${rules.base}`, "MODEL_API_KEY=stub-key-not-real", `MODEL_BASE_URL=http://127.0.0.1:${MODEL_PORT}`, `ART_STUB=${mode}`]);
+const startSrv = (mode, extra = []) => startServer(state, SRV_PORT, [...extra, "DEV_MODE=1", `SITE_URL=http://localhost:${SRV_PORT}`, `RULES_BASE_URL=${rules.base}`, "MODEL_API_KEY=stub-key-not-real", `MODEL_BASE_URL=http://127.0.0.1:${MODEL_PORT}`, `ART_STUB=${mode}`]);
 const until = async (f, ms = 20000) => { const end = Date.now() + ms; for (;;) { const v = f(); if (v) return v; if (Date.now() > end) return null; await new Promise((r) => setTimeout(r, 250)); } };
 try {
   migrate(state);
@@ -102,7 +102,7 @@ try {
   const got = await until(() => refs(1).length === 1);
   check("a drawing lands: one art_refs row, not saved, with the prompt and its hash; one art_objects row for the same hash", !!got && refs(1)[0].saved === 0 && refs(1)[0].is_default === 0 && refs(1)[0].prompt === "a small green frog sitting on a lily pad" && d1(state, "SELECT * FROM art_objects")[0].hash === refs(1)[0].hash, J(refs(1)));
   const h1 = refs(1)[0].hash;
-  check("the draw is done, and the call is logged as art (no player text in it)", draws(1)[0].state === "done" && d1(state, `SELECT * FROM agent_calls WHERE purpose = 'art'`).length === 1 && d1(state, `SELECT * FROM agent_calls WHERE purpose = 'art'`)[0].outcome === "ok" && !J(d1(state, `SELECT * FROM agent_calls WHERE purpose = 'art'`)).includes("frog"));
+  check("the draw is done, and the call is logged as art with its cost counted in the month's budget (no player text in it)", draws(1)[0].state === "done" && d1(state, `SELECT * FROM agent_calls WHERE purpose = 'art'`).length === 1 && d1(state, `SELECT * FROM agent_calls WHERE purpose = 'art'`)[0].outcome === "ok" && d1(state, `SELECT * FROM agent_calls WHERE purpose = 'art'`)[0].cost_micro === 2000 && !J(d1(state, `SELECT * FROM agent_calls WHERE purpose = 'art'`)).includes("frog"));
   const tmp = r2Get(state, tmpKey(h1));
   check("the bytes are under tmp/<hash>, once, and the key is their SHA-256; nothing is under art/ yet", !!tmp && sha(tmp) === h1 && r2Get(state, artKey(h1)) === null);
   check("the drawing cost no message beyond the turn: one player message today", msgs().length === 1);
@@ -130,6 +130,9 @@ try {
   check("save: the row is saved, the bytes are copied to art/<hash> (same bytes), and the first one saved is the default", s1.status === 200 && s1.data.copied === true && refs(1)[0].saved === 1 && refs(1)[0].is_default === 1 && sha(r2Get(state, artKey(h1)) ?? new Uint8Array()) === h1, J(s1.data));
   const s2 = await act(1, { entry: "Frog", action: "save", hash: h1 });
   check("a second save of the same drawing is a no-op: nothing copied, still one row", s2.status === 200 && s2.data.copied === false && refs(1).length === 1);
+  r2Delete(state, artKey(h1));
+  const heal = await act(1, { entry: "Frog", action: "save", hash: h1 });
+  check("a save that died between its row and its copy is finished by the next save: art/ is written again", heal.status === 200 && heal.data.copied === true && sha(r2Get(state, artKey(h1)) ?? new Uint8Array()) === h1, J(heal.data));
   const m0 = msgs().length;
   const rd = await act(1, { entry: "Frog", action: "redraw" });
   check("Redraw answers at once with the drawing state, and counts as one of the player's messages ('Redraw Frog.', on this ticket)", rd.status === 200 && rd.data.redrawing === true && msgs().length === m0 + 1 && msgs()[m0].body === "Redraw Frog." && msgs()[m0].ticket_id === tk(1).id);
@@ -210,6 +213,22 @@ try {
   const f0 = draws(1).filter((d) => d.state === "failed").length;
   await act(1, { entry: "Frog", action: "redraw" });
   check("a model that answers with something that is not a picture is a failed drawing too: no object, no row", await until(() => draws(1).filter((d) => d.state === "failed").length === f0 + 1) && /not a picture/.test(draws(1).filter((d) => d.state === "failed").pop().reason) && refs(1).length === nRefs && r2Get(state, tmpKey(sha(new TextEncoder().encode("this is not a picture at all")))) === null);
+
+  console.log("a drawing that lands after the ticket left Draft is not tied to it (rule 801.2)");
+  await srv.stop();
+  srv = await startSrv("delay");
+  const r0 = refs(1).length, dr0 = draws(1).length;
+  const lateDraw = await act(1, { entry: "Frog", action: "redraw" });
+  d1(state, `UPDATE tickets SET state = 'Proposed' WHERE id = '${tk(1).id}'`);
+  check("the draw that was out when the ticket was confirmed finishes as failed (ticket changed) and stores no row; nobody is shown a picture the requester never kept", !!(await until(() => draws(1).length === dr0 + 1 && draws(1)[dr0].state !== "pending")) && draws(1)[dr0].state === "failed" && draws(1)[dr0].reason === "ticket changed" && refs(1).length === r0, J({ lateDraw: lateDraw.status, err: lateDraw.data?.error, draws: draws(1).slice(-2), refs: refs(1).length, r0 }));
+  d1(state, `UPDATE tickets SET state = 'Draft' WHERE id = '${tk(1).id}'`);
+
+  console.log("over the month's budget nothing more is drawn (rule 106.7)");
+  await srv.stop();
+  srv = await startSrv("seeded", ["AGENT_BUDGET_USD=0"]);
+  const mB = msgs().length, drB = draws(1).length;
+  const broke = await act(1, { entry: "Frog", action: "redraw" });
+  check("Redraw is refused (503) with the reason, spends no message and leaves no draw pending", broke.status === 503 && /out of budget/.test(broke.data.error) && msgs().length === mB && draws(1).length === drB);
 
   console.log("the daily sweep (rule 801.5)");
   const NOW = Date.parse("2026-11-10T19:00:00.000Z"), iso = (d) => new Date(NOW - d * 86400000).toISOString();

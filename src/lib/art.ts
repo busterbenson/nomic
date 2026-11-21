@@ -4,8 +4,8 @@
 // shows (the default). All of it is the player's own draft's: the same gate as their own edit (EDIT_GUARD), checked in the SQL.
 // Nothing here writes a ticket's `makes`: the page lays these rows over each entry on the way out (overlay), so a drawing that lands while
 // the player is typing can never be lost by, or lose, their edit.
-import { MAX_SAVED, DRAWING_STALE_MS, DRAW_TIMEOUT_MS, IMAGE_MODEL, artKey, runImage, sha256Hex, sizeFor, stubImage, stylePrompt, tmpKey } from "./art.js";
-import { logCall } from "./agent";
+import { ART_COST_MICRO, MAX_SAVED, DRAWING_STALE_MS, DRAW_TIMEOUT_MS, IMAGE_MODEL, artKey, runImage, sha256Hex, sizeFor, stubImage, stylePrompt, tmpKey } from "./art.js";
+import { logCall, monthSpend } from "./agent";
 import { dayOpenBinds } from "./day";
 import { EDIT_GUARD } from "./tickets.js";
 import { Ctx, Env, nowIso } from "./util";
@@ -23,8 +23,9 @@ export const modelOf = (env: Env) => (env.IMAGE_MODEL && /^@cf\/[\w./-]+$/.test(
 // ---- what the page shows ------------------------------------------------------------------------------------------------------------
 /**
  * Lays each entry's drawings over its view: {prompt, shown (the hash the card shows), drawings [{hash, saved, default}], state}. `owner`:
- * the viewer is the ticket's requester, who sees every drawing made; anyone else sees the saved ones (or the latest, so a card is not
- * blank). state: drawing (a call is out, fresh), failed (the last call failed or died), ready, none. @rule 801.2
+ * the viewer is the ticket's requester, who sees every drawing made; anyone else sees only the ones the requester kept (an unkept drawing
+ * lives in tmp/ and goes after 30 days, so it is never shown as the entry's picture). state: drawing (a call is out, fresh), failed (the last
+ * call failed or died), ready, none. @rule 801.2
  */
 export async function overlay(env: Env, ticketId: string, makes: any[], views: any[], owner: boolean, nowMs: number) {
   const entries = (Array.isArray(makes) ? makes : []).filter((m) => m && m.kind === "entry");
@@ -34,14 +35,14 @@ export async function overlay(env: Env, ticketId: string, makes: any[], views: a
     const m = entries[i], name = String(m?.name ?? v.name ?? "").toLowerCase();
     const mine = refs.filter((r) => r.entry_name.toLowerCase() === name);
     const saved = mine.filter((r) => r.saved);
-    const seen = owner ? mine : saved.length ? saved : mine.slice(-1);
+    const seen = owner ? mine : saved;
     const dflt = saved.find((r) => r.is_default) ?? saved[saved.length - 1] ?? null;
-    const shown = (dflt ?? mine[mine.length - 1] ?? null)?.hash ?? null;
+    const shown = (dflt ?? (owner ? mine[mine.length - 1] : null) ?? null)?.hash ?? null;
     const last = draws.filter((d) => d.entry_name.toLowerCase() === name).pop();
     let state = shown ? "ready" : "none";
     if (last?.state === "pending") state = nowMs - Date.parse(last.started_at) < DRAWING_STALE_MS ? "drawing" : "failed";
     else if (last?.state === "failed") state = "failed";
-    return { ...v, art: { prompt: String(m?.art?.prompt ?? mine[mine.length - 1]?.prompt ?? ""), shown, state, drawings: seen.map((r) => ({ hash: r.hash, saved: !!r.saved, default: !!r.is_default })) } };
+    return { ...v, art: { prompt: String(m?.art?.prompt ?? mine[mine.length - 1]?.prompt ?? ""), shown, state: owner || shown ? state : "none", drawings: seen.map((r) => ({ hash: r.hash, saved: !!r.saved, default: !!r.is_default })) } };
   });
 }
 
@@ -61,12 +62,16 @@ export async function reserve(env: Env, game: any, ticket: any, name: string, pr
 /** Gives a reservation back (the Redraw's message was refused). @rule 106.7 */
 export async function release(env: Env, drawId: number) { await env.DB.prepare("DELETE FROM art_draws WHERE id = ? AND state = 'pending'").bind(drawId).run(); }
 
+/** Is the game over its month's model budget? Drawings count in it (ART_COST_MICRO each), so they stop with the agents' words. @rule 106.7 */
+export async function overBudget(env: Env, game: any, tz: string, nowMs: number) { return (await monthSpend(env, game, tz, nowMs)).over; }
+
 /**
  * The first drawings of a turn (rule 801.2): each entry that carries an art prompt Gremlin has not drawn yet (no draw and no drawing for that
  * exact prompt) gets one. They cost no message: they are part of the turn that wrote the prompt. Runs in ctx.waitUntil.
  */
 export async function queueNew(ctx: Ctx, game: any, player: any, ticket: any, makes: any[], tz: string, nowMs: number) {
   const jobs: Draw[] = [];
+  if (await overBudget(ctx.env, game, tz, nowMs)) return 0;
   for (const e of entriesOf(makes).slice(0, 6)) {
     if (!e.prompt) continue;
     const had: any = await ctx.env.DB.prepare("SELECT 1 AS x FROM art_draws WHERE ticket_id = ? AND lower(entry_name) = lower(?) AND prompt = ? UNION ALL SELECT 1 FROM art_refs WHERE ticket_id = ? AND lower(entry_name) = lower(?) AND prompt = ? LIMIT 1")
@@ -75,7 +80,7 @@ export async function queueNew(ctx: Ctx, game: any, player: any, ticket: any, ma
     const drawId = await reserve(ctx.env, game, ticket, e.name, e.prompt, nowMs);
     if (drawId) jobs.push({ game, player, ticket, name: e.name, prompt: e.prompt, kind: e.kind, attrs: e.attrs, tz, drawId, mode: "new" });
   }
-  if (jobs.length) ctx.waitUntil((async () => { for (const j of jobs) await draw(ctx.env, j); })());
+  if (jobs.length) ctx.waitUntil(Promise.all(jobs.map((j) => draw(ctx.env, j))).then(() => undefined));
   return jobs.length;
 }
 
@@ -99,10 +104,11 @@ export async function draw(env: Env, j: Draw): Promise<void> {
     const now = nowIso(Date.now());
     await env.DB.batch([
       env.DB.prepare("INSERT OR IGNORE INTO art_objects (hash, size_bytes, content_type, model, created_at) VALUES (?, ?, ?, ?, ?)").bind(hash, made.bytes.length, made.type, env.ART_STUB ? `stub:${env.ART_STUB}` : model, now),
-      env.DB.prepare("INSERT OR IGNORE INTO art_refs (hash, game_id, ticket_id, entry_name, prompt, saved, is_default, created_at) VALUES (?, ?, ?, ?, ?, 0, 0, ?)").bind(hash, j.game.id, j.ticket.id, j.name, j.prompt, now),
-      env.DB.prepare("UPDATE art_draws SET state = 'done', ended_at = ? WHERE id = ? AND state = 'pending'").bind(now, j.drawId),
+      // a drawing is the requester's while they draft: one that lands after the ticket has left Draft (confirmed, withdrawn into a ballot) is not tied to it
+      env.DB.prepare("INSERT OR IGNORE INTO art_refs (hash, game_id, ticket_id, entry_name, prompt, saved, is_default, created_at) SELECT ?, ?, ?, ?, ?, 0, 0, ? WHERE EXISTS (SELECT 1 FROM tickets WHERE id = ? AND state = 'Draft')").bind(hash, j.game.id, j.ticket.id, j.name, j.prompt, now, j.ticket.id),
+      env.DB.prepare("UPDATE art_draws SET state = CASE WHEN EXISTS (SELECT 1 FROM tickets WHERE id = ? AND state = 'Draft') THEN 'done' ELSE 'failed' END, reason = CASE WHEN EXISTS (SELECT 1 FROM tickets WHERE id = ? AND state = 'Draft') THEN NULL ELSE 'ticket changed' END, ended_at = ? WHERE id = ? AND state = 'pending'").bind(j.ticket.id, j.ticket.id, now, j.drawId),
     ]);
-    await logCall(env, j.game, j.tz, Date.now(), { player_id: j.player.id, agent: "gremlin", purpose: "art", model, outcome: "ok", ms: Date.now() - t0 });
+    await logCall(env, j.game, j.tz, Date.now(), { player_id: j.player.id, agent: "gremlin", purpose: "art", model, outcome: "ok", ms: Date.now() - t0, cost_micro: ART_COST_MICRO });
   } catch (e: any) {
     console.error("art: a drawing failed:", e?.message || "error");
     await fail(String(e?.message || "error"));
@@ -115,6 +121,15 @@ const gateOf = (game: any, player: any, ticket: any, nowMs: number) => ({ sql: `
 
 export type Done = { status: number; body: any };
 
+/** Makes sure art/<hash> exists: copies tmp/<hash> there unless it is already there. Returns {here, copied}; here is false when neither exists. @rule 801.2 */
+async function ensureCopy(env: Env, hash: string, force: boolean): Promise<{ here: boolean; copied: boolean }> {
+  if (!force && (await env.ART.head(artKey(hash)))) return { here: true, copied: false };
+  const src = await env.ART.get(tmpKey(hash));
+  if (!src) return { here: !!(await env.ART.head(artKey(hash))), copied: false };
+  await env.ART.put(artKey(hash), await src.arrayBuffer(), { httpMetadata: { contentType: src.httpMetadata?.contentType } });
+  return { here: true, copied: true };
+}
+
 /**
  * Saves a drawing to the entry: the art_refs row first (saved = 1; the first one saved becomes the default), then the copy to art/<sha256>.
  * A second save of the same drawing changes nothing. A drawing whose tmp/ copy has expired is gone unless the same bytes are already saved.
@@ -123,7 +138,11 @@ export type Done = { status: number; body: any };
 export async function save(env: Env, game: any, player: any, ticket: any, name: string, hash: string, nowMs: number): Promise<Done> {
   const ref: any = await env.DB.prepare("SELECT id, saved FROM art_refs WHERE ticket_id = ? AND lower(entry_name) = lower(?) AND hash = ?").bind(ticket.id, name, hash).first();
   if (!ref) return { status: 404, body: { error: "That is not one of this entry's drawings." } };
-  if (ref.saved) return { status: 200, body: { ok: true, copied: false } };
+  if (ref.saved) {
+    // already kept: nothing changes, unless its copy in art/ is missing (a save that died between its row and its copy): then it is made now
+    try { const c = await ensureCopy(env, hash, false); return c.here ? { status: 200, body: { ok: true, copied: c.copied } } : { status: 409, body: { error: "That drawing is gone. Draw it again." } }; }
+    catch { return { status: 502, body: { error: "The drawing could not be kept just now. Try again." } }; }
+  }
   const n: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM art_refs WHERE ticket_id = ? AND lower(entry_name) = lower(?) AND saved = 1").bind(ticket.id, name).first();
   if ((n?.n ?? 0) >= MAX_SAVED) return { status: 409, body: { error: `An entry keeps at most ${MAX_SAVED} drawings.` } };
   const has: any = await env.DB.prepare("SELECT 1 AS x FROM art_refs WHERE ticket_id = ? AND lower(entry_name) = lower(?) AND is_default = 1").bind(ticket.id, name).first();
@@ -135,13 +154,14 @@ export async function save(env: Env, game: any, player: any, ticket: any, name: 
     const again: any = await env.DB.prepare("SELECT saved FROM art_refs WHERE id = ?").bind(ref.id).first();
     return again?.saved ? { status: 200, body: { ok: true, copied: false } } : { status: 409, body: { error: "The day changed under you. Reload and try again." } };
   }
-  const src = await env.ART.get(tmpKey(hash));
-  if (src) await env.ART.put(artKey(hash), await src.arrayBuffer(), { httpMetadata: { contentType: src.httpMetadata?.contentType } });
-  else if (!(await env.ART.head(artKey(hash)))) {
+  // the copy always happens on the first save, even when art/<hash> exists (the same bytes kept elsewhere): a sweep may be deleting it right now
+  let c = { here: false, copied: false };
+  try { c = await ensureCopy(env, hash, true); } catch (e: any) { console.error("art: the copy to art/ failed:", e?.message || "error"); }
+  if (!c.here) {
     await env.DB.prepare("UPDATE art_refs SET saved = 0, is_default = 0 WHERE id = ?").bind(ref.id).run();
     return { status: 409, body: { error: "That drawing is gone. Draw it again." } };
   }
-  return { status: 200, body: { ok: true, copied: !!src } };
+  return { status: 200, body: { ok: true, copied: c.copied } };
 }
 
 /** Picks the drawing the entry shows: it must be one the player saved. @rule 801.2 */

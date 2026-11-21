@@ -7,7 +7,7 @@
 //                                              picks which saved one the entry shows; redraw asks again, and counts as one of Gremlin's messages.
 import { getPlayer } from "../lib/auth";
 import { HASH, artKey, tmpKey } from "../lib/art.js";
-import { draw, entriesOf, release, reserve, save, setDefault } from "../lib/art";
+import { draw, entriesOf, overBudget, release, reserve, save, setDefault } from "../lib/art";
 import { PLAYER_MESSAGE_SQL, usedToday } from "../lib/chat.js";
 import { clockNow, isLocked, loadToday, lockMessage, settingsOf, timeZoneOf } from "../lib/day";
 import { localDate, lockOpenBinds } from "../lib/day-gate.js";
@@ -76,6 +76,7 @@ export const act = async (ctx: Ctx) => {
   const last: any = e.prompt ? null : await env.DB.prepare("SELECT prompt FROM art_refs WHERE ticket_id = ? AND lower(entry_name) = lower(?) AND prompt != '' ORDER BY id DESC LIMIT 1").bind(t.id, e.name).first();
   const prompt = e.prompt || String(last?.prompt ?? "");
   if (!prompt) return json({ error: `There is nothing to draw ${e.name} from yet. Tell Gremlin what it looks like.` }, 409);
+  if (await overBudget(env, game, tz, nowMs)) return json({ error: "Gremlin is out of budget this month, so nothing more is drawn until the 1st." }, 503);
   const drawId = await reserve(env, game, t, e.name, prompt, nowMs);
   if (!drawId) return json({ error: `${e.name} is already being drawn.` }, 409);
   const ins = await env.DB.prepare(PLAYER_MESSAGE_SQL).bind(game.id, player.id, "gremlin", date, game.day || null, `Redraw ${e.name}.`.slice(0, 200), t.id, nowIso(nowMs), game.id, player.id, "gremlin", date, cap, game.id, ...lockOpenBinds(nowMs)).run();

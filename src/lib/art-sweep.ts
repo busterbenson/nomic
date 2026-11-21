@@ -4,7 +4,7 @@
 // from the table, and it re-checks the references immediately before each delete (a save of the same bytes by another ticket writes its row
 // before it copies, so a row that lands after the check is for an object the save then writes again). tmp/ is the bucket's lifecycle rule's.
 import { catalogFor } from "../routes/api-catalog";
-import { HASH, artKey } from "./art.js";
+import { HASH, artKey, tmpKey } from "./art.js";
 import { Env, nowIso } from "./util";
 
 export const SHELVED_DAYS = 30;
@@ -33,6 +33,13 @@ export async function sweepArt(env: Env, nowMs: number): Promise<{ tickets: numb
     else if (!(await wanted(h))) {   // the check again, immediately before the delete
       await env.ART.delete(artKey(h));
       deleted.push(h);
+      // A save of the same bytes by another ticket writes its row, then copies tmp/ to art/. If its row landed between the check above and
+      // the delete, its copy may have come first and been deleted: look again, and put it back from tmp/ (the copy of a save that comes later is its own).
+      if (await wanted(h)) {
+        const src = await env.ART.get(tmpKey(h));
+        if (src) await env.ART.put(artKey(h), await src.arrayBuffer(), { httpMetadata: { contentType: src.httpMetadata?.contentType } });
+        deleted.pop(); kept.push(h);
+      }
     }
     await env.DB.prepare(`DELETE FROM art_refs WHERE hash = ? AND ticket_id IN (${swept})`).bind(h, cutoff).run();
     await env.DB.prepare("DELETE FROM art_objects WHERE hash = ? AND NOT EXISTS (SELECT 1 FROM art_refs WHERE hash = art_objects.hash)").bind(h).run();

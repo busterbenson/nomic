@@ -5,7 +5,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
-import { ROOT, createGame, d1, join, migrate, newState, startPlaying, startRulesStub, startServer, freePort, PYTHON } from "./lib.mjs";
+import { ROOT, createGame, d1, join, migrate, newState, r2Put, startPlaying, startRulesStub, startServer, freePort, PYTHON } from "./lib.mjs";
+import { artKey, sha256Hex, stubPng } from "../src/lib/art.js";
 
 const shots = process.env.WORKSHOP_SHOTS || "";
 if (shots) mkdirSync(shots, { recursive: true });
@@ -61,6 +62,8 @@ try {
   // the Workshop's catalog groups, an entry's page with its flavor expander, a ticket whose Makes cards show a kind, attribute rows with
   // "No rule yet", a structure's footprint and flavor, and the draft form's kind picker and required fields (tests/browser-catalog.py).
   stub.files["/busterbenson/catalogued/main/RULES.md"] = readFileSync(ROOT + "/tests/fixtures/games/catalogued/RULES.md", "utf8");
+  // the fixture catalog's Garden wall holds two saved drawings (their hashes are in catalog.json): the bucket has them, as it would after the night
+  for (const n of [0, 1]) r2Put(state, artKey(await sha256Hex(stubPng(n))), stubPng(n));
   const cg = await createGame(state, { slug: "catalogued", name: "The Catalog", repo: "busterbenson/catalogued", rulesBase: stub.base });
   const eli = await join(srv.base, "catalogued", cg.code, { email: "eli@example.com", name: "Eli", color: "teal" });
   const fay = await join(srv.base, "catalogued", cg.code, { email: "fay@example.com", name: "Fay", color: "vermilion" });

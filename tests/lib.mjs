@@ -137,6 +137,9 @@ export function r2Get(state, key) {
     return readFileSync(f);
   } catch { return null; }
 }
+export function r2Delete(state, key) {
+  execFileSync(WRANGLER, ["r2", "object", "delete", `${ART_BUCKET}/${key}`, "--local", "--persist-to", state, "--config", localConfig()], { cwd: ROOT, env, stdio: "pipe", timeout: 60000 });
+}
 export function r2Put(state, key, bytes, type = "image/png") {
   const f = pjoin(state, "r2-write.bin");
   writeFileSync(f, bytes);

@@ -12,8 +12,9 @@ export const HASH = /^[0-9a-f]{64}$/;
 export const IMAGE_MODEL = "@cf/black-forest-labs/flux-2-klein-4b";
 export const MAX_PROMPT = 300;          // what Gremlin may write as an art prompt (3.4 of the plan)
 export const MAX_BYTES = 4 * 1024 * 1024;
-export const DRAW_TIMEOUT_MS = 50_000;
+export const DRAW_TIMEOUT_MS = 28_000;   // inside the 30 s a Worker may keep working after its response (ctx.waitUntil)
 export const DRAWING_STALE_MS = 60_000; // a draw still pending after this is a draw that died: the card says it failed and offers Redraw
+export const ART_COST_MICRO = 2000;      // what one drawing is counted as in the monthly budget: $0.002 (FLUX.2 klein 4B is about $0.0016-0.0021, step2-plan 3.1)
 export const MAX_SAVED = 20;            // the most drawings one entry keeps (the same limit catalog.json reads, LIMITS.saved)
 
 /** The key of a drawing as made. Refuses anything that is not 64 lowercase hex characters, so a key can never name another path. @rule 801.2 */
@@ -98,7 +99,7 @@ export async function runImage(ai, model, { prompt, width, height, seed }) {
 }
 
 // ---- the test stand-in for the model ----------------------------------------------------------------------------------------------
-// ART_STUB = "fixed" (always the same bytes: the same prompt twice makes the same key), "seeded" (the bytes follow the seed, so a Redraw
+// ART_STUB = "delay" (seeded, after 6 s: a drawing that is still out while the test changes the ticket), "fixed" (always the same bytes: the same prompt twice makes the same key), "seeded" (the bytes follow the seed, so a Redraw
 // makes a new key), "fail" (the model errors), "slow" (a drawing that never lands in time), "text" (an answer that is not a picture). Unset
 // in production: the Worker then uses the AI binding and nothing else.
 const crcTable = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
@@ -125,5 +126,6 @@ export async function stubImage(mode, { seed }) {
   if (mode === "fail") throw new Error("the stub model failed");
   if (mode === "text") return runImage({ run: async () => ({ image: btoa("this is not a picture at all") }) }, IMAGE_MODEL, { prompt: "x", width: 8, height: 8 });
   if (mode === "slow") await new Promise((r) => setTimeout(r, DRAW_TIMEOUT_MS + 5000));
-  return { bytes: stubPng(mode === "seeded" ? seed : 0), type: "image/png" };
+  if (mode === "delay") await new Promise((r) => setTimeout(r, 6000));
+  return { bytes: stubPng(mode === "seeded" || mode === "delay" ? seed : 0), type: "image/png" };
 }
