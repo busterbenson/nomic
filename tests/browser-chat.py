@@ -1,14 +1,14 @@
 # The chat window in real Chromium (called by tests/chat-browser.mjs). Game "shop" is on day 1: Ada (teal, the viewer) has a ticket W1 that
-# Gremlin drafted over two turns (a flying dragon, priced with a reason), Bo (vermilion) is at the day's cap with the limit's excuse stored, Cy (cobalt) is at the cap and has not been told yet.
+# Gremlin drafted over two turns (a flying dragon, priced with a reason), Bo (vermilion) is at the day's cap with the limit's excuse stored, Cy (cobalt) and Dee (jade) are at the cap and have not been told yet.
 # Checks the column on the Workshop tab at 1280 (open, a new message, minimize and back, remembered across a reload, "Commission something"
 # opens it on the new draft), the corner pill and the bottom sheet at 390, the cap's closed composer, a visitor with no window, light and dark,
 # no sideways scroll and no console errors. "ok"/"FAIL" lines; any FAIL makes the exit code 1.
-# Usage: browser-chat.py <base> <screenshot dir or -> <Ada's session cookie> <Bo's session cookie> <Cy's session cookie>
+# Usage: browser-chat.py <base> <screenshot dir or -> <Ada's session cookie> <Bo's session cookie> <Cy's session cookie> <Dee's session cookie>
 import re, sys
 from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
 
-base, out, ada_cookie, bo_cookie, cy_cookie = sys.argv[1:6]
+base, out, ada_cookie, bo_cookie, cy_cookie, dee_cookie = sys.argv[1:7]
 host = urlparse(base).hostname
 failed = []
 SLUG = "shop"
@@ -148,6 +148,15 @@ with sync_playwright() as p:
     check("1280-light (at the limit): sending is what tells him: his excuse is the last line, ending with when he's back, and the composer closes with the count", "midnight" in text(page, "#chatLog .msg >> nth=-1").lower() and text(page, ".ch-in .closed") == "30 of 30 messages today" and page.locator("#chatText").count() == 0, text(page, "#chatLog .msg >> nth=-1") + " | " + text(page, ".ch-in"))
     check("1280-light (at the limit): her message was not stored or answered: the log gained only his excuse", msgs(page) == n0 + 1, f"{n0} -> {msgs(page)}")
     check("1280-light (at the limit): no console errors", not errors, str(errors)); c.close()
+
+    # ---------------- the state is read again when the tab is entered: the cap closed from another tab shows here without a reload
+    c, page, errors = new_page(b, 1280, 900, "light", dee_cookie)
+    page.click("#tab-workshop"); page.wait_for_selector("#chatText")
+    check("1280-light (another tab): Dee's composer is open (at the limit, not told yet)", page.locator("#chatText").is_enabled())
+    page.evaluate("fetch('/shop/api/chat/gremlin', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({body: 'from another tab'})}).then(r => r.json())"); page.wait_for_timeout(800)
+    page.click("#tab-summary"); page.click("#tab-workshop"); page.wait_for_selector(".ch-in .closed")
+    check("1280-light (another tab): after the limit's excuse was given elsewhere, entering the tab again closes the composer with the count, and shows his excuse", text(page, ".ch-in .closed") == "30 of 30 messages today" and "midnight" in text(page, "#chatLog .msg >> nth=-1").lower(), text(page, ".ch-in"))
+    check("1280-light (another tab): no console errors", not errors, str(errors)); c.close()
 
     # ---------------- a visitor
     c, page, errors = new_page(b, 1280, 900, "light")

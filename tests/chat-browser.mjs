@@ -25,6 +25,7 @@ try {
   const ada = await join(srv.base, "shop", g.code, { email: "ada@example.com", name: "Ada", color: "teal" });
   const bo = await join(srv.base, "shop", g.code, { email: "bo@example.com", name: "Bo", color: "vermilion" });
   const cy = await join(srv.base, "shop", g.code, { email: "cy@example.com", name: "Cy", color: "cobalt" });
+  const dee = await join(srv.base, "shop", g.code, { email: "dee@example.com", name: "Dee", color: "jade" });
   startPlaying(state, "shop");
   const gid = d1(state, "SELECT id FROM games WHERE slug = 'shop'")[0].id;
   const pid = (n) => d1(state, `SELECT id FROM players WHERE game_id = '${gid}' AND display_name = '${n}'`)[0].id;
@@ -48,8 +49,9 @@ try {
   ok(await again(() => bo.post(CH, { body: REC["rule-question"].message })), "bo 30th");
   const r31 = ok(await bo.post(CH, { body: "one more" }), "bo 31st");
   if (r31.data.out !== "cap") throw new Error("Bo is not at the cap: " + r31.text);
+  d1(state, Array.from({ length: 30 }, (_, i) => `INSERT INTO chat_messages (game_id, player_id, agent, local_date, day, role, body, at) VALUES ('${gid}', '${pid("Dee")}', 'gremlin', '${today}', 1, 'player', '${said[i % 12]}', '${at}')`).join("; "));
   const cookie = (c) => [...c.jar].find(([k]) => k === "s|/shop")[1];
-  const r = await promisify(execFile)("/usr/local/bin/python3", [ROOT + "/tests/browser-chat.py", srv.base, shots || "-", cookie(ada), cookie(bo), cookie(cy)], { timeout: 280000, maxBuffer: 1 << 24 });
+  const r = await promisify(execFile)("/usr/local/bin/python3", [ROOT + "/tests/browser-chat.py", srv.base, shots || "-", cookie(ada), cookie(bo), cookie(cy), cookie(dee)], { timeout: 280000, maxBuffer: 1 << 24 });
   process.stdout.write(r.stdout);
 } catch (e) {
   failed = true;

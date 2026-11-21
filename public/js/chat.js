@@ -11,7 +11,7 @@
 //     rpill(num)          a rule pill for a rule number (plain text when the rulebook has none)
 //     wpill(n)            a ticket pill
 //     onTicket(page)      called with the ticket page a turn returned (the Workshop redraws its card and list)
-//   CHAT.sync(tab)  CHAT.attach(n, {open})  CHAT.open()  CHAT.load()
+//   CHAT.sync(tab, reread)  CHAT.attach(n, {open})  CHAT.open()  CHAT.load()
 // Nothing here decides what is allowed: the server's answers (the cap, the lock, a refusal) are shown as they come.
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -156,14 +156,27 @@ ${refused ? `<div class="tx">${esc(last.refusal)}</div>` : ""}
     document.body.classList.toggle("chat-sheet", !!(on && S.sheet && !desktop()));
   }
   /** Called when the tab or the player changes. @rule 106.3 */
-  async function sync(tab) {
+  async function sync(tab, reread) {
+    const entering = tab !== S.tab;
     S.tab = tab;
     S.open = remembered();
     if (S.tab !== agent.tab) S.sheet = false;
     place();
     if (player() && S.tab === agent.tab) {
-      if (!S.loaded && !S.loading) await load(); else draw(true);
+      if (!S.loaded && !S.loading) await load();
+      else if (entering || reread) await readState();   // the day, the lock or the cap may have changed since this was drawn
+      else draw(true);
     }
+  }
+  /** The window's state again (the cap, the lock, the day) without touching the log; the lines the server has since the last one are added. @rule 106.7, 107.1 */
+  async function readState() {
+    const r = await api(`/api/chat/${agent.path}`);
+    if (r.ok) {
+      S.state = r.data.state;
+      const have = new Set(S.msgs.map((m) => m.id));
+      for (const m of r.data.messages) if (!have.has(m.id)) S.msgs.push(m);
+    }
+    draw(true);
   }
   function open() {
     if (desktop()) { S.open = true; remember(true); } else S.sheet = true;
