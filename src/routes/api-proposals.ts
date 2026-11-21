@@ -86,13 +86,14 @@ export function view(r: any, viewerId?: string | null, electorate?: number) {
 
 // Draft (rule 103.1). Returns the draft, or the refusal.
 /** @rule 103.1, 108.3, 110.1 */
-export async function draft(ctx: Ctx, player: any, body: any, nowMs: number): Promise<Out> {
+export async function draft(ctx: Ctx, player: any, body: any, nowMs: number, o: { atLimit?: boolean } = {}): Promise<Out> {
   const { env } = ctx;
   const { game, day, turn } = await loadToday(env, ctx.data.game!, nowMs, player.id);
   const blocked = turnBlock(game, day, turn, player, "propose", nowMs);
   if (blocked) return out(refusalBody(blocked), blocked.status);
   const limit = limitOf(game), made = await confirmedToday(env, game.id, player.id, game.day);
-  if (made >= limit) return out({ error: proposalLimitMessage(made) }, 409);
+  // Starling drafts at the limit too (rule 103.1: drafting costs nothing, only a locked-in proposal counts): `atLimit`. Confirming still refuses past it.
+  if (made >= limit && !o.atLimit) return out({ error: proposalLimitMessage(made) }, 409);
 
   const { md, book, sha } = await bookFor(game);
   const req = readRequest(book, body);

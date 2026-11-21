@@ -81,7 +81,7 @@
   import { createBallot } from "/js/ballot.js";
   import { mini, playerPill, hexOf } from "/js/people.js";
 import { createWorkshop } from "/js/workshop.js";
-import { createChat } from "/js/chat.js";
+import { createChat, AGENTS } from "/js/chat.js";
  import { commissionHTML, wPill } from "/js/commission.js";
   const SLUG = location.pathname.split("/")[1] || "";
   const BASE = "/" + SLUG;
@@ -106,7 +106,7 @@ import { createChat } from "/js/chat.js";
   };
   let ME = null, DATA = null, INVITE = null;   // who is looking, and the last /api/game
   let DAY = null, END_ASK = false, START_ASK = false, DAY_AT = 0, DAY_TIMER = 0, DAY_TICK = 0;   // the last /api/day, the End turn confirm, when it was fetched
-  let PROP = null, BAL = null, BOOK = null, CARDS = null, WS = null, CHAT = null;   // the proposal controller (propose.js), the mounted rulebook, the card host
+  let PROP = null, BAL = null, BOOK = null, CARDS = null, WS = null, CHAT = null, STAR = null;   // the proposal controller (propose.js), the mounted rulebook, the card host
   let BOARD = null, SEL = null, VIEW = null;   // the last /api/board, the selected tile {x,y}, the drawn board
   let TAB = "summary", BOARD_OPEN = true, LASTMOVE = null, NOTES = { list: [], unread: 0 }, RULES_OK = false;
   ensureDefs();
@@ -139,7 +139,7 @@ import { createChat } from "/js/chat.js";
     if (PROP) PROP.redraw();
     if (BOOK) BOOK.redraw();
     drawBook();   // the ballot's Yes / No and the Propose card depend on who is looking
-    if (CHAT) CHAT.sync(TAB);   // the chat window exists only for a signed-in player
+    syncChats();   // the chat windows exist only for a signed-in player
     if (VIEW && ME && ME.player) VIEW.setMe(ME.player.color.key);
     drawWho();
     drawMoveBar();
@@ -242,7 +242,10 @@ import { createChat } from "/js/chat.js";
     WS = createWorkshop({ api, me: () => ME, pill, rpill: n => PROP.rpill(n), when: whenText, canCommission: () => PROP.canPropose(), refresh: async () => { await refresh(); loadNotes(); }, cards: CARDS, chat: () => CHAT });
     CHAT = createChat({ api, root: $("bwrap"), me: () => ME, slug: SLUG, rpill: n => PROP.rpill(n), wpill: wPill,
       onTicket: async t => { WS.apply(t); await WS.load(); drawBook(); } });
-    PROP = createProposer({ api, me: () => ME, day: () => DAY, pill, vote: n => BAL.box(n), refresh: async () => { await refresh(); loadNotes(); } });
+    // Starling shares the column and the pill with Gremlin: only the window whose tab is showing draws (public/js/chat.js)
+    STAR = createChat({ api, root: $("bwrap"), me: () => ME, slug: SLUG, agent: AGENTS.starling, rpill: n => PROP.rpill(n), wpill: wPill,
+      onProposals: async () => { await refresh(); loadNotes(); } });
+    PROP = createProposer({ api, me: () => ME, day: () => DAY, pill, vote: n => BAL.box(n), starling: () => STAR, refresh: async () => { await refresh(); loadNotes(); } });
     drawTabs(); drawBook();
     loadMe();
     const [g] = await Promise.all([api("/api/game"), loadDay()]);
@@ -266,10 +269,12 @@ import { createChat } from "/js/chat.js";
     $("btabs").innerHTML = TABS().map(([k, n, c]) => `<button type="button" class="btab" role="tab" id="tab-${k}" aria-selected="${TAB === k}" aria-controls="p-${k}" tabindex="${TAB === k ? 0 : -1}" data-tab="${k}">${n}${c ? `<span class="cnt">${esc(c)}</span>` : ""}</button>`).join("")
       + (TAB === "summary" || !DAY || !DAY.day ? "" : `<span class="bday">Day ${esc(DAY.day)}</span>`);
   }
+  // Both chat windows hear about the tab and the day: each one draws only while its own tab is showing
+  function syncChats(reread) { if (CHAT) CHAT.sync(TAB, reread); if (STAR) STAR.sync(TAB, reread); }
   function setTab(k, scroll) {
     TAB = k;
     for (const t of ["summary", "rules", "workshop", "history"]) $("p-" + t).hidden = t !== k;
-    drawTabs(); drawBook(); if (CHAT) CHAT.sync(TAB);
+    drawTabs(); drawBook(); syncChats();
     if (scroll) $("book").scrollIntoView({ block: "start", behavior: reduced() ? "auto" : "smooth" });
   }
   $("btabs").addEventListener("keydown", e => {
@@ -544,7 +549,7 @@ import { createChat } from "/js/chat.js";
     if (g.ok) { DATA = g.data; }
     if (b.ok) { BOARD = b.data; if (VIEW) VIEW.setData(b.data, myKey()); }
     await Promise.all([PROP ? PROP.load() : 0, BAL ? BAL.load() : 0, WS ? WS.load() : 0]);
-    drawWho(); if (g.ok) drawGame(g.data); if (b.ok) drawBoard(b.data); drawTabs(); drawBook(); drawMoveBar(); if (CHAT) CHAT.sync(TAB, true);   // the day or the lock changed: the chat reads its state again
+    drawWho(); if (g.ok) drawGame(g.data); if (b.ok) drawBoard(b.data); drawTabs(); drawBook(); drawMoveBar(); syncChats(true);   // the day or the lock changed: the chats read their state again
     if (BOOK) BOOK.redraw();
     if (CARDS && CARDS.isOpen()) CARDS.redraw();
   }

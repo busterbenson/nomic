@@ -25,6 +25,7 @@ import * as apiTurn from "./routes/api-turn";
 import * as apiProposals from "./routes/api-proposals";
 import * as apiTickets from "./routes/api-tickets";
 import * as apiChat from "./routes/api-chat";
+import * as apiStarling from "./routes/api-starling";
 import { AGENTS } from "./lib/chat.js";
 import * as apiBoard from "./routes/api-board";
 import * as apiAction from "./routes/api-action";
@@ -166,8 +167,8 @@ async function route(request: Request, env: Env, execCtx: ExecutionContext): Pro
     ctx.params.id = segs[3];
     return run({ post: apiProposals.action(segs[4]) }, method, ctx);
   }
-  // /api/chat/<agent>: a player's private chat with Gremlin (rules 106.3, 106.7)
-  if (sub === "api" && segs.length === 4 && segs[2] === "chat" && AGENTS.includes(segs[3])) return run(apiChat, method, ctx);
+  // /api/chat/<agent>: a player's private chat with Gremlin or Starling (rules 106.2, 106.3, 106.7)
+  if (sub === "api" && segs.length === 4 && segs[2] === "chat" && AGENTS.includes(segs[3])) return run(segs[3] === "starling" ? apiStarling : apiChat, method, ctx);
   // /api/tickets/<W3> (the ticket page), and /api/tickets/<W3>/edit, /confirm, /reopen and /post (rules 801, 804)
   if (sub === "api" && segs[2] === "tickets" && (segs.length === 4 || segs.length === 5)) {
     ctx.params.n = segs[3];

@@ -65,17 +65,17 @@ check("the day model replaces the turn model: 103 is proposals (no join order), 
   T.byNum["103"].title === "Proposals" && !/order they joined/.test(rules) && !/skipped for that round/.test(rules) && T.byNum["203"].title === "Days" &&
   T.byNum["202"].clauses.map((c) => c.num).join() === "202.1,202.2,202.3,202.4,202.5" && T.byNum["203"].clauses.map((c) => c.num).join() === "203.1,203.2" && T.byNum["107"].clauses.map((c) => c.num).join().startsWith("107.1") &&
   rules.includes("there is no order of play") && rules.includes("Ending is final: after it they can't move, propose or vote until the next day") && rules.includes("A day runs from midnight to midnight in the game's time zone. [setting: game.timezone]") &&
-  rules.includes("A day always runs to midnight, even if every player has ended their turn.") && rules.includes("the game is locked: nobody can move, vote, propose, post in a ticket's discussion, talk to Gremlin or end their turn, on the site or through an AI client (rule 204)"));
+  rules.includes("A day always runs to midnight, even if every player has ended their turn.") && rules.includes("the game is locked: nobody can move, vote, propose, post in a ticket's discussion, talk to Starling or Gremlin or end their turn, on the site or through an AI client (rule 204)"));
 console.log("the proposal rules (step 1, PR 3)");
 check("103 Proposals is 103.1-103.4 and 105 Votes needed is 105.1-105.5, worded as approved; the moderator moved to 106",
   T.byNum["103"].clauses.map((c) => c.num).join() === "103.1,103.2,103.3,103.4" && T.byNum["105"].title === "Votes needed" && T.byNum["105"].clauses.map((c) => c.num).join() === "105.1,105.2,105.3,105.4,105.5" &&
-  T.byNum["106"].title === "The moderator" && rules.includes("Drafting costs nothing: only a confirmed proposal counts toward the day's limit.") &&
+  T.byNum["106"].title === "The moderator" && rules.includes("Drafting costs nothing: only a locked-in proposal counts toward the day's limit.") &&
   rules.includes("Each confirmed proposal gets the next number (P1, P2, ...) and goes on the next day's ballot.") && rules.includes("You can confirm up to 3 proposals a day. [setting: proposals.per_day]") && rules.includes("A withdrawn proposal doesn't count toward the limit (103.2).") &&
   rules.includes("The mark sets the votes needed to change, add or repeal any rule in the block.") && rules.includes("The votes a proposal needs are set when it is confirmed, from the marks in effect then.") &&
   rules.includes("Rules marked unanimous, by their block or by their own mark, are the core rules."));
-check("108.3 (the moderator names conflicts when drafting) and 110.1 (what no proposal can change, refused at drafting) are in",
+check("108.3 (Starling names conflicts when drafting) and 110.1 (what no proposal can change, refused at drafting) are in",
   T.byNum["108"].clauses.map((c) => c.num).join() === "108.1,108.2,108.3,108.4,108.5" && T.byNum["110"].clauses.map((c) => c.num).join() === "110.1" &&
-  rules.includes("When drafting, the moderator names any other rule the proposal would conflict with, so the proposer can change that rule too.") &&
+  rules.includes("When drafting, Starling names any other rule the proposal would conflict with, so the proposer can change that rule too.") &&
   rules.includes("A proposal that would change them is refused when it is drafted."));
 console.log("the vote rules (step 1, PR 4)");
 check("104 Voting is 104.1-104.5 and 107 has 107.6 (the 2 am deadline) and 107.7 (not applied: back to the owner), worded as approved for what the code does; 110.1 names hidden votes, the count by code and the deadline",
@@ -86,8 +86,8 @@ check("104 Voting is 104.1-104.5 and 107 has 107.6 (the 2 am deadline) and 107.7
   rules.includes("The moderator has until 2:00 am to process the day.") && rules.includes("It goes back to its proposer with the moderator's reason and a suggestion") &&
   !/48 hours/.test(rules) && ["104.4", "104.5", "107.6"].every((n) => T.byNum["110.1"].paras[0].s.includes(`(rule ${n})`)));
 console.log("the night's rules (step 1, PR 5)");
-check("106 is 106.1, 106.3-106.7 (Gremlin's are 106.3, 106.4 and 106.7; rulings 106.5; the drafter audit is 106.6), 107 is 107.1-107.8 (order, redraft, text + code + tests, the budget, the day tag), 108 is 108.1-108.5, 402 is 402.1-402.3",
-  T.byNum["106"].clauses.map((c) => c.num).join() === "106.1,106.3,106.4,106.5,106.6,106.7" && T.byNum["107"].clauses.map((c) => c.num).join() === "107.1,107.2,107.3,107.4,107.5,107.6,107.7,107.8" &&
+check("106 is 106.1-106.7 (Starling's is 106.2, Gremlin's 106.3; both are in 106.4 and 106.7; rulings 106.5; the drafter audit is 106.6), 107 is 107.1-107.8 (order, redraft, text + code + tests, the budget, the day tag), 108 is 108.1-108.5, 402 is 402.1-402.3",
+  T.byNum["106"].clauses.map((c) => c.num).join() === "106.1,106.2,106.3,106.4,106.5,106.6,106.7" && T.byNum["107"].clauses.map((c) => c.num).join() === "107.1,107.2,107.3,107.4,107.5,107.6,107.7,107.8" &&
   T.byNum["402"].clauses.map((c) => c.num).join() === "402.1,402.2,402.3" &&
   rules.includes("The draft that was voted on is the one applied.") && rules.includes("[setting: night.apply_minutes]") && rules.includes("[setting: night.apply_effort]") &&
   rules.includes("A core rule prevails over a majority rule.") && rules.includes("the moderator tags the game's files with that day's number"));

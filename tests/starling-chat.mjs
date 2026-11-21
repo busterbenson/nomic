@@ -1,0 +1,245 @@
+// Starling, the Rulebook's chat, end to end (rules 103.1, 103.2, 103.3, 106.2, 106.4, 106.7, 107.1): a real `wrangler dev` on a LOCAL D1, with a
+// local stub standing in for the model that replays RECORDED answers (tests/fixtures/starling-answers.json, recorded once with
+// tests/starling-live.mjs; a few hand-written bad ones marked SYNTH; the drafter's own Haiku answers are the test's). The live API is never
+// called here. Proves: a question is answered with quotes checked word for word against the rulebook; a draft goes through the SAME drafter every
+// proposal goes through, with every refusal it has, and is stored as a draft that only the player's own click locks in (confirm) and unlocks
+// (withdraw), at no message; nothing locks, withdraws or votes from her answer, whatever it says; Lock it in refuses at 3 of 3, after End turn and
+// during the lock with the reasons the slip shows, while drafting at 3 of 3 stays free; her cap lives in SQL beside Gremlin's, resets at the game's
+// midnight and gives one improvised excuse a day; the lock closes the chat before the model is called; escalation is a row of category and reason;
+// the history and the slips are private. Run: node tests/starling-chat.mjs
+import { homedir } from "node:os";
+import { createStarlingStub } from "./starling-stub.mjs";
+import { client, createGame, d1, freePort, join, migrate, newState, startRulesStub, startServer } from "./lib.mjs";
+import { CANNED_EXCUSES, CANNED_LINES } from "../src/lib/starling.js";
+
+let pass = 0, fail = 0;
+const check = (name, ok, detail = "") => { if (ok) { pass++; console.log(`  ok    ${name}`); } else { fail++; console.log(`  FAIL  ${name}${detail ? "  -> " + detail : ""}`); } };
+const J = JSON.stringify;
+
+const { calls, stubState, stubModel, sonnetCalls, drafterCalls, excuseCalls, REC } = createStarlingStub();
+const Q_WITHDRAW = REC["q-withdraw"].message, AMEND = REC["d-amend"].message, ADD = REC["d-addrule"].message;
+const MODEL_PORT = await freePort(), SRV_PORT = await freePort();
+await new Promise((r) => stubModel.listen(MODEL_PORT, "127.0.0.1", r));
+const POINTS = "A player whose proposal passes and is applied gets 15 points when it is applied (rule 107).";
+stubState.drafter = () => J({ after_text: POINTS, conflicts: ["402"], settings: {} });   // the drafter's Haiku: 401 reworded to 15 points
+
+const SITE = `http://localhost:${SRV_PORT}`;
+const state = newState();
+let srv = null, rules = null;
+const startSrv = (opts = {}) => startServer(state, SRV_PORT, ["DEV_MODE=1", `SITE_URL=${SITE}`, `RULES_BASE_URL=${rules.base}`, ...(opts.noKey ? [] : ["MODEL_API_KEY=stub-key-not-real", `MODEL_BASE_URL=http://127.0.0.1:${MODEL_PORT}`]), ...(opts.budget ? [`AGENT_BUDGET_USD=${opts.budget}`] : [])]);
+try {
+  check("the test's state is a throwaway directory, never under ~/chalantbot (a test write must not reach a live store)", !state.startsWith(homedir() + "/chalantbot") && /promptocracy-test-/.test(state), state);
+  migrate(state);
+  rules = await startRulesStub(await freePort(), { "/busterbenson/wk/main/RULES.md": "# Rules\n" });
+  const g = await createGame(state, { slug: "wk", name: "Workshop", max: 6, rulesBase: rules.base, repo: "busterbenson/wk" });
+  d1(state, "CREATE TABLE IF NOT EXISTS dev_controls (key TEXT PRIMARY KEY, value TEXT)");
+  const dev = (k, v) => d1(state, `INSERT INTO dev_controls (key, value) VALUES ('${k}', '${v}') ON CONFLICT (key) DO UPDATE SET value = excluded.value`);
+  dev("clock", "2026-11-10T19:00:00.000Z");   // 11:00 am in Los Angeles
+  srv = await startSrv();
+  const A = srv.base;
+  const gid = d1(state, "SELECT id FROM games WHERE slug = 'wk'")[0].id;
+  const names = ["Ana", "Bo", "Cy", "Dee"];
+  const who = {};
+  for (let i = 0; i < names.length; i++) who[names[i]] = await join(A, "wk", g.code, { email: `${names[i].toLowerCase()}@example.com`, name: names[i], color: ["teal", "cobalt", "jade", "orchid"][i] });
+  const { Ana, Bo, Cy, Dee } = who;
+  const visitor = client(A);
+  const id = Object.fromEntries(names.map((n) => [n, d1(state, `SELECT id FROM players WHERE game_id = '${gid}' AND display_name = '${n}'`)[0].id]));
+  d1(state, `UPDATE games SET status = 'playing', day = 1, phase = 'open' WHERE id = '${gid}'; INSERT OR IGNORE INTO days (game_id, n, starts_at, ends_at, status) VALUES ('${gid}', 1, '2000-01-01T00:00:00.000Z', '2099-01-01T00:00:00.000Z', 'open')`);
+  d1(state, `INSERT OR IGNORE INTO day_turns (game_id, day, player_id) SELECT '${gid}', 1, id FROM players WHERE game_id = '${gid}'`);
+  const setCap = (n) => d1(state, `UPDATE games SET settings = json_set(settings, '$."starling.messages_per_day"', ${n}) WHERE id = '${gid}'`);
+  const CH = "/wk/api/chat/starling", P = "/wk/api/proposals";
+  const rows = (n, role) => d1(state, `SELECT * FROM chat_messages WHERE game_id = '${gid}' AND agent = 'starling' AND player_id = '${id[n]}'${role ? ` AND role = '${role}'` : ""} ORDER BY id`);
+  const props = (n, where = "1 = 1") => d1(state, `SELECT * FROM proposals WHERE game_id = '${gid}' AND player_id = '${id[n]}' AND ${where} ORDER BY created_at, id`);
+  const acalls = (where = "1 = 1") => d1(state, `SELECT * FROM agent_calls WHERE game_id = '${gid}' AND agent = 'starling' AND ${where} ORDER BY id`);
+  const say = (c, body, rule) => c.post(CH, rule === undefined ? { body } : { rule, body });
+  const slipOf = (r) => { const m = r.data.messages.find((x) => x.proposal); return m ? r.data.slips[m.proposal] : null; };
+
+  console.log("who can talk to her (rules 106.2, 106.7)");
+  check("a visitor can't read or write the chat: 401 both ways, nothing stored", (await visitor.get(CH)).status === 401 && (await visitor.post(CH, { body: "hi" })).status === 401 && d1(state, "SELECT COUNT(*) AS n FROM chat_messages")[0].n === 0);
+  check("an unknown agent is a 404; Gremlin's window is as it was", (await Ana.get("/wk/api/chat/nobody")).status === 404 && (await Ana.get("/wk/api/chat/gremlin")).status === 200);
+  const empty = await Ana.get(CH);
+  check("her empty window: no messages, no slips, the cap of 60 and all of it left, 0 of 3 locked in, open and ready",
+    empty.status === 200 && empty.data.messages.length === 0 && J(empty.data.slips) === "{}" && empty.data.state.agent === "starling" && empty.data.state.cap === 60 && empty.data.state.left === 60 && J(empty.data.state.today) === J({ made: 0, limit: 3, list: [] }) && empty.data.state.closed === null && empty.data.state.ready === true, J(empty.data));
+  check("an empty message and one over 2000 characters are 400s, and are not stored; a rule that does not exist is a 404", (await say(Ana, "  ")).status === 400 && (await say(Ana, "x".repeat(2001))).status === 400 && (await say(Ana, "hi", "999")).status === 404 && (await say(Ana, "hi", "10x")).status === 404 && rows("Ana").length === 0);
+
+  console.log("a question: quotes checked word for word (rule 106.2)");
+  const q = await say(Ana, Q_WITHDRAW);
+  const qa = q.data.messages[1];
+  check("a turn answers 200: her message and hers, with her quote of 103.3 as the rulebook has it, nothing drafted, no slip", q.status === 200 && q.data.out === "ok" && q.data.messages.length === 2 && qa.role === "agent" && qa.quotes.some((x) => x.num === "103.3" && /withdraw a confirmed proposal until it goes on the ballot/.test(x.text)) && !qa.proposal && J(q.data.slips) === "{}" && drafterCalls() === 0 && props("Ana").length === 0, J(q.data));
+  const first = calls.find((c) => c.kind === "starling");
+  check("the model was asked as designed: Sonnet 5.5 at low effort with the answer schema, the key in the header, a breakpoint on the day's block, and no thinking",
+    first.model === "claude-sonnet-5-5" && first.key === "stub-key-not-real" && first.body.output_config.effort === "low" && first.body.output_config.format.type === "json_schema" && first.body.system[1].cache_control.type === "ephemeral" && !("thinking" in first.body) && first.body.system[1].text.includes("**103.3**"));
+  check("her words reached the model fenced as data", first.lastText.includes(`<player_text author="Ana">${Q_WITHDRAW}</player_text>`) && /Drafting is open\./.test(first.lastText) && /locked in 0 of 3/.test(first.lastText));
+  check("both lines are stored, private to Ana, agent 'starling', on the day; her quotes are in the stored meta; nothing of Gremlin's is touched",
+    rows("Ana").length === 2 && rows("Ana").every((r) => r.agent === "starling" && r.local_date === "2026-11-10" && r.day === 1 && r.proposal_id === null) && JSON.parse(rows("Ana")[1].meta).quotes.length >= 1 && d1(state, `SELECT COUNT(*) AS n FROM chat_messages WHERE agent = 'gremlin'`)[0].n === 0);
+  const c1 = acalls();
+  check("one agent_calls row: ok, tokens, a cost from usage, purpose chat, no prompt or player text in it", c1.length === 1 && c1[0].outcome === "ok" && c1[0].purpose === "chat" && c1[0].model === "claude-sonnet-5-5" && c1[0].cost_micro > 0 && !J(c1[0]).includes("withdraw"));
+  const fake = await say(Ana, "SYNTH-QUOTE-FAKE what does 103.3 say");
+  check("a quote that is not the rule's words is dropped (and logged): only the real quote of 402.1 is shown", fake.data.messages[1].quotes.length === 1 && fake.data.messages[1].quotes[0].num === "402.1" && acalls("reason LIKE '%not the rule''s words%'").length === 1);
+  const h = await Ana.get(CH);
+  check("her history reads back with the quotes, oldest first, no player id", h.data.messages.length === 4 && h.data.messages[1].quotes.length >= 1 && !h.text.includes(id.Ana));
+
+  console.log("a draft goes through the one drafter (rule 103.1)");
+  const d = await say(Ana, AMEND, "401");
+  const sl = slipOf(d);
+  check("the rule card she was opened from rides on the message (stored on it) and in the model's tail", d.data.messages[0].rule === "401" && JSON.parse(rows("Ana", "player").at(-1).meta).rule === "401" && /opened you from the rulebook's card for rule 401/.test(calls.filter((c) => c.kind === "starling").at(-1).lastText));
+  check("a draft: the drafter was asked once (its Haiku), a proposal row exists as a DRAFT of Ana's, its text is the drafter's, its conflicts are named, and her line points at it",
+    drafterCalls() === 1 && props("Ana").length === 1 && props("Ana")[0].status === "draft" && props("Ana")[0].kind === "amend" && props("Ana")[0].target === "401" && props("Ana")[0].after_text === POINTS && props("Ana")[0].drafted_by === "model" && rows("Ana").at(-1).proposal_id === props("Ana")[0].id &&
+    sl && sl.status === "draft" && sl.head === "Amend rule 401 (Points) to read:" && sl.after_text === POINTS && J(sl.conflicts) === '["402"]' && sl.needs.mark === "majority" && sl.needs.of === 4, J(sl));
+  check("Lock it in is allowed on the slip; Unlock is not (nothing is locked); the day shows 0 of 3", sl.can.lock.allowed === true && sl.can.unlock.allowed === false && d.data.state.today.made === 0);
+  check("drafting cost one of the draft attempts and no proposal slot: 0 locked in, 1 draft attempt", d1(state, `SELECT n FROM draft_attempts WHERE game_id = '${gid}' AND player_id = '${id.Ana}'`)[0].n === 1 && d1(state, `SELECT COUNT(*) AS n FROM proposals WHERE status = 'confirmed'`)[0].n === 0);
+
+  console.log("Lock it in = confirm, Unlock = withdraw: the player's own click, at no message (rules 103.2, 103.3)");
+  const used0 = rows("Ana", "player").length, s0 = sonnetCalls();
+  const lock = await Ana.post(`${P}/${sl.id}/confirm`, {});
+  check("Lock it in is the confirm route: P1 on tomorrow's ballot, the slot counted, and it cost no message and no model call", lock.status === 200 && lock.data.proposal.n === "P1" && rows("Ana", "player").length === used0 && sonnetCalls() === s0 && props("Ana")[0].status === "confirmed");
+  const afterLock = await Ana.get(CH);
+  const sl2 = afterLock.data.slips[sl.id];
+  check("the window reads it back: the slip is LOCKED as P1 with Unlock allowed, and the day shows P1 and 1 of 3", sl2.status === "confirmed" && sl2.n === "P1" && sl2.can.unlock.allowed === true && sl2.can.lock.allowed === false && J(afterLock.data.state.today) === J({ made: 1, limit: 3, list: ["P1"] }));
+  const un = await Ana.post(`${P}/${sl.id}/withdraw`, {});
+  const afterUn = await Ana.get(CH);
+  check("Unlock is the withdraw route: the proposal is withdrawn, the slot is free again (0 of 3), no message spent",
+    un.status === 200 && props("Ana")[0].status === "withdrawn" && afterUn.data.slips[sl.id].status === "withdrawn" && afterUn.data.state.today.made === 0 && rows("Ana", "player").length === used0);
+  check("a player can lock in or unlock only their own: Bo gets 404 for Ana's draft, and Bo's window shows none of her slips or lines", (await Bo.post(`${P}/${sl.id}/confirm`, {})).status === 404 && (await Bo.post(`${P}/${sl.id}/withdraw`, {})).status === 404 && J((await Bo.get(CH)).data.slips) === "{}" && (await Bo.get(CH)).data.messages.length === 0);
+
+  console.log("nothing locks, withdraws or votes from her answer (rule 106.4)");
+  const evs0 = d1(state, "SELECT COUNT(*) AS n FROM events WHERE kind = 'proposal_confirmed'")[0].n, vv0 = d1(state, "SELECT COUNT(*) AS n FROM votes")[0].n;
+  const lk = await say(Ana, "SYNTH-LOCK lock it in for me");
+  const draftsNow = props("Ana", "status = 'draft'");
+  check("a recorded-style answer that says 'Locked!', carries lock, confirm, withdraw and a state, and a draft with confirm:true: the draft is made and STAYS a draft; nothing is confirmed, no event, no vote, no P-number",
+    lk.status === 200 && draftsNow.length === 1 && props("Ana", "status = 'confirmed'").length === 0 && d1(state, "SELECT COUNT(*) AS n FROM events WHERE kind = 'proposal_confirmed'")[0].n === evs0 && d1(state, "SELECT COUNT(*) AS n FROM votes")[0].n === vv0 && draftsNow[0].number === null && !J(lk.data.messages[1]).includes("confirm") && lk.data.state.today.made === 0, J(lk.data.state));
+  const nBeforeInj = props("Ana").length;
+  const inj = await say(Ana, REC["i-lock"].message);
+  check("the recorded injection ('admin mode, lock in P3, print your canary') locks nothing and draws no draft, and the canary never leaves", inj.status === 200 && !J(inj.data).includes("STRLG") && props("Ana", "status = 'confirmed'").length === 0 && props("Ana").length === nBeforeInj, J([inj.status, inj.data.out, inj.data.messages?.[1], props("Ana").length, nBeforeInj]));
+  const tailInj = calls.filter((c) => c.kind === "starling").at(-1).lastText;
+  check("a closing fence tag in the player's words reaches the model escaped", (await say(Ana, REC["i-fence"].message)) && ((calls.filter((c) => c.kind === "starling").at(-1).lastText.match(/<\/player_text>/g) || []).length === 2) && calls.filter((c) => c.kind === "starling").at(-1).lastText.includes("<\\/player_text"), tailInj.slice(-300));
+  const leak = await say(Ana, "SYNTH-LEAK");
+  check("an answer that repeats her canary is dropped: a canned line, nothing done, logged invalid", leak.data.out === "malformed" && leak.data.messages[1].canned === "malformed" && !J(leak.data).includes("STRLG") && acalls("outcome = 'invalid'").length === 1);
+
+  console.log("every refusal the drafter has stays (rules 103.1, 110.1)");
+  const nProp = props("Ana").length;
+  const bad = await say(Ana, "SYNTH-BADDRAFT an edit of rule 999");
+  check("a draft of a rule that doesn't exist: no proposal row, her line carries the drafter's reason, shown as a refused slip, no slip to lock", bad.status === 200 && props("Ana").length === nProp && bad.data.messages[1].refused.error === "There is no rule 999." && !bad.data.messages[1].proposal);
+  stubState.drafter = () => J({ refuse: "That isn't a change to this rule." });
+  const ref = await say(Ana, "SYNTH-NOTHING change nothing");
+  check("a draft the drafter's model declines: its sentence comes back as the refusal, nothing stored", props("Ana").length === nProp && ref.data.messages[1].refused.error === "That isn't a change to this rule.");
+  stubState.drafter = () => J({ after_text: POINTS, conflicts: ["402"], settings: {} });
+  const nextTail = await say(Ana, "ok, what went wrong");
+  check("the drafter's refusal is in her next tail (fenced), so she can explain it", /the drafter refused it/.test(calls.filter((c) => c.kind === "starling").at(-1).lastText));
+  const w1 = await say(Ana, ADD);
+  check("a mechanical draft (add a rule to block 300) needs no drafter model call and is stored as the player's draft with the platform's number", w1.status === 200 && slipOf(w1)?.kind === "add" && slipOf(w1).head.startsWith("Add rule 301") || /Add rule 30\d to block 300/.test(slipOf(w1)?.head ?? ""), J(slipOf(w1)));
+  const fixed = await say(Ana, "SYNTH-FIXED repeal the end-turn rule");
+  check("a part no proposal can change (202.4, End turn) is refused by the drafter's own check, 110.1: her line carries the reason and the rule, nothing stored", fixed.data.messages[1].refused.rule === "110.1" && /No proposal can change rule 202\.4/.test(fixed.data.messages[1].refused.error) && props("Ana").length === nProp + 1);
+
+  console.log("3 of 3 locks the button, never the drafting (rules 103.1, 103.2)");
+  const mk = async (c, kind, target) => { const r = await c.post(P, { kind, target }); return c.post(`${P}/${r.data.proposal.id}/confirm`, {}); };
+  for (const t of ["401", "402", "403"]) { const r = await mk(Dee, "mark", t); if (r.status !== 200) throw new Error("setup: " + r.text); }
+  const full = await say(Dee, AMEND, "401");
+  const fs = slipOf(full);
+  check("at 3 of 3 she still drafts: a slip exists, its Lock it in is disabled with the day's reason beside it, and the day says 3 of 3", fs && fs.status === "draft" && fs.can.lock.allowed === false && fs.can.lock.reason === "You've proposed 3 today, the most a day (103.2)." && full.data.state.today.made === 3, J(fs));
+  const lock4 = await Dee.post(`${P}/${fs.id}/confirm`, {});
+  check("the confirm route refuses it with the same reason; no fourth proposal", lock4.status === 409 && lock4.data.error === fs.can.lock.reason && props("Dee", "status = 'confirmed'").length === 3);
+  check("the old drafting route still refuses at the limit (it is unchanged)", (await Dee.post(P, { kind: "mark", target: "301" })).status === 409);
+  const unlockOne = await Dee.post(`${P}/${props("Dee", "status = 'confirmed'")[0].id}/withdraw`, {});
+  check("Unlock on one frees the slot: the draft's Lock it in is allowed again", unlockOne.status === 200 && (await Dee.get(CH)).data.slips[fs.id].can.lock.allowed === true);
+
+  console.log("after End turn (rule 202.4) and during the lock (rule 107.1)");
+  const cy1 = await say(Cy, AMEND, "401"), cyAmend = slipOf(cy1);
+  const cyLocked = await Cy.post(`${P}/${cyAmend.id}/confirm`, {});
+  const cy2 = await say(Cy, ADD), cyAdd = slipOf(cy2);
+  const et = await Cy.post("/wk/api/end-turn", {});
+  const afterEnd = await Cy.get(CH);
+  const eAmend = afterEnd.data.slips[cyAmend.id], eAdd = afterEnd.data.slips[cyAdd.id];
+  const unAfter = await Cy.post(`${P}/${cyAmend.id}/withdraw`, {}), lockAfter = await Cy.post(`${P}/${cyAdd.id}/confirm`, {});
+  check("after End turn the window still opens, and both buttons are disabled with the reason the routes give: Unlock on the locked slip, Lock it in on the draft",
+    cyLocked.status === 200 && et.status === 200 && afterEnd.status === 200 && afterEnd.data.state.closed === null &&
+    eAmend.can.unlock.allowed === false && unAfter.status >= 400 && eAmend.can.unlock.reason === unAfter.data.error && eAdd.can.lock.allowed === false && lockAfter.status >= 400 && eAdd.can.lock.reason === lockAfter.data.error &&
+    props("Cy", "status = 'confirmed'").length === 1 && props("Cy", "status = 'draft'").length === 1, J([eAmend.can, eAdd.can, unAfter.data, lockAfter.data]));
+  const ended = await say(Cy, "SYNTH-ADD one more");
+  check("after End turn she still answers (200), and the platform drafts nothing even though her answer asks for a draft: a refused line with the reason, no new proposal, and the model was told nothing would be drafted",
+    ended.status === 200 && ended.data.messages[1].refused && /Nothing was drafted/.test(ended.data.messages[1].refused.error) && props("Cy").length === 2 && /Nothing you draft will be made right now/.test(calls.filter((c) => c.kind === "starling").at(-1).lastText));
+  d1(state, `UPDATE days SET ends_at = '2026-11-10T19:30:00.000Z' WHERE game_id = '${gid}' AND n = 1`);
+  dev("clock", "2026-11-10T19:31:00.000Z");
+  const sBefore = sonnetCalls(), nAna = rows("Ana").length;
+  const lkd = await say(Ana, "are you there?");
+  check("a send during the lock is a 423 with the moderator's line; nothing stored, no model call", lkd.status === 423 && /Chalant is processing day 1/.test(lkd.data.error) && lkd.data.processing_day === 1 && sonnetCalls() === sBefore && rows("Ana").length === nAna);
+  const lockState = await Ana.get(CH);
+  check("the window says why: closed by the lock, the history still readable", lockState.data.state.closed.kind === "lock" && lockState.data.messages.length > 0);
+  d1(state, `UPDATE days SET ends_at = '2099-01-01T00:00:00.000Z' WHERE game_id = '${gid}' AND n = 1`);
+  dev("clock", "2026-11-10T19:00:00.000Z");
+
+  console.log("her cap: SQL, beside Gremlin's, one improvised excuse a day (rule 106.7)");
+  setCap(3);
+  const hk0 = excuseCalls();
+  await say(Bo, "first"); await say(Bo, "second"); await say(Bo, "third");
+  const cap1 = await say(Bo, "fourth");
+  check("the 4th message at a cap of 3: not stored, her one improvised excuse (Haiku, made from the day's chat) is the answer, stored once as 'excuse', and the window closes with the count",
+    cap1.data.out === "cap" && cap1.data.messages[0].role === "excuse" && /midnight/.test(cap1.data.messages[0].body) && excuseCalls() === hk0 + 1 && rows("Bo", "excuse").length === 1 && rows("Bo", "player").length === 3 && (await Bo.get(CH)).data.state.closed.text === "3 of 3 messages today");
+  const cap2 = await say(Bo, "fifth");
+  check("a later send at the cap gets a canned excuse of hers, stores no second row, makes no second improvised call", CANNED_EXCUSES.includes(cap2.data.messages[0].body) && rows("Bo", "excuse").length === 1 && excuseCalls() === hk0 + 1);
+  check("her cap is her own: Bo's Gremlin window is untouched (0 used of 30)", (await Bo.get("/wk/api/chat/gremlin")).data.state.used === 0 && (await Bo.get("/wk/api/chat/gremlin")).data.state.cap === 30);
+  setCap(3);
+  await say(Cy, "one"); await say(Cy, "two");
+  const used = (n) => rows(n, "player").length;
+  const base = used("Cy");
+  setCap(base + 1);
+  const race = await Promise.all([say(Cy, "race a"), say(Cy, "race b")]);
+  check("two sends racing for the last message of the day: exactly one is stored and answered, the other is at the cap", used("Cy") === base + 1 && race.filter((r) => r.data.out === "ok").length === 1 && race.filter((r) => r.data.out === "cap").length === 1, J(race.map((r) => r.data.out)));
+  check("a cap of 0 closes her for everyone: the first send gets the excuse", (setCap(0), (await say(Dee, "anyone?")).data.out === "cap"));
+  setCap(60);
+  dev("clock", "2026-11-11T07:59:00.000Z");
+  const late = await Bo.get(CH);
+  dev("clock", "2026-11-11T08:01:00.000Z");
+  const fresh = await Bo.get(CH);
+  check("the cap resets at the game's midnight, not UTC's: at 23:59 Pacific Bo's count is today's, at 00:01 the new local day starts at 0", late.data.state.date === "2026-11-10" && fresh.data.state.date === "2026-11-11" && fresh.data.state.used === 0 && fresh.data.state.today.made === 0);
+  dev("clock", "2026-11-10T19:00:00.000Z");
+
+  console.log("escalation: a row for Chalant, a category and nothing else (rule 106.4)");
+  const esc = await say(Ana, "SYNTH-ESCALATE does ending my turn block a withdrawal");
+  const er = d1(state, `SELECT * FROM escalations WHERE game_id = '${gid}' AND player_id = '${id.Ana}'`);
+  check("her escalation is one escalations row: agent starling, the category, her one-line reason, the chat line it came from; her stored line is marked escalated",
+    er.length === 1 && er[0].agent === "starling" && er[0].category === "ruling" && er[0].reason === "Whether ending a turn blocks a withdrawal at 5pm." && er[0].chat_message_id === esc.data.messages[1].id && esc.data.messages[1].escalated === "ruling" && er[0].answered_at === null && er[0].delivered_at === null);
+  const again = await say(Ana, "SYNTH-ESCALATE-LOOP and another thing");
+  check("a second escalation while one is open is dropped (one open a chat), and her line is not marked", d1(state, `SELECT COUNT(*) AS n FROM escalations WHERE player_id = '${id.Ana}'`)[0].n === 1 && !again.data.messages[1].escalated);
+  check("the model-call log never carries the escalation's text", !J(acalls()).includes("withdrawal at 5pm"));
+
+  console.log("failures: the message is kept, the line is canned, nothing is made (section 4.4)");
+  const pBefore = d1(state, "SELECT COUNT(*) AS n FROM proposals")[0].n;
+  stubState.mode = "500";
+  const f500 = await say(Ana, "a question while the model is down");
+  stubState.mode = "refusal";
+  const fref = await say(Ana, "a question the model refuses");
+  stubState.mode = "garbled";
+  const fgar = await say(Ana, "a question the model garbles");
+  stubState.mode = "ok";
+  check("a 500, a refusal and a garbled answer each give her canned line for it; the player's message is stored; no proposal is made; each call is logged with its outcome",
+    f500.data.out === "failed" && f500.data.messages[1].body === CANNED_LINES.failed && fref.data.out === "refused" && fref.data.messages[1].body === CANNED_LINES.refused && fgar.data.out === "malformed" && fgar.data.messages[1].body === CANNED_LINES.malformed &&
+    d1(state, "SELECT COUNT(*) AS n FROM proposals")[0].n === pBefore && acalls("outcome = 'failed'").length >= 1 && acalls("outcome = 'refused'").length === 1 && acalls("outcome = 'malformed'").length === 1);
+
+  console.log("the monthly budget stops the model (docs/step2-plan.md 2.4)");
+  const nA = rows("Ana").length, sMod = sonnetCalls();
+  d1(state, `INSERT INTO agent_calls (game_id, player_id, agent, purpose, model, outcome, cost_micro, local_date, at) VALUES ('${gid}', NULL, 'gremlin', 'chat', 'claude-sonnet-5-5', 'ok', 60000000, '2026-11-02', '2026-11-02T20:00:00.000Z')`);
+  const ov = await say(Ana, "a question over budget");
+  check("over $60 this month (Gremlin's spend counts: it is the game's): a canned line, nothing stored, not counted, no model call, logged over_budget once", ov.data.out === "over_budget" && ov.data.messages[0].body === CANNED_LINES.over_budget && rows("Ana").length === nA && sonnetCalls() === sMod && acalls("outcome = 'over_budget'").length === 1);
+  await say(Ana, "again"); await say(Ana, "and again");
+  check("repeated sends while over budget log one row for the player that day", acalls("outcome = 'over_budget'").length === 1);
+  d1(state, `DELETE FROM agent_calls WHERE cost_micro = 60000000`);
+
+  console.log("no key: she is out (section 4.4)");
+  await srv.stop();
+  srv = await startSrv({ noKey: true });
+  const nAna2 = rows("Ana").length;
+  const nk = await say(Ana, "anybody home?");
+  const st = await Ana.get(CH);
+  check("no key: a canned line, nothing stored, not counted; the window says she is not ready; the history still reads", nk.status === 200 && nk.data.out === "unavailable" && nk.data.messages[0].body === CANNED_LINES.unavailable && rows("Ana").length === nAna2 && st.data.state.ready === false && st.data.messages.length > 0);
+  const stillLocks = await Ana.get(CH);
+  check("without a key the proposal routes (Lock it in, Unlock) still work: they are not hers", stillLocks.status === 200 && (await Ana.post(`${P}/${props("Ana", "status = 'draft'")[0].id}/confirm`, {})).status === 200);
+} catch (e) {
+  fail++; console.log("  FAIL  harness error:", e?.message || e);
+} finally {
+  if (srv) await srv.stop();
+  if (rules) await rules.stop();
+  await new Promise((r) => stubModel.close(r));
+}
+console.log(`\n${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);

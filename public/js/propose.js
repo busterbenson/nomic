@@ -72,7 +72,7 @@ const settingsHTML = (p) => {
 /** @rule 105.1 */
 const needText = (p) => (p.needs ? `${p.needs.mark} · needs ${p.needs.needed} of ${p.needs.of}` : p.mark || "");
 
-export function createProposer({ api, me, day, refresh, pill, vote }) {
+export function createProposer({ api, me, day, refresh, pill, vote, starling }) {
   const S = { list: [], today: null, ui: null, RB: null, redraw: () => {}, openAdd: () => {}, openPick: () => {}, closeAdd: () => {} };
 
   /** @rule 103.2 */
@@ -204,7 +204,8 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
     if (!active()) return "";
     const c = can(), u = S.ui, here = u && u.rule === rule.num && c.allowed;
     const open = here && (u.step === "scope" || u.step === "menu");
-    return `<div class="proposeact"><button class="btn ghost small" type="button" data-p="open" data-n="${esc(rule.num)}" aria-expanded="${!!open}"${c.allowed ? "" : ` disabled title="${esc(c.reason || "")}"`}>Propose a change</button>${here ? (open ? menuHTML(rule) : flowHTML()) : ""}</div>`;
+    const st = starling && starling();
+    return `<div class="proposeact"><button class="btn ghost small" type="button" data-p="open" data-n="${esc(rule.num)}" aria-expanded="${!!open}"${c.allowed ? "" : ` disabled title="${esc(c.reason || "")}"`}>Propose a change</button>${st && st.ready() ? `<button class="btn ghost small" type="button" data-p="starling" data-n="${esc(rule.num)}">Draft with Starling</button>` : ""}${here ? (open ? menuHTML(rule) : flowHTML()) : ""}</div>`;
   }
 
   // A block's own row: a change to the block itself (its mark, rule 105.3), on the ballot or yours and waiting for tomorrow.
@@ -301,6 +302,7 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
     const a = el.dataset.p;
     if (S.ui && S.ui.wId && a !== "withdraw") S.ui = null;   // a withdraw error is said once
     const u = S.ui;
+    if (a === "starling") { const st = starling && starling(); if (st) await st.attachRule(el.dataset.n, { open: true }); return; }   // her window opens with this rule riding on the next message (rule 103.1)
     if (a === "open") {
       const n = el.dataset.n, rule = S.RB.byNum[n];
       if (u && u.rule === n && (u.step === "scope" || u.step === "menu")) S.ui = null;

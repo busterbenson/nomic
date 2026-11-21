@@ -7,15 +7,15 @@ Every function that carries out the game should say which rule it implements, wi
 `src/` is only reported for now: these functions have no claim yet. Site plumbing such as sign-in and email goes
 under rule 101 or 102; a follow-up change claims them and moves `src/` into the strict set.
 
-139 of 344 functions outside `src/engine/` are unclaimed.
+141 of 371 functions outside `src/engine/` are unclaimed.
 
 ## src/index.ts (5)
 
-- line 60: `secure`
-- line 70: `notFound`
-- line 76: `run`
-- line 81: `route`
-- line 181: `fetch`
+- line 61: `secure`
+- line 71: `notFound`
+- line 77: `run`
+- line 82: `route`
+- line 182: `fetch`
 
 ## src/lib/auth.ts (6)
 
@@ -108,18 +108,18 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/lib/settings.js (12)
 
-- line 49: `validTimeZone`
-- line 56: `isInt`
-- line 57: `isObj`
-- line 58: `evenInt`
-- line 62: `max_players`
-- line 66: `mcp_enabled`
-- line 74: `exactly`
-- line 83: `spawnSpots`
-- line 84: `inside`
-- line 92: `validateSettings`
-- line 112: `getSettings`
-- line 126: `settingsForSize`
+- line 51: `validTimeZone`
+- line 58: `isInt`
+- line 59: `isObj`
+- line 60: `evenInt`
+- line 64: `max_players`
+- line 68: `mcp_enabled`
+- line 77: `exactly`
+- line 86: `spawnSpots`
+- line 87: `inside`
+- line 95: `validateSettings`
+- line 115: `getSettings`
+- line 129: `settingsForSize`
 
 ## src/lib/tickets.js (1)
 
@@ -161,7 +161,7 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/routes/api-chat.ts (1)
 
-- line 170: `stateNow`
+- line 176: `stateNow`
 
 ## src/routes/api-day.ts (1)
 
@@ -199,6 +199,11 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 - line 11: `text`
 - line 14: `get`
+
+## src/routes/api-starling.ts (2)
+
+- line 33: `no`
+- line 163: `stateNow`
 
 ## src/routes/api-tickets.ts (3)
 
