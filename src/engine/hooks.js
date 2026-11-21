@@ -36,9 +36,10 @@ export const HOOKS = Object.freeze({
   applyOrder: { mode: "decide", wired: true },
   onEnacted: { mode: "sequence", wired: true },
   dayEnd: { mode: "sequence", wired: true },
-  // The Champion's change (rule 402.4). A veto hook with one difference: a game whose rules have NO module for it has no such
-  // change at all (the site refuses the draft), so repealing the rule that carries it removes the capability, wherever that
-  // rule is numbered. A module answers null (allowed) or refuses with a reason.
+  // What the Champion may do (rule 402.3 naming the Era, 402.4 the one change): `championChange(ctx, champion, power)` with power
+  // "change" or "name". A veto hook with one difference: a game whose rules have NO module for it gives the Champion neither
+  // power (the site refuses both), so repealing the rule that carries them removes them, wherever that rule is numbered. A module
+  // answers null (allowed) or refuses with a reason.
   championChange: { mode: "veto", wired: true },
 });
 
@@ -280,14 +281,15 @@ export function assembleRules(modules, { label = "rules" } = {}) {
       }
       return null;
     },
-    // null, or {error, status, rule}: whether the Champion may draft their change (rule 402.4). With no module for the hook the
-    // game has no Champion's change, and the answer is a refusal; otherwise the first refusal in rule order wins, as above.
-    /** @rule 402.4 */
-    championChange(ctx, champion) {
+    // null, or {error, status, rule}: whether the Champion may draft their change ("change", rule 402.4) or name the Era ("name", rule
+    // 402.3). With no module for the hook the game gives the Champion neither, and the answer is a refusal; otherwise the first
+    // refusal in rule order wins, as above.
+    /** @rule 402.3, 402.4 */
+    championChange(ctx, champion, power = "change") {
       const mods = implementers("championChange");
-      if (!mods.length) return { error: "The game's rules have no Champion's change.", status: 409, rule: 0 };
+      if (!mods.length) return { error: power === "name" ? "The game's rules have no naming of Eras." : "The game's rules have no Champion's change.", status: 409, rule: 0 };
       for (const m of mods) {
-        const r = call(m, "championChange", [ctx, champion]);
+        const r = call(m, "championChange", [ctx, champion, power]);
         if (r === null || r === undefined) continue;
         if (typeof r?.error !== "string" || !r.error || (r.status !== undefined && !REFUSAL_STATUSES.includes(r.status))) {
           throw new RuleError(m.rule, "championChange", new Error("must return null or {error, status?}"));

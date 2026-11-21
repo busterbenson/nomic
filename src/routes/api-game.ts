@@ -28,7 +28,7 @@ export const get = async ({ env, data, request }: Ctx) => {
       winning_score: g.winning_score,
       max_players: seatLimit(g),
     },
-    era: await eraView(env, g.id, viewer?.id),
+    era: await eraView(env, g, viewer?.id),
     players,
     events,
   });

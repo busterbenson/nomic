@@ -1,6 +1,7 @@
 // Eras (rule 402): the Era the game is in, who is Champion, and whether the Champion's change is still theirs to make.
 // The Era's end itself is in src/engine/host.ts (the night); the count of the Champion's change is tally() in
 // src/lib/votes.js; this file reads the state and runs the one write a Champion has besides a proposal: naming the Era.
+import { checkChampionChange, lightContext } from "../engine/host";
 import { getPlayer } from "./auth";
 import { clockNow, dayOpenBinds, dayOpenSql, loadToday } from "./day";
 import { refusalBody, turnBlock } from "./turn";
@@ -33,7 +34,8 @@ export async function changeUsed(env: Env, gameId: string, playerId: string): Pr
 
 // What the board and the clients show: the Era, the Champion, and what you can do as Champion. PUBLIC apart from `you`.
 /** @rule 402.1, 402.3, 402.4 */
-export async function eraView(env: Env, gameId: string, viewerId?: string | null) {
+export async function eraView(env: Env, game: any, viewerId?: string | null) {
+  const gameId = game.id;
   const era = await openEra(env, gameId);
   if (!era) return null;
   const cid = await championId(env, gameId);
@@ -44,7 +46,7 @@ export async function eraView(env: Env, gameId: string, viewerId?: string | null
     name: era.name,
     started_day: era.started_day,
     champion: champ ? { name: champ.name, color: colorOf(champ.color) } : null,
-    you: isChampion ? { champion: true, can_name: era.name === null, change_used: await changeUsed(env, gameId, viewerId!) } : { champion: false },
+    you: isChampion ? { champion: true, can_name: era.name === null && !checkChampionChange(game, lightContext(game), { ref: viewerId! }, "name"), change_used: await changeUsed(env, gameId, viewerId!) } : { champion: false },
   };
 }
 
@@ -64,6 +66,8 @@ export const post = async (ctx: Ctx) => {
   const blocked = turnBlock(game, day, turn, player, "end_turn", nowMs); // the day's gates only: naming is not a proposal
   if (blocked) return json(refusalBody(blocked), blocked.status);
   if ((await championId(env, game.id)) !== player.id) return json({ error: "Only the Champion names the Era (rule 402.3)." }, 403);
+  const no = checkChampionChange(game, lightContext(game), { ref: player.id }, "name"); // the rules may have no naming (402.3) any more
+  if (no) return json({ error: no.error }, no.status);
   const era = await openEra(env, game.id);
   if (!era) return json({ error: "There is no Era yet." }, 409);
   if (era.name !== null) return json({ error: `This Era is already named ${era.name}.` }, 409);

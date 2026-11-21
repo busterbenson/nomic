@@ -49,9 +49,9 @@ export type Hooks = {
   applyOrder?(ctx: Ctx, passed: unknown[]): unknown[];
   onEnacted?(ctx: Ctx, proposal: unknown): Effect[];
   dayEnd?(ctx: Ctx, results: unknown): Effect[];
-  /** Whether the Champion (rule 402.4) may draft their change: null, or a refusal. A game with no module for this hook has no
-   *  Champion's change. */
-  championChange?(ctx: Ctx, champion: Actor): Refusal | null;
+  /** Whether the Champion may use a power (rule 402): "change" drafts their one change (402.4), "name" names the Era (402.3).
+   *  null, or a refusal. A game with no module for this hook gives the Champion neither. */
+  championChange?(ctx: Ctx, champion: Actor, power: "change" | "name"): Refusal | null;
 };
 export type RuleModule = { rule: number } & Hooks;
 

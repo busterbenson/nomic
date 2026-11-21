@@ -77,12 +77,13 @@ export function checkAction(game: any, ctx: any, actor: { ref: string }, action:
   }
 }
 
-// Runs the game's championChange hook: may the Champion draft their change (rule 402.4)? null, or the refusal the route sends. A
-// game whose rules have no module for it answers a refusal, so the capability goes with the rule that carries it.
-/** @rule 402.4 */
-export function checkChampionChange(game: any, ctx: any, champion: { ref: string }): Refusal | null {
+// Runs the game's championChange hook: may the Champion draft their change ("change", rule 402.4) or name the Era ("name", rule
+// 402.3)? null, or the refusal the route sends. A game whose rules have no module for it answers a refusal, so both powers go
+// with the rule that carries them.
+/** @rule 402.3, 402.4 */
+export function checkChampionChange(game: any, ctx: any, champion: { ref: string }, power: "change" | "name" = "change"): Refusal | null {
   try {
-    const r = rulesFor(game).championChange(ctx, champion);
+    const r = rulesFor(game).championChange(ctx, champion, power);
     return r && { error: r.error, status: r.status, rule: r.rule };
   } catch (e) {
     if (!(e instanceof RuleError)) throw e;
