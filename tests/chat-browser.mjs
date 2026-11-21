@@ -24,7 +24,7 @@ try {
   srv = await startServer(state, await freePort(), ["DEV_MODE=1", `RULES_BASE_URL=${stub.base}`, "MODEL_API_KEY=stub-key-not-real", `MODEL_BASE_URL=http://127.0.0.1:${MODEL_PORT}`]);
   const ada = await join(srv.base, "shop", g.code, { email: "ada@example.com", name: "Ada", color: "teal" });
   const bo = await join(srv.base, "shop", g.code, { email: "bo@example.com", name: "Bo", color: "vermilion" });
-  await join(srv.base, "shop", g.code, { email: "cy@example.com", name: "Cy", color: "cobalt" });
+  const cy = await join(srv.base, "shop", g.code, { email: "cy@example.com", name: "Cy", color: "cobalt" });
   startPlaying(state, "shop");
   const gid = d1(state, "SELECT id FROM games WHERE slug = 'shop'")[0].id;
   const pid = (n) => d1(state, `SELECT id FROM players WHERE game_id = '${gid}' AND display_name = '${n}'`)[0].id;
@@ -41,13 +41,15 @@ try {
   const at = new Date().toISOString();
   const fill = Array.from({ length: 29 }, (_, i) => `INSERT INTO chat_messages (game_id, player_id, agent, local_date, day, role, body, at) VALUES ('${gid}', '${pid("Bo")}', 'gremlin', '${today}', 1, 'player', '${said[i % 12]}', '${at}'), ('${gid}', '${pid("Bo")}', 'gremlin', '${today}', 1, 'agent', '${heard[i % 12]}', '${at}')`).join("; ");
   d1(state, fill);
+  // Cy: 30 messages today and no excuse yet, so the composer is still open: the next send is what tells him
+  d1(state, Array.from({ length: 30 }, (_, i) => `INSERT INTO chat_messages (game_id, player_id, agent, local_date, day, role, body, at) VALUES ('${gid}', '${pid("Cy")}', 'gremlin', '${today}', 1, 'player', '${said[i % 12]}', '${at}')`).join("; "));
   d1(state, `UPDATE games SET settings = json_set(settings, '$."gremlin.messages_per_day"', 30) WHERE id = '${gid}'`);
   const again = (f) => f().catch(() => f());   // a kept-alive socket the dev server closed during the long d1 call above: EPIPE on reuse, once
   ok(await again(() => bo.post(CH, { body: REC["rule-question"].message })), "bo 30th");
   const r31 = ok(await bo.post(CH, { body: "one more" }), "bo 31st");
   if (r31.data.out !== "cap") throw new Error("Bo is not at the cap: " + r31.text);
   const cookie = (c) => [...c.jar].find(([k]) => k === "s|/shop")[1];
-  const r = await promisify(execFile)("/usr/local/bin/python3", [ROOT + "/tests/browser-chat.py", srv.base, shots || "-", cookie(ada), cookie(bo)], { timeout: 280000, maxBuffer: 1 << 24 });
+  const r = await promisify(execFile)("/usr/local/bin/python3", [ROOT + "/tests/browser-chat.py", srv.base, shots || "-", cookie(ada), cookie(bo), cookie(cy)], { timeout: 280000, maxBuffer: 1 << 24 });
   process.stdout.write(r.stdout);
 } catch (e) {
   failed = true;

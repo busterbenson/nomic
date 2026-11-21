@@ -9,7 +9,7 @@ import { pathToFileURL } from "node:url";
 import { ROOT } from "./lib.mjs";
 import * as G from "../src/lib/gremlin.js";
 import * as C from "../src/lib/chat.js";
-import { DEFAULT_SETTINGS, validateSettings } from "../src/lib/settings.js";
+import { DEFAULT_SETTINGS, getSettings, validateSettings } from "../src/lib/settings.js";
 import { readFields } from "../src/lib/tickets.js";
 
 let pass = 0, fail = 0;
@@ -53,7 +53,7 @@ console.log("the prompt: static first, per-day second with the breakpoint, histo
   const tkText = tk.messages[tk.messages.length - 1].content[0].text;
   check("the ticket's own fields (typed by the player) reach the model inside a fence too, with a closing tag in them made harmless", /<player_text author="ticket W2">/.test(tkText) && (tkText.match(/<\/player_text>/g) || []).length === 2 && tkText.includes("<\\/player_text"));
   check("a turn the platform won't save says so in the tail (End turn, an approved ticket)", J(G.gremlinRequest({ ...base, noWrite: "your turn has ended for today" }).messages).includes("Nothing you write will be saved (your turn has ended for today)"));
-  check("what was rejected last turn is in the tail for him to fix", J(G.gremlinRequest({ ...base, rejected: ["makes[0]: size must be W×H"] }).messages).includes("size must be W×H"));
+  check("what was rejected last turn is in the tail for him to fix, and what was saved with a change is said differently", J(G.gremlinRequest({ ...base, rejected: ["makes[0]: size must be W×H"] }).messages).includes("not saved: makes[0]: size must be W×H") && J(G.gremlinRequest({ ...base, notes: ["price: kept, but at the ceiling of 25 points."] }).messages).includes("saved with a change: price: kept"));
 }
 
 console.log("his mood and his excuses");
@@ -102,7 +102,7 @@ console.log("his answer: what the platform keeps");
   check("a rule item needs a number that looks like one, or a draft sentence", /not a rule number/.test(read({ say: "ok", ticket: { makes: [{ kind: "rule", num: "banana" }] } }).rejected.join(" ")) && /needs a rule number, or a "draft"/.test(read({ say: "ok", ticket: { makes: [{ kind: "rule" }] } }).rejected.join(" ")));
 
   const hi = read({ say: "ok", ticket: { price: { points: 500, reason: "Because I can." } } });
-  check("a price over the ceiling is clamped to it, and he is told", hi.patch.price === 25 && hi.clamped && /kept to the ceiling of 25/.test(hi.rejected.join(" ")));
+  check("a price over the ceiling is clamped to it, and he is told (as a note: it was saved)", hi.patch.price === 25 && hi.clamped && /at the ceiling of 25/.test(hi.notes.join(" ")) && !hi.rejected.length);
   check("a price needs a one-line reason (none and a long one are rejected with the reason); a negative or fractional price is coerced",
     /say why/.test(read({ say: "ok", ticket: { price: { points: 3, reason: "" } } }).rejected.join(" ")) && /one line/.test(read({ say: "ok", ticket: { price: { points: 3, reason: "x".repeat(141) } } }).rejected.join(" ")) &&
     read({ say: "ok", ticket: { price: { points: -4, reason: "r" } } }).patch.price === 0 && read({ say: "ok", ticket: { price: { points: "7", reason: "r" } } }).patch.price === 7 && read({ say: "ok", ticket: { price: { points: 2.6, reason: "r" } } }).patch.price === 3 && /whole number/.test(read({ say: "ok", ticket: { price: { points: "lots", reason: "r" } } }).rejected.join(" ")));
@@ -115,6 +115,12 @@ console.log("his answer: what the platform keeps");
   check("the fields he writes go through the player's own reader: a title over 80 characters, a brief over 2000, an estimate of 0 or 100, 21 tasks are rejected with its reasons",
     /title is at most 80/.test(read({ say: "ok", ticket: { title: "x".repeat(81) } }).rejected.join(" ")) && /brief is at most 2000/.test(read({ say: "ok", ticket: { brief: "x".repeat(2001) } }).rejected.join(" ")) &&
     /whole number of nights/.test(read({ say: "ok", ticket: { estimate: 0 } }).rejected.join(" ")) && /whole number of nights/.test(read({ say: "ok", ticket: { estimate: 100 } }).rejected.join(" ")) && /at most 20 tasks/.test(read({ say: "ok", ticket: { tasks: Array.from({ length: 21 }, () => "t") } }).rejected.join(" ")) && read({ say: "ok", ticket: { estimate: 3 } }).patch.estimate === 3);
+  check("an EMPTY value leaves the field alone too: a brief of '', no tasks, no makes, an empty title must not wipe what the player wrote (structured output may send every property)",
+    J(read({ say: "ok", ticket: { title: "", brief: "", running_cost: "", tasks: [], makes: [], estimate: "" } }).patch) === "{}" && read({ say: "ok", ticket: { brief: "now this" } }).patch.brief === "now this");
+  check("a clamped price is a note (saved, with a change), not a 'not saved' reason; a price-only turn on a ticket that already has a rule item is not 'price without a build'",
+    (() => { const c = read({ say: "ok", ticket: { price: { points: 90, reason: "r" } } }); return c.patch.price === 25 && !c.rejected.length && /at the ceiling of 25/.test(c.notes.join()); })() &&
+    !G.readGremlinAnswer(ans({ say: "ok", ticket: { price: { points: 4, reason: "r" } } }), { ...ctx, makes: [{ kind: "rule", num: null, draft: "x" }] }).unbuiltPrice &&
+    G.readGremlinAnswer(ans({ say: "ok", ticket: { price: { points: 4, reason: "r" } } }), { ...ctx, makes: [] }).unbuiltPrice);
   check("a field left out (or null) leaves the ticket alone", J(read({ say: "ok", ticket: { title: null, brief: null } }).patch) === "{}" && J(read({ say: "just talking" }).patch) === "{}");
   const refuse = read({ say: "No.", refusal: "That would share players' private information (802.2).", ticket: { title: "Mail", makes: [{ kind: "entry", name: "Box", catalogKind: "item" }] } });
   check("a refusal writes nothing even if the answer carries fields", refuse.refusal && J(refuse.patch) === "{}");
@@ -142,6 +148,7 @@ console.log("the cap's SQL, the settings' bounds, the budget");
   check("a call's cost from usage (Sonnet 5.5: $2 in, $10 out, cache write $2.50, cache read $0.10 per million): 150 in + 400 out + 7305 read = 5,031 micro-dollars; Haiku is a twentieth", C.costMicro("claude-sonnet-5-5", u) === 5031 && C.costMicro("claude-haiku-5-5", u) === Math.round(150 * 0.1 + 400 * 0.5 + 7305 * 0.01) && C.costMicro("claude-sonnet-5-5", { cache_creation_input_tokens: 1000 }) === 2500);
   check("the monthly budget is $60 unless the environment lowers it (a bad value falls back)", C.budgetMicro(undefined) === 60e6 && C.budgetMicro("0.05") === 50_000 && C.budgetMicro("nope") === 60e6 && C.budgetMicro("-1") === 60e6 && C.budgetMicro("0") === 0);
   check("the month starts at the first midnight of the calendar month in the game's zone (Los Angeles in November: 08:00 UTC on the 1st)", C.monthStartIso("America/Los_Angeles", Date.parse("2026-11-20T10:00:00Z")) === "2026-11-01T07:00:00.000Z" || C.monthStartIso("America/Los_Angeles", Date.parse("2026-11-20T10:00:00Z")) === "2026-11-01T08:00:00.000Z", C.monthStartIso("America/Los_Angeles", Date.parse("2026-11-20T10:00:00Z")));
+  check("a game whose stored settings lack Gremlin's two (Rickshaw's today) runs on the defaults, 30 a day and a ceiling of 25", (() => { const g = getSettings(J({ max_players: 8, "proposals.per_day": 3 })); return g["gremlin.messages_per_day"] === 30 && g["workshop.price_ceiling"] === 25; })() && getSettings(J({ "gremlin.messages_per_day": 99 }))["gremlin.messages_per_day"] === 30);
   check("the history's row view is a whitelist: no player id, the ticket as W3, the patch and reasons from meta", (() => { const v = C.rowView({ id: 5, role: "agent", body: "hi", local_date: "2026-11-20", day: 2, at: "t", ticket_number: 3, player_id: "SECRET", meta: J({ patch: ["title"], rejected: ["r"], price: 4 }) }); return v.ticket === "W3" && J(v.patch) === '["title"]' && v.price === 4 && !("player_id" in v) && !J(v).includes("SECRET"); })());
 }
 

@@ -46,8 +46,12 @@ async function stateOf(ctx: Ctx, game: any, day: any, player: Player, nowMs: num
   const used = await usedToday(env.DB, game.id, player.id, AGENT, date);
   let closed: { kind: string; text: string } | null = null;
   if (lockedNow(game, day, nowMs)) closed = { kind: "lock", text: lockMessage(day.n) };
-  // At the cap the composer is closed with the count beside it; his excuse is a line in the log (rule 106.7)
-  else if (used >= cap) closed = { kind: "cap", text: `${used} of ${cap} messages today` };
+  // At the cap the composer stays open until he has told the player (rule 106.7): the next send gets his excuse, and then it closes with the
+  // count beside it. A player who never sends a message at the cap still sees "0 left".
+  else if (used >= cap) {
+    const told: any = await env.DB.prepare("SELECT 1 AS x FROM chat_messages WHERE game_id = ? AND player_id = ? AND agent = ? AND local_date = ? AND role = 'excuse' LIMIT 1").bind(game.id, player.id, AGENT, date).first();
+    if (told) closed = { kind: "cap", text: `${used} of ${cap} messages today` };
+  }
   return { agent: AGENT, date, cap, used, left: Math.max(0, cap - used), closed, ready: agentsReady(env) };
 }
 
@@ -147,41 +151,44 @@ export async function turn(ctx: Ctx, player: Player, body: any, nowMs: number): 
   const posts = ticket ? ((await env.DB.prepare("SELECT x.body, x.author_kind, p.display_name FROM ticket_posts x LEFT JOIN players p ON p.game_id = x.game_id AND p.id = x.player_id WHERE x.ticket_id = ? ORDER BY x.id DESC LIMIT 20").bind(ticket.id).all()).results as any[]).reverse().map((r) => ({ by: r.author_kind === "player" ? r.display_name : r.author_kind, author: r.author_kind, body: r.body })) : [];
   const queue: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM tickets WHERE game_id = ? AND queue_pos IS NOT NULL AND state IN ('Approved', 'Building')").bind(game.id).first();
   const last: any = ticket ? await env.DB.prepare("SELECT meta FROM chat_messages WHERE game_id = ? AND player_id = ? AND agent = ? AND ticket_id = ? AND role = 'agent' AND id < ? ORDER BY id DESC LIMIT 1").bind(game.id, player.id, AGENT, ticket.id, myId).first() : null;
-  let rejected: string[] = [];
-  try { rejected = last ? JSON.parse(last.meta || "{}").rejected || [] : []; } catch { rejected = []; }
+  let rejected: string[] = [], notes: string[] = [];
+  try { const m = last ? JSON.parse(last.meta || "{}") : {}; rejected = m.rejected || []; notes = m.notes || []; } catch { rejected = []; notes = []; }
   // what he can write this turn: the same gate the player's own edit meets, so he tells them when nothing will land
   let noWrite: string | null = null;
   if (!ticket) noWrite = "no ticket is open";
   else if (ticket.state !== "Draft") noWrite = `W${ticket.number} is ${ticket.state === "Proposed" ? "on the ballot" : ticket.state.toLowerCase()}`;
   else { const b = turnBlock(game, day, playerTurn, player, "propose", nowMs); if (b) noWrite = b.error; }
+  let later = nowMs;   // the clock after the model call (set below): a reply that lands after midnight is stored on the new day
   const { system, messages } = gremlinRequest({
     ceiling, rulesMd, mood: moodOf(game.id, date), localDate: date, history: hist,
     ticket: ticket ? { number: ticket.number, title: ticket.title, brief: ticket.brief, makes: JSON.parse(ticket.makes || "[]"), estimate: ticket.estimate, running_cost: ticket.running_cost, tasks, price: ticket.price, price_reason: ticket.price_reason } : null,
-    posts, queueDepth: queue?.n ?? 0, rejected, label: player.display_name, message: text, noWrite,
+    posts, queueDepth: queue?.n ?? 0, rejected, notes, label: player.display_name, message: text, noWrite,
   });
 
   const r = await callModel(env, { model: MODEL, system, messages, maxTokens: OUTPUT_CAP_TOKENS, timeoutMs: CHAT_TIMEOUT_MS, schema: answerSchema(), effort: "low" });
+  later = await clockNow(env);   // the model can take 30 s: everything from here on (the write, its gate, the rows, the page, the state) uses the clock NOW
+  const stateNow = async () => { const f = await loadToday(env, ctx.data.game!, later, player.id); return stateOf(ctx, f.game, f.day, player, later); };
 
   // ---- what he said, validated ----
   /** @rule 106.3 */
   const reply = async (role: string, bodyText: string, meta: Record<string, unknown>, outcome: string, reason: string | null) => {
+    const dateL = localDate(tz, later), atL = nowIso(later);
     await logCall(env, game, tz, nowMs, { player_id: player.id, agent: AGENT, purpose: "chat", model: MODEL, outcome, usage: r.usage, ms: r.ms, reason });   // first: the budget counts the call whatever happens to the row
     const res = await env.DB.prepare("INSERT INTO chat_messages (game_id, player_id, agent, local_date, day, role, body, ticket_id, meta, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .bind(game.id, player.id, AGENT, date, game.day || null, role, bodyText, ticket?.id ?? null, JSON.stringify(meta), nowIso(nowMs)).run();
-    return viewOf(Number(res.meta.last_row_id), role, bodyText, date, game.day || null, nowIso(nowMs), ticket?.number ?? null, meta);
+      .bind(game.id, player.id, AGENT, dateL, game.day || null, role, bodyText, ticket?.id ?? null, JSON.stringify(meta), atL).run();
+    return viewOf(Number(res.meta.last_row_id), role, bodyText, dateL, game.day || null, atL, ticket?.number ?? null, meta);
   };
   /** @rule 106.3 */
   const canned = async (code: "unavailable" | "failed" | "malformed" | "refused", outcome: string, reason: string | null) => {
     const line = CANNED_LINES[code === "unavailable" ? "unavailable" : code];
-    return out({ ok: true, out: code, messages: [mine, await reply("agent", line, { canned: code }, outcome, reason)], state: await state() });
+    return out({ ok: true, out: code, messages: [mine, await reply("agent", line, { canned: code }, outcome, reason)], state: await stateNow() });
   };
   if (!r.ok) return canned(r.code, r.code, r.reason);
-  const a = readGremlinAnswer(r.text, { ceiling, systemText: systemStatic({ ceiling }) });
+  const a = readGremlinAnswer(r.text, { ceiling, systemText: systemStatic({ ceiling }), makes: ticket ? JSON.parse(ticket.makes || "[]") : [] });
   if (!a.ok) return canned(a.code === "invalid" ? "malformed" : a.code, a.code, a.reason);
 
   // The model can take 30 seconds: the write and its gate use the clock NOW, not the one this request began with, so an answer that lands
   // after midnight is a write during the lock (rule 107.1) and is refused by the guard in the SQL.
-  const later = await clockNow(env);
   const lines: any[] = [mine];
   const patch = a.refusal ? {} : a.patch;
   const wrote = Object.keys(patch);
@@ -192,6 +199,7 @@ export async function turn(ctx: Ctx, player: Player, body: any, nowMs: number): 
   const meta: Record<string, unknown> = {};
   if (saved && wrote.length) { meta.patch = patchSummary(patch); if ("price" in patch) meta.price = patch.price; }
   if (a.rejected.length) meta.rejected = a.rejected;
+  if (a.notes.length) meta.notes = a.notes;
   if (a.refusal) meta.refusal = a.refusal;
   lines.push(await reply("agent", a.say, meta, "ok", [a.clamped ? "price clamped" : "", a.unbuiltPrice ? "price without a build" : ""].filter(Boolean).join("; ") || null));
   if (wrote.length && !saved) {
@@ -203,7 +211,7 @@ export async function turn(ctx: Ctx, player: Player, body: any, nowMs: number): 
       .bind(game.id, player.id, AGENT, date, game.day || null, `Nothing was saved: ${why}`, ticket?.id ?? null, nowIso(nowMs)).run();
     lines.push(viewOf(Number(res.meta.last_row_id), "event", `Nothing was saved: ${why}`, date, game.day || null, nowIso(nowMs), ticket?.number ?? null));
   }
-  return out({ ok: true, out: "ok", messages: lines, ticket: ticket ? await pageOf(ctx, ticket.number, player, nowMs) : null, state: await state() });
+  return out({ ok: true, out: "ok", messages: lines, ticket: ticket ? await pageOf(ctx, ticket.number, player, later) : null, state: await stateNow() });
 }
 
 // POST /api/chat/gremlin

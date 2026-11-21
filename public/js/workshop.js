@@ -247,8 +247,9 @@ ${editing ? formHTML(t) : factsHTML(t)}${reopenHTML(t)}${editing ? "" : tasksHTM
     if (S.form && S.form.n === t.n) {
       // what the player has typed in the open form stays; every field they have not touched takes what Gremlin wrote
       const typed = new Set(S.touched), fresh = formFrom(t);
-      for (const k of Object.keys(fresh)) if (k !== "n" && k !== "was" && !typed.has(k)) S.form[k] = fresh[k];
-      if (!typed.has("entries") && !typed.has("rules")) S.form.was = fresh.was;
+      const lists = typed.has("entries") || typed.has("rules");   // the two lists change together or not at all (a half-refreshed pair would look edited)
+      for (const k of Object.keys(fresh)) if (k !== "n" && k !== "was" && !typed.has(k) && !(lists && (k === "entries" || k === "rules"))) S.form[k] = fresh[k];
+      if (!lists) S.form.was = fresh.was;
       S.touched = typed;
     }
     if (cards.isOpen && cards.isOpen()) cards.redraw();

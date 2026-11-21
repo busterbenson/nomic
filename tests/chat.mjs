@@ -94,7 +94,7 @@ try {
   const next = calls.slice(before).filter((c) => c.model === "claude-sonnet-5-5").at(-1);
   check("the next turn's tail carries the reason, in the volatile tail and not in the cached part", /"weapon" is not a kind/.test(next.lastText) && !J(next.body.system).includes("weapon"));
   await say(Ana, "SYNTH-PRICE", "W1");
-  check("a price of 500 is clamped to the ceiling of 25 and he is told", tk(1).price === 25 && /ceiling of 25/.test(rows("Ana").at(-1).meta) && acalls("reason LIKE '%price clamped%'").length === 1);
+  check("a price of 500 is clamped to the ceiling of 25 and he is told", tk(1).price === 25 && /ceiling of 25/.test(JSON.parse(rows("Ana").at(-1).meta).notes?.join() ?? "") && acalls("reason LIKE '%price clamped%'").length === 1);
 
   console.log("player text is data: nothing a player says writes outside his ticket's draft fields (rule 106.4)");
   const inj = await say(Ana, INJECT, "W1");
@@ -129,6 +129,7 @@ try {
   const s30 = await say(Bo, "the 30th");
   const s31 = await say(Bo, "the 31st");
   check("at 28 -> the 29th and the 30th are answered; the 31st is not stored: the cap is 30 (the default)", s29.data.out === "ok" && s30.data.out === "ok" && s31.data.out === "cap" && used("Bo") === 30 && s30.data.state.left === 0 && s31.data.state.closed?.kind === "cap", J(s31.data));
+  check("at the limit the composer stays OPEN until he has told the player: after the 30th answer left is 0 and closed is null; the 31st send gets the excuse, and only then does it close", s30.data.state.closed === null && s31.data.out === "cap" && s31.data.state.closed.text === "30 of 30 messages today");
   fill("Cy", 29);
   const sonnetBefore = sonnetCalls();
   const race = await Promise.all([say(Cy, "tab one"), say(Cy, "tab two")]);
@@ -211,6 +212,7 @@ try {
   dev("clock", "2026-11-10T19:29:50.000Z");
   stubState.before = () => dev("clock", "2026-11-10T19:30:40.000Z");   // the clock passes midnight while the model thinks
   const slow = await say(Ana, "SYNTH-SLOW a slow one", "W1");
+  check("the answer reports the clock after the call: the window's state is the lock's, and the ticket page offers no edit", slow.data.state?.closed?.kind === "lock" && slow.data.ticket?.can?.edit?.allowed === false && slow.data.messages.every((m) => m.date === "2026-11-10"), J(slow.data.state?.closed));
   check("a turn that began a few seconds before midnight and was answered after it saves nothing: the ticket is as it was, and an event says the players are sleeping",
     slow.status === 200 && J(tk(1)) === snapSlow && /Nothing was saved: The players are sleeping/.test(rows("Ana", "event").at(-1)?.body ?? ""), (rows("Ana", "event").at(-1)?.body ?? "") + " | " + J(tk(1).title));
   d1(state, `UPDATE days SET ends_at = '2099-01-01T00:00:00.000Z' WHERE game_id = '${gid}' AND n = 1`);
