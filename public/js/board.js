@@ -78,10 +78,6 @@ export function sceneSVG(board, { sel = null, me = null, id = "b", showFog = tru
   for (const p of pieces) {
     const c = P(p.at.x + .5, p.at.y + .5);
     s += `<g class="piece" data-piece="${esc(p.color.key)}" transform="translate(${f1(c[0])},${f1(c[1])})">${pieceSVG({ shape: p.shape, color: p.color, mirrored: !!p.mirrored })}</g>`;
-    if (me && p.color.key === me) {
-      const label = `${p.name} · you`, w = label.length * 6.6 + 16;
-      s += `<g class="nametag"><rect x="${f1(c[0] - w / 2)}" y="${f1(c[1] - 64)}" width="${f1(w)}" height="16" rx="8"/><text x="${f1(c[0])}" y="${f1(c[1] - 52.5)}" text-anchor="middle">${esc(label)}</text></g>`;
-    }
   }
   return { markup: s, box: bbox(new Set([...charted, ...ring(charted, 1)])), tiles };
 }
@@ -129,6 +125,10 @@ export async function createBoard(container, { onSelect } = {}) {
     svg.innerHTML = r.markup;
     box = r.box;
     labels = new Map(r.tiles.map((t) => [K(t.x, t.y), t.label]));
+    // names show only on hover (mouse) or press-and-hold (touch): the tile's tip leads with whoever stands on it
+    const named = new Map();
+    for (const p of board.pieces) if (p.at.z === 0 && p.name) { const k = K(p.at.x, p.at.y); named.set(k, [...(named.get(k) || []), me && p.color.key === me ? `${p.name} (you)` : p.name]); }
+    for (const [k, names] of named) labels.set(k, labels.get(k) ? `${names.join(", ")} · ${labels.get(k)}` : names.join(", "));
     if (!fitted) { fitted = true; if (container.clientWidth < 600 && me) centerOnMe(me); else fit(); }
     else if (!touched) fit();
     else apply();
@@ -138,10 +138,9 @@ export async function createBoard(container, { onSelect } = {}) {
     return n ? { x: Number(n.dataset.x), y: Number(n.dataset.y) } : null;
   };
   const showTip = (t, cx, cy) => {
-    const lab = t && labels.get(K(t.x, t.y)), box0 = container.getBoundingClientRect();
+    const lab = t && labels.get(K(t.x, t.y));
     if (!lab) return hideTip();
-    tip.textContent = lab; tip.hidden = false;
-    tip.style.left = (cx - box0.left) + "px"; tip.style.top = (cy - box0.top) + "px";
+    tip.textContent = lab; tip.hidden = false;   // a quiet readout in the board's corner, never over what you're pointing at
     const hov = svg.querySelector(".hover");
     if (hov) hov.setAttribute("points", pts(top(t.x, t.y)));
   };
