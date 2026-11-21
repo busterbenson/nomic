@@ -18,6 +18,7 @@ Notes marked "library note" are suggestions, not rules. Nothing here is a rule o
 | 10 | [Social dynamics: alliances, kingmaking, betrayal, griefing](10-social-dynamics.md) | 2026-11-20 |
 | 11 | [Code is law: automated enforcement, bots and AI moderation](11-code-is-law.md) | 2026-11-20 |
 | 12 | [History and lineage](12-history.md) | 2026-11-20 |
+| 13 | [Catalogs and attributes: how data-driven games define things](13-catalogs-and-attributes.md) | 2026-11-20 |
 
 First full pass done 2026-11-20. Known gaps: Suber's own pages, PerlNomic's rules, Kaufman's ruleset, and anything sourced on kingmaking or small vs. big games.
 
