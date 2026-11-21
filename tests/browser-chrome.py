@@ -175,7 +175,16 @@ with sync_playwright() as pw:
     pr = tile(page, 2, 0)
     check("the zoom buttons zoom the board", abs(pr["x"] - pz["x"]) > 5 or abs(pr["y"] - pz["y"]) > 5, f"{pz} {pr}")
     page.click('.board-ctl [data-ctl="me"]'); page.wait_for_timeout(250)
-    check("S1-ACC-06: You puts the viewer's own piece back in view", page.evaluate("(() => { const r = document.querySelector('#board-wrap .nametag').getBoundingClientRect(); const w = document.getElementById('board-wrap').getBoundingClientRect(); return r.left >= w.left && r.right <= w.right; })()") and "Ada · you" in page.evaluate("document.querySelector('#board-wrap .nametag').textContent"))
+    check("no name floats over any piece until you point at it", page.evaluate("document.querySelectorAll('#board-wrap .nametag').length") == 0 and page.evaluate("document.querySelector('#board-wrap .tip').hidden"))
+    mine = None
+    for pc in page.evaluate("[...document.querySelectorAll('#board-wrap g.piece')].map((g) => { const r = g.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.bottom - 4, l: r.left, r: r.right }; })"):
+        page.mouse.move(pc["x"], pc["y"]); page.wait_for_timeout(60)
+        if "Ada (you)" in (page.evaluate("document.querySelector('#board-wrap .tip').textContent") or ""): mine = pc; break
+    if mine: page.mouse.move(mine["x"], mine["y"]); page.wait_for_timeout(60); page.locator("#board-wrap").screenshot(path=f"{out}/board-hover-name.png") if out != "-" else None
+    wrap = box(page, "#board-wrap")
+    check("S1-ACC-06: You puts the viewer's own piece back in view, and pointing at it names it", mine is not None and mine["l"] >= wrap["x"] and mine["r"] <= wrap["r"], f"{mine}")
+    page.mouse.move(2, 2); page.wait_for_timeout(60)
+    check("moving off the board hides the name again", page.evaluate("document.querySelector('#board-wrap .tip').hidden"))
     page.mouse.click(2, 2)
 
     # ---- the board band and the move bar
