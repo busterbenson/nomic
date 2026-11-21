@@ -125,7 +125,12 @@ export function localConfig() {
   const toml = readFileSync(pjoin(ROOT, "wrangler.toml"), "utf8");
   const local = toml.replace(/^\[(?:previews\.)?ai\]\n(?:(?!\[)[^\n]*\n)*/gm, "");
   if (/^\[(?:previews\.)?ai\]/m.test(local)) throw new Error("localConfig: the [ai] block was not removed");
-  writeFileSync(out, local);
+  // `wrangler dev` watches this file and reloads the Worker whenever it is written, even with the same bytes. r2Get/r2Put/r2Delete
+  // call this on every use, so a run of writes (art.mjs's sweep fixture: 14 puts) reloaded the server mid-test and the next request
+  // failed with "fetch failed". Write it only when it changes.
+  let cur = null;
+  try { cur = readFileSync(out, "utf8"); } catch {}
+  if (cur !== local) writeFileSync(out, local);
   return out;
 }
 
