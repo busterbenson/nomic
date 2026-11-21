@@ -17,7 +17,7 @@ An **entry** is one thing in the catalog. It has:
 | Id | kind letter + number, next free in its kind: I1, C4, T2, S1, F1 (the v32 draft's 701.3) |
 | Name | "Very large hat" |
 | Kind | one of the kinds (below) |
-| Art | one drawing (a key in art storage) |
+| Art | one or more saved drawings (keys in art storage); one is selected and shown by default |
 | Attributes | `{key: value}`, each key defined by a rule |
 | Flavor | `{key: value}`, keys no rule defines; shown, never read by code |
 | Made by | the ticket (W42) and the day it went live |
@@ -68,22 +68,22 @@ Fields: `key` (lowercase, a-z and `_`), `type`, `kinds` it applies to, optional 
 - **Where it lives:** in the game's repo, with the rule. Repealing the rule removes the attribute (109.1's "code follows the rule" already says so).
 - **How the platform reads it:** at deploy, the bundler collects every module's `attributes` into one registry (key → definition + rule number) beside the bundled rule text. A Worker can't load code at runtime, so the registry is fixed per `day-N` tag, the same as the rules.
 - **On the card:** each attribute row shows its value and its rule pill (`Speed 2 [602]`). Tapping the pill opens the rule, as everywhere. No reminder text: Magic prints reminder text beside a keyword and has to keep it in step by hand; our pill opens the rule's own words, which can't drift.
-- **Flavor** shows below, under its own label, values only, no pills.
+- **Flavor** shows below, under its own label, values only, no pills. The card shows the first 3; the entry's detail page has an expander that shows all of them.
 - **Claims checker** (`scripts/check-rule-claims.mjs`) gains three checks: (a) every registry key is defined by exactly one rule that exists; (b) code reads an attribute only through `attr(entry, "speed")` with a literal key, and that key is in the registry, so code can't read flavor or a typo; (c) every key in a kind's required list (section 3) has a type in 704's data; the ones no rule defines are the "No rule yet" keys. Cataclysm's `flags.json` is the model: one list of known keys, so a made-up key is caught at build, not in play.
 
 **Rules act on attributes, never on entry names.** "Anything that flies ignores walls" (example), not "the Crow ignores walls". Minecraft's game logic checks tags, not item ids, for the same reason (page 13). Then a new creature made from existing attributes needs no code: art and values, price 0.
 
 ## 3. Required attributes, missing, unknown, flavor
 
-Each kind has a **required list**, set by a rule (704). Buster's starting list:
+Each kind has a **required list**, set by a rule (704). Required lists stay short: an attribute is required only if it is crucial to play, extra delightful, or a player asked for it (Buster, 2026-11-20). The v1 list is the three he named:
 
 | Kind | Required | Type |
 |---|---|---|
-| creature | hearts, moves | number, choice |
+| creature | hearts | number |
 | item | acquired | rule |
 | structure | size | size |
-| tile | passable | yes/no |
-| feature | shows in | choice: a tab, a button on a card |
+
+Other common attributes are **suggestions**, not requirements: Gremlin offers them while drafting and fills them when the player wants them (creature: moves; tile: passable; feature: shows in). Promoting one to required is an ordinary proposal on 704.
 
 Four cases, all **lenient on write, strict on use**:
 
@@ -93,6 +93,8 @@ Four cases, all **lenient on write, strict on use**:
 | Required, no rule yet | `hearts: 3`, and no rule defines hearts | value kept and shown with a "No rule yet" state; no code reads it |
 | Missing | an item with no `acquired` | the entry still goes live; the card shows the defining rule's `missing` state, e.g. "Can't be acquired" |
 | Unknown | `smell: "tar"` | kept as flavor: shown, never read |
+
+**Who fills a missing required attribute:** Gremlin, while drafting, if he can (he asks the player or picks a fitting value). If it's still missing, Chalant fills it when working the ticket at night, where a value follows from the brief. If it falls through both, the entry goes live without it and the card shows what that means. (Buster: "If it falls through those then we just see what happens.")
 
 Nothing is refused for a missing or unknown attribute. Dwarf Fortress logs unknown tokens and loads anyway (typos pass as features); Minecraft once refused a whole tag for one missing entry. We keep the entry, put unknown keys in their own bag (Minecraft's `custom_data` move), and let only registry keys reach code.
 
@@ -134,11 +136,12 @@ Ships with Workshop step 2 (Gremlin), since Gremlin is what fills it in.
 ```
 
   (`kind` stays the makes-item's type, as #38 stores it; `catalogKind` is the entry's kind, to avoid two meanings of one field.) This changes #38's `readMakes` in the catalog v1 PR: it keeps the new fields (`catalogKind`, `attrs`, `flavor`, `needsBuild`, `art`, `copiedFrom`), checks them against the registry (section 6, guards), treats two entries as duplicates only when name **and** kind match, and accepts a rule item with no `num` yet (a `draft` sentence instead), since Chalant numbers the rule at build time.
-- Art in object storage (Cloudflare R2 lean), drafts under `drafts/W<n>/`, copied to `entries/<id>.png` when the entry goes live. Lean: a bucket lifecycle rule deletes drawings that were replaced (except each entry's last 3, Q7), and the drafts of Shelved tickets, after 30 days. Refused and Failed tickets keep theirs, since they can be reopened (801.5 on #38).
+- Art in object storage (Cloudflare R2 lean), drafts under `drafts/W<n>/`, copied to `entries/<id>.png` when the entry goes live. An entry keeps every drawing that was saved to it, with one selected as its default (Q7); drawings that were never saved, and the drafts of Shelved tickets, are deleted by a bucket lifecycle rule after 30 days. Refused and Failed tickets keep theirs, since they can be reopened (801.5 on #38).
 
 **UI**
 - The ticket's Makes cards, as in Chalant's static mockup (`artifacts/promptocracy-workshop/ticket-art-mock/`, not in this repo): art with Redraw, name, kind chip, size + footprint for structures, then attribute rows. Dimmed until live (workshop.md).
-- The catalog card: art, id + name, kind chip, attribute rows (value + pill, or "No rule yet"), missing-state line where one applies, flavor rows, made by (W pill + day).
+- The catalog card: the selected drawing, id + name, kind chip, attribute rows (value + pill, or "No rule yet"), missing-state line where one applies, the first 3 flavor rows, made by (W pill + day).
+- The entry's detail page: every saved drawing (the selected one first), all attributes, and an expander for all flavor rows.
 - The Workshop's catalog groups: one per kind, in the order item, creature, tile, structure, feature.
 
 **Left for players to propose** (each a commission that makes a rule)
@@ -163,7 +166,7 @@ Ships with Workshop step 2 (Gremlin), since Gremlin is what fills it in.
 7. The player's messages, fenced as data.
 
 **What he must do**
-- Pick a kind for every entry. Fill every required attribute, or leave it empty on purpose (lenient: the card will show the consequence).
+- Pick a kind for every entry. Fill every required attribute if you can: ask the player, or pick a value that fits the brief. Leave one empty only when neither works (Chalant gets another go at night; after that the card shows the consequence).
 - Reuse a registry key before inventing one. Copy from a similar entry when the player says "like X".
 - Put anything no rule defines in flavor, unless the player wants it to *do* something; then list the key in `needsBuild` and add the rule to `makes`. That's what costs nights and points.
 - Propose the estimate and price, with his one-line reason.
@@ -173,10 +176,10 @@ Ships with Workshop step 2 (Gremlin), since Gremlin is what fills it in.
 - He returns structured JSON (below), and the platform validates it before anything is saved.
 - He has no tool but writing the ticket's fields and a post (workshop.md); the JSON below *is* that write.
 - An unknown kind is refused. A key in the entry's required list (704) counts as known, with its type from 704's data, and stays in `attrs` even with no rule yet. A registry key or required key with a bad value is coerced (`"3"` → 3, `"Yes"` → yes) or rejected with a reason he sees on his next turn ("size must be W×H, like 2×1"). Any other key goes to flavor, unless it is listed in `needsBuild`: then it stays in `attrs` on the draft, waiting for the rule the ticket makes.
-- A `needsBuild` key the registry already has is refused, naming the rule that defines it (section 4): reuse it instead. At most 6 flavor keys per entry (lean, Q4); more are refused with that reason.
+- A `needsBuild` key the registry already has is refused, naming the rule that defines it (section 4): reuse it instead. Flavor has no limit; the card shows 3 and the detail page shows all (Q4).
 - Player text is data. He never writes registry or rule code; rules are drafted at build time by Chalant.
 - He escalates to Chalant (workshop.md) on a conflict between rules, a request to change what an existing attribute means, or anything that reads as a loophole.
-- Each redraw counts as 1 of his 30 chat messages a day (Q7).
+- Each redraw counts as 1 of his 30 chat messages a day (Q7). The player can save any drawing to the entry and pick which one is the default.
 
 **How he stays fun.** The personality lives in his chat and his thread posts, never on the card. The card holds labels, data and state only (AGENTS.md rule 4): no "Gremlin says" captions, no hints. His price reason is the one exception workshop.md already gives him, one line on the ticket.
 
@@ -229,7 +232,7 @@ Block 700 is free in Rickshaw's RULES.md. The v32 draft's 700 rules (Looks, Your
 **703.3** Only one rule can define an attribute. *(catalog v1 PR: the claims check)*
 
 **704 What each kind needs**
-**704.1** Each kind needs some attributes. A creature needs hearts and a way to move. An item needs the rule that gives it to you. A structure needs a size in tiles. A tile needs to say if you can cross it. A feature needs where it shows. *(catalog v1 PR; the list is Q6, and naming a slot here decides nothing about what hearts or moving do)*
+**704.1** Some kinds need certain attributes. A creature needs hearts. An item needs the rule that gives it to you. A structure needs a size in tiles. *(catalog v1 PR; Q6: only what's crucial to play, extra delightful, or asked for by a player. Naming a slot here decides nothing about what hearts do)*
 **704.2** An attribute a kind needs can have no rule yet. Its value shows on the entry's card and does nothing until a rule defines it (703.1). *(catalog v1 PR)*
 **704.3** An entry can go live without an attribute its kind needs. The rule that defines that attribute says what that means for the entry. *(catalog v1 PR: the `missing` field)*
 
@@ -243,16 +246,16 @@ Block 700 is free in Rickshaw's RULES.md. The v32 draft's 700 rules (Looks, Your
 - 801.1 and 801.2 on origin/main and #38 are unchanged until these land.
 - 803.2 (workshop.md): "A ticket's rules and catalog entries (701) go live together."
 
-## 8. Questions for Buster (lean first)
+## 8. Decided (Buster, 2026-11-20 16:56 PT)
 
-1. **The sixth value type, "rule".** Lean yes: "acquired" names the rule that gives you the item, as your item example asked. Evidence: v32's "Where from (602)" row is already a rule reference.
-2. **No inheritance; copy at drafting instead.** Lean yes. Evidence: every templating system in page 13 grew undo syntax, and RimWorld's bugs come from it; our catalog is small.
-3. **Missing required attribute: go live anyway, card shows the consequence.** Lean yes (your "lenient"). The other choice, refusing at drafting, blocks a player who wants a hat that can't be acquired yet, which is a fine thing to make.
-4. **Flavor: allowed, shown, at most 6 per entry.** Lean yes. Evidence: Minecraft kept unknown data in its own bag rather than losing it; Magic's flavor text is a beloved part of the card that does nothing.
-5. **Entries in the game repo (`catalog.json`), widening the moderator's allowed paths.** Lean yes: entries go live with the rules in the same commit and the same `day-N` tag, so the catalog can't drift from the code.
-6. **The v1 required list** (creature: hearts, moves; item: acquired; structure: size; tile: passable; feature: shows in). Lean: take it as written, all "No rule yet". "Moves" as a choice (walks, slithers, stays) or a number? Lean choice, since how far is a rule's business; flying stays its own attribute. The other option: 704.1 says only "each kind needs some attributes" and the list lives in data until the 600 block ships. If you'd rather not have "hearts" in rule text before hearts exist, take that one.
-7. **Redraws.** Lean: each redraw is 1 of Gremlin's daily messages, and the ticket keeps the last 3 drawings so the player can go back.
-8. **Changing an existing entry** (values or art) is a commission at price 0, not an ordinary proposal. Lean yes, so every catalog change goes through the Workshop and gets a ticket.
+1. **"Rule" is a value type**, so an item's "acquired" names the rule that gives it to you. Yes.
+2. **No inheritance**; Gremlin copies at drafting. Yes.
+3. **A missing required attribute doesn't block an entry.** Gremlin tries to fill it while drafting; Chalant tries again when working the ticket; if it falls through both, it goes live and "we just see what happens" (the card shows the consequence).
+4. **Flavor is allowed, with no limit.** Not all of it shows all the time: the card shows the first 3, and the detail page has an expander for the rest.
+5. **Entries live in the game repo's `catalog.json`**; the moderator's allowed paths widen to include it. Yes.
+6. **Required lists stay short:** only attributes crucial to play, extra delightful, or requested by a player. v1 requires the three he named (creature: hearts; item: acquired; structure: size); moves, passable and shows-in are suggestions Gremlin offers.
+7. **Redraws** cost 1 of Gremlin's daily messages. An entry can keep several saved drawings, with one selected as its default.
+8. **Changing an existing entry** is a commission at price 0. Yes.
 
 ## 9. Build plan
 
