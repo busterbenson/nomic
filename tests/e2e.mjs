@@ -244,8 +244,8 @@ try {
   check("a turn in a game that has not started is refused (409)", early.status === 409, early.text);
   startPlaying(state, "one");
   check("logged-out submit is 401", (await client(A).post("/one/api/turn", clause("Hi"))).status === 401);
-  check("empty words and 2001 characters of words are refused",
-    (await bo.post("/one/api/turn", clause("   "))).status === 400 && (await bo.post("/one/api/turn", clause("x".repeat(2001)))).status === 400);
+  check("empty words and 2501 characters of words are refused",
+    (await bo.post("/one/api/turn", clause("   "))).status === 400 && (await bo.post("/one/api/turn", clause("x".repeat(2501)))).status === 400);
   const before = (await ada.get("/one/api/notifications")).data.unread;
   const pub0 = await client(A).get("/one/api/game");
   check("before submitting, the board shows day 1 and no proposals", pub0.data.game.day === 1 && (await client(A).get("/one/api/proposals")).data.proposals.length === 0, pub0.text);
