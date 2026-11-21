@@ -5,7 +5,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
-import { ROOT, createGame, d1, join, migrate, newState, startPlaying, startRulesStub, startServer } from "./lib.mjs";
+import { ROOT, createGame, d1, join, migrate, newState, startPlaying, startRulesStub, startServer, PYTHON } from "./lib.mjs";
 
 const shots = process.env.CHROME_SHOTS || "";
 if (shots) mkdirSync(shots, { recursive: true });
@@ -72,7 +72,7 @@ try {
   const samCookie = [...sam1.jar].find(([k]) => k === "s|/dupes")[1];
   const cookie = [...ada.jar].find(([k]) => k === "s|/chrome")[1];
   if (process.env.CHROME_SERVE) { console.log("SERVE", srv.base, cookie); await new Promise((res) => setTimeout(res, Number(process.env.CHROME_SERVE) * 1000)); }   // for debugging: keep the fixture up
-  const r = await promisify(execFile)("/usr/local/bin/python3", [ROOT + "/tests/browser-chrome.py", srv.base, shots || "-", cookie, samCookie, deeCookie, eliCookie, louCookie, zedCookie], { timeout: 240000, maxBuffer: 1 << 24 });
+  const r = await promisify(execFile)(PYTHON, [ROOT + "/tests/browser-chrome.py", srv.base, shots || "-", cookie, samCookie, deeCookie, eliCookie, louCookie, zedCookie], { timeout: 240000, maxBuffer: 1 << 24 });
   process.stdout.write(r.stdout);
 } catch (e) {
   failed = true;
