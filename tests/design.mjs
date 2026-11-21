@@ -19,8 +19,8 @@ const PIECES = JSON.parse(read("src/lib/pieces.json"));
 console.log("the rulebook parser");
 const T = parseRules(read("templates/RULES.md"));
 check("the starter rules parse with no problems: six blocks, 100 to 500 and the workshop (800), in file order", T.warnings.length === 0 && T.sections.map((s) => s.num).join() === "100,200,300,400,500,800", J(T.warnings));
-check("each block is marked: 100 unanimous, the rest majority; no rule overrides its block", T.sections.map((s) => s.change).join() === "unanimous,majority,majority,majority,majority,majority" && T.sections.every((s) => s.rules.every((r) => r.mark === null)) && T.sections.flatMap((s) => s.rules).every((r) => markOf(r) === r.sec.change));
-check("the rules are numbered from 101 within their hundreds block, 25 in all, each under the right block (107 The night; 302 retired by the reorganization, its job now 107.4; the workshop, 801 803 804, with no 802: its limits are a later step)", T.sections.map((s) => s.rules.map((r) => r.num).join()).join(" | ") === "101,102,103,104,105,106,107,108,110 | 201,202,203,204 | 301 | 401,402,403 | 501,502,503,504,505 | 801,803,804" && T.sections.every((s) => s.rules.every((r) => Math.floor(Number(r.num) / 100) * 100 === Number(s.num))));
+check("each block is marked: 100 unanimous, the rest majority; only 202 (End turn) and 203 (the day), in block 200, carry their own unanimous mark (105.2)", T.sections.map((s) => s.change).join() === "unanimous,majority,majority,majority,majority,majority" && T.sections.flatMap((s) => s.rules).filter((r) => r.mark !== null).map((r) => `${r.num}:${r.mark}`).join() === "202:unanimous,203:unanimous");
+check("the rules are numbered from 101 within their hundreds block, 24 in all, each under the right block (107 The night; 302 retired by the reorganization, its job now 107.4; the workshop, 801 803 804, with no 802: its limits are a later step)", T.sections.map((s) => s.rules.map((r) => r.num).join()).join(" | ") === "101,102,103,104,105,106,107,108 | 201,202,203,204 | 301 | 401,402,403 | 501,502,503,504,505 | 801,803,804" && T.sections.every((s) => s.rules.every((r) => Math.floor(Number(r.num) / 100) * 100 === Number(s.num))));
 check("every rule has a title and text", T.sections.flatMap((s) => s.rules).every((r) => r.title && (r.paras.length || r.clauses.length)));
 check("the intro is the paragraph above the first block, not a rule", T.intro.length === 1 && /rules in effect/.test(T.intro[0].s) && !/2xx/.test(T.intro[0].s));
 check("a list inside a rule stays with that rule", parseRules("## 100. A [u]\n\n### 101 One\nEither:\n- this, or\n- that.\n\n### 102 Two\nText.\n").byNum["101"].paras.some((p) => p.t === "ul" && p.items.length === 2));
@@ -67,24 +67,28 @@ check("the day model replaces the turn model: 103 is proposals (no join order), 
   rules.includes("there is no order of play") && rules.includes("Ending is final: after it they can't move, propose or vote until the next day") && rules.includes("A day runs from midnight to midnight in the game's time zone. [setting: game.timezone]") &&
   rules.includes("A day always runs to midnight, even if every player has ended their turn.") && rules.includes("the game is locked: nobody can move, vote, propose, post in a ticket's discussion or end their turn, on the site or through an AI client (rule 204)"));
 console.log("the proposal rules (step 1, PR 3)");
-check("103 Proposals is 103.1-103.4 and 105 Votes needed is 105.1-105.5, worded as approved; the moderator moved to 106",
-  T.byNum["103"].clauses.map((c) => c.num).join() === "103.1,103.2,103.3,103.4" && T.byNum["105"].title === "Votes needed" && T.byNum["105"].clauses.map((c) => c.num).join() === "105.1,105.2,105.3,105.4,105.5" &&
+check("103 Proposals is 103.1-103.4 and 103.6 (103.5 is kept for actions), and 105 Votes needed is 105.1-105.5, worded as approved; the moderator moved to 106",
+  T.byNum["103"].clauses.map((c) => c.num).join() === "103.1,103.2,103.3,103.4,103.6" && T.byNum["105"].title === "Votes needed" && T.byNum["105"].clauses.map((c) => c.num).join() === "105.1,105.2,105.3,105.4,105.5" &&
   T.byNum["106"].title === "The moderator" && rules.includes("Drafting costs nothing: only a confirmed proposal counts toward the day's limit.") &&
   rules.includes("Each confirmed proposal gets the next number (P1, P2, ...) and goes on the next day's ballot.") && rules.includes("You can confirm up to 3 proposals a day. [setting: proposals.per_day]") && rules.includes("A withdrawn proposal doesn't count toward the limit (103.2).") &&
   rules.includes("The mark sets the votes needed to change, add or repeal any rule in the block.") && rules.includes("The votes a proposal needs are set when it is confirmed, from the marks in effect then.") &&
   rules.includes("Rules marked unanimous, by their block or by their own mark, are the core rules."));
-check("108.3 (the moderator names conflicts when drafting) and 110.1 (what no proposal can change, refused at drafting) are in",
-  T.byNum["108"].clauses.map((c) => c.num).join() === "108.1,108.2,108.3,108.4,108.5" && T.byNum["110"].clauses.map((c) => c.num).join() === "110.1" &&
-  rules.includes("When drafting, the moderator names any other rule the proposal would conflict with, so the proposer can change that rule too.") &&
-  rules.includes("A proposal that would change them is refused when it is drafted."));
+check("108.3 (the moderator names conflicts when drafting) is in",
+  T.byNum["108"].clauses.map((c) => c.num).join() === "108.1,108.2,108.3,108.4,108.5" &&
+  rules.includes("When drafting, the moderator names any other rule the proposal would conflict with, so the proposer can change that rule too."));
+check("rule 110 (what no proposal can change) is retired: no rule or clause 110, nothing cites it, no helper text about parts the site runs",
+  !T.byNum["110"] && !T.byNum["110.1"] && !/rule 110|\(110(\.\d)?\)|what no proposal can change|no proposal can change/i.test(rules));
+check("what 110.1 listed is ordinary rules, each unanimous: sign-in 102.5, the proposal limit 103.2, hidden votes 104.4, votes counted by code 104.5, the lock 107.1, the deadline 107.6, End turn 202.4, the day 203.1",
+  [["102.5", "102"], ["103.2", "103"], ["104.4", "104"], ["104.5", "104"], ["107.1", "107"], ["107.6", "107"], ["202.4", "202"], ["203.1", "203"]].every(([c, r]) => T.byNum[c] && markOf(T.byNum[r]) === "unanimous") &&
+  rules.includes("You sign in with a link sent to your email address."));
 console.log("the vote rules (step 1, PR 4)");
-check("104 Voting is 104.1-104.5 and 107 has 107.6 (the 2 am deadline) and 107.7 (not applied: back to the owner), worded as approved for what the code does; 110.1 names hidden votes, the count by code and the deadline",
+check("104 Voting is 104.1-104.5 and 107 has 107.6 (the 2 am deadline) and 107.7 (not applied: back to the owner), worded as approved for what the code does; each is unanimous",
   T.byNum["104"].clauses.map((c) => c.num).join() === "104.1,104.2,104.3,104.4,104.5" && T.byNum["107"].clauses.map((c) => c.num).join().includes("107.6,107.7") &&
   rules.includes("Not voting counts as no, except on the Champion's change (402.4).") && rules.includes("are the players when the day starts. A player who joins during the day votes from the next day.") &&
   rules.includes("until midnight or until they end their turn (rule 202.4), and may change their vote until then.") &&
   rules.includes("During the day everyone can see who has voted on a proposal, and how many have. After midnight every vote is shown.") &&
   rules.includes("The moderator has until 2:00 am to process the day.") && rules.includes("It goes back to its proposer with the moderator's reason and a suggestion") &&
-  !/48 hours/.test(rules) && ["104.4", "104.5", "107.6"].every((n) => T.byNum["110.1"].paras[0].s.includes(`(rule ${n})`)));
+  !/48 hours/.test(rules) && ["104.4", "104.5", "107.6"].every((n) => T.byNum[n] && markOf(T.byNum[n.slice(0, 3)]) === "unanimous"));
 console.log("the night's rules (step 1, PR 5)");
 check("106 is 106.1-106.3 (the drafter audit is 106.3), 107 is 107.1-107.8 (order, redraft, text + code + tests, the budget, the day tag), 108 is 108.1-108.5, 402 is 402.1-402.4 (Eras)",
   T.byNum["106"].clauses.map((c) => c.num).join() === "106.1,106.2,106.3" && T.byNum["107"].clauses.map((c) => c.num).join() === "107.1,107.2,107.3,107.4,107.5,107.6,107.7,107.8" &&

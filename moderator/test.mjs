@@ -223,12 +223,12 @@ console.log("moderator runner");
     const o = t.claims[0]?.outcomes[0];
     check(want === true ? `kinds: ${name} applies` : `kinds: ${name} is refused`, want === true ? o?.applied === true : o && !o.applied && want.test(o.reason), J(o));
   }
-  // A move of a rule with clauses: the draft is plain text ("302.2 ..."), the file has markdown ("**302.2** ...").
-  const r203 = md.slice(md.indexOf("### 203 "), md.indexOf("### 204 "));
-  const body203 = r203.split("\n").slice(1).join("\n").trim();
-  const moved203 = body203.replace(/\*\*203\.(\d+)\*\*/g, "**302.$1**").replace(/\(rule 203\.(\d)\)/g, "(rule 302.$1)");
-  const draft203 = `302 Days\n\n${moved203.replace(/\*\*/g, "")}\n\n203 [Moved to 302]`;
-  const tm = await night({ scenario: { apply: { 4: { action: "ops", ops: [{ replace: ["RULES.md", r203, "### 203 [Moved to 302]\n\n"] }, { replace: ["RULES.md", "## 400.", `### 302 Days\n${moved203}\n\n## 400.`] }] } } }, state: { job: job([P(4, "203", { kind: "move", new_num: "302", to_block: "300", after_text: draft203 })]) }, opts: { audit: false } });
+  // A move of a rule with clauses, no mark of its own and no code (rule 203 carries a mark now, and the scope check reads a moved rule's forwarder by its number): the draft is plain text ("302.2 ..."), the file has markdown ("**302.2** ...").
+  const r106 = md.slice(md.indexOf("### 106 "), md.indexOf("### 107 "));
+  const body106 = r106.split("\n").slice(1).join("\n").trim();
+  const moved106 = body106.replace(/\*\*106\.(\d+)\*\*/g, "**302.$1**").replace(/\(rule 106\.(\d)\)/g, "(rule 302.$1)");
+  const draft106 = `302 The moderator\n\n${moved106.replace(/\*\*/g, "")}\n\n106 [Moved to 302]`;
+  const tm = await night({ scenario: { apply: { 4: { action: "ops", ops: [{ replace: ["RULES.md", r106, "### 106 [Moved to 302]\n\n"] }, { replace: ["RULES.md", "## 400.", `### 302 The moderator\n${moved106}\n\n## 400.`] }] } } }, state: { job: job([P(4, "106", { kind: "move", new_num: "302", to_block: "300", after_text: draft106 })]) }, opts: { audit: false } });
   check("kinds: a move of a rule with clauses applies (the voted plain-text draft matches the file's markdown)", tm.claims[0]?.outcomes[0]?.applied === true, J(tm.claims[0]?.outcomes));
   // From Codex: a clause proposal leaves the other clauses; an add's own number is its identity in a 108.4 note; a
   // module that gains a hook may update the rulebook test's lines for that rule.
@@ -248,7 +248,7 @@ console.log("moderator runner");
   check("kinds: an add-clause to rule 402 that also changes 402.1's threshold is refused", ta2.claims[0]?.outcomes[0]?.applied === false && /clause 402\.1 changed/.test(ta2.claims[0].outcomes[0].reason), J(ta2.claims[0]?.outcomes));
   const ta3 = await night({ scenario: { apply: { 4: { action: "ops", ops: [add4024, { replace: ["RULES.md", "the first one to be given them wins", "the last one to be given them wins"] }] } } }, state: { job: job([P(4, "402.2", { kind: "addclause", scope: "clause", new_num: "402.5", after_text: "402.5 Players may share victory." })]) }, opts: { audit: false } });
   check("kinds: an add-clause after 402.2 that rewrites 402.2 itself is refused", ta3.claims[0]?.outcomes[0]?.applied === false && /clause 402\.2 changed/.test(ta3.claims[0].outcomes[0].reason), J(ta3.claims[0]?.outcomes));
-  const tmv = await night({ scenario: { apply: { 4: { action: "ops", ops: [{ replace: ["RULES.md", r203, "### 203 [Moved to 302]\n\n"] }, { replace: ["RULES.md", "## 400.", `### 302 Days\n${moved203}\nA day lasts two hours.\n\n## 400.`] }] } } }, state: { job: job([P(4, "203", { kind: "move", new_num: "302", to_block: "300", after_text: draft203 })]) }, opts: { audit: false } });
+  const tmv = await night({ scenario: { apply: { 4: { action: "ops", ops: [{ replace: ["RULES.md", r106, "### 106 [Moved to 302]\n\n"] }, { replace: ["RULES.md", "## 400.", `### 302 The moderator\n${moved106}\nA day lasts two hours.\n\n## 400.`] }] } } }, state: { job: job([P(4, "106", { kind: "move", new_num: "302", to_block: "300", after_text: draft106 })]) }, opts: { audit: false } });
   check("kinds: a move that also adds a sentence to the moved rule is refused", tmv.claims[0]?.outcomes[0]?.applied === false && /a move changed the rule's text/.test(tmv.claims[0].outcomes[0].reason), J(tmv.claims[0]?.outcomes));
   const pAdd = P(4, "400", { kind: "add", scope: "block", new_num: "404", after_text: "You get 1 more point when your proposal is applied. This rule prevails over rule 402." });
   const tn = await night({ scenario: { apply: { 4: { action: "ops", ops: [{ replace: ["RULES.md", "## 500.", "### 404 Bonus\nYou get 1 more point when your proposal is applied. This rule prevails over rule 402.\n\n## 500."] }, { replace: ["RULES.md", "### 403 Paradox", "This rule gives way to rule 404.\n\n### 403 Paradox"] }], result: { outcome: "applied", conflict: { rule: 402, why: "x" } } } } }, state: { job: job([pAdd]) }, opts: { audit: false } });

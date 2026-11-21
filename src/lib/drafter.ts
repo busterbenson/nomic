@@ -16,7 +16,7 @@ import { answerSchema, modelPrompt, readModelAnswer } from "./proposals.js";
 import { Env } from "./util";
 
 export type DraftAnswer = { after_text: string; conflicts: string[]; settings: Record<string, unknown> };
-// "refused": the model or a check said no, with a sentence for the player (reason: declined, scope, setting, nochange, 110.1).
+// "refused": the model or a check said no, with a sentence for the player (reason: declined, scope, setting, nochange, not wired).
 export class DrafterError extends Error {
   constructor(public code: "unavailable" | "failed" | "malformed" | "refused", message: string, public reason?: string) { super(message); }
 }

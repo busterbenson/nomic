@@ -3,6 +3,7 @@ import { emailMode } from "../lib/email";
 import { issueLink, tooManyLinks } from "../lib/links";
 import { Ctx, json, normEmail, playersLine, readJson, seatLimit, seatsTaken, validEmail } from "../lib/util";
 
+/** @rule 102.5 */
 export const post = async (ctx: Ctx) => {
   const { env } = ctx;
   const game = ctx.data.game!;

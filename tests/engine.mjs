@@ -3,7 +3,7 @@
 // pack's own tests, and scripts/bundle-games.mjs (fixtures, a local git remote with day-N tags, failure cases,
 // and that game code runs with a scrubbed environment).
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as pjoin } from "node:path";
 import { ROOT } from "./lib.mjs";
@@ -343,6 +343,43 @@ check("the game's claims also say what each rule works with: 202 shares actionAl
   const out = pjoin(work, "out-ww");
   quiet(() => bundle({ BUNDLE_OUT: out, GAMES_SOURCE: "tests/fixtures/games" }));
   return /worksWith: \{"202":\{"actionAllowed":\[504\]\},"504":\{"actionAllowed":\[202\]\}\}/.test(readFileSync(pjoin(out, "games.ts"), "utf8"));
+})());
+// A running `wrangler dev` watches src/generated and reloads its Worker on any change there. Every wrangler start runs
+// this build, and tests run concurrently on one checkout, so a build that deletes and recreates the folder (or rewrites
+// identical files) made every other running server reload mid-test: a fetch landing then failed ("fetch failed").
+check("a rebuild with the same inputs leaves src/generated untouched (same folder, same files, same mtimes); a changed input rewrites only what changed", (() => {
+  const out = pjoin(work, "out-idem");
+  const snap = () => { const o = {}; for (const f of ["", "games.ts", "starter", "starter/rules", "starter/rules/505.ts", "games/bundled/rules/202.ts"]) { const st = statSync(pjoin(out, f)); o[f] = `${st.ino}:${st.mtimeMs}`; } return o; };
+  quiet(() => bundle({ BUNDLE_OUT: out, GAMES_SOURCE: "tests/fixtures/games" }));
+  const before = snap();
+  const old = new Date(Date.now() - 60_000);
+  for (const f of ["games.ts", "starter/rules/505.ts", "games/bundled/rules/202.ts", "starter", ""]) utimesSync(pjoin(out, f), old, old); // age them, so a rewrite shows
+  const aged = snap();
+  quiet(() => bundle({ BUNDLE_OUT: out, GAMES_SOURCE: "tests/fixtures/games" }));
+  const same = J(snap()) === J(aged) && Object.keys(before).every((k) => before[k].split(":")[0] === aged[k].split(":")[0]);
+  writeFileSync(pjoin(out, "stale.ts"), "x"); // a file the build no longer produces is removed
+  quiet(() => bundle({ BUNDLE_OUT: out, GAMES_SOURCE: "tests/fixtures/games" }));
+  const { "": _, ...files } = snap(), { "": __, ...filesAged } = aged; // the folder's own mtime moved with stale.ts
+  return same && !existsSync(pjoin(out, "stale.ts")) && J(files) === J(filesAged);
+})());
+// The harness's d1() blocks the event loop (execFileSync of `wrangler d1 execute`, seconds each under load). After a
+// blocking gap past ~15 s the next fetch to `wrangler dev` failed at once with ECONNRESET ("fetch failed") though the
+// server was fine: the client reused a pooled keep-alive socket the server had dropped (the moderator suite, 2026-11-20;
+// a 16 s `sleep` between two fetches reproduced it, `connection: close` cured it). tests/lib.mjs makes every test fetch
+// send `connection: close`, so no socket outlives its request. A mock server cannot reproduce the drop, so this checks
+// what the server sees.
+check("every test fetch asks the server to close the connection after the response (no pooled socket to go stale during a blocking d1 call)", await (async () => {
+  const { createServer } = await import("node:http");
+  let seen = null;
+  const srv = createServer((req, res) => { seen = req.headers.connection; res.end("ok"); });
+  await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+  const url = `http://127.0.0.1:${srv.address().port}/`;
+  try {
+    await (await fetch(url)).text();
+    const plain = seen;
+    await (await fetch(new Request(url, { headers: { "x-a": "1" } }), { headers: { "x-b": "2" } })).text();
+    return plain === "close" && seen === "close";
+  } finally { srv.close(); }
 })());
 must("a node_modules folder in a game fails the build (the build links its own engine; a game must not supply one)", { GAMES_SOURCE: tree("bad", (d) => put(d, "node_modules/promptocracy/package.json", `{"name":"promptocracy","exports":{"./engine":"./e.js","./engine/testing":"./e.js"}}`)) }, /top level may hold only[\s\S]*not node_modules/);
 must("any other unknown top-level file fails the build too", { GAMES_SOURCE: tree("bad", (d) => put(d, "build.mjs", "export const x = 1;\n")) }, /not build\.mjs/);
