@@ -258,7 +258,9 @@ export async function awaitModerator(env: Env, game: any, day: DayRow, nowMs: nu
 async function notApplyRemaining(env: Env, game: any, day: DayRow, nowMs: number, reason: string) {
   const now = nowIso(nowMs);
   const passed = (await env.DB.prepare("SELECT id, number, player_id FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed' AND kind != 'action' ORDER BY number").bind(game.id, day.n).all()).results as any[];
-  await env.DB.batch(passed.flatMap((q) => notAppliedStatements(env, game, q, reason, now)));
+  if (passed.length) await env.DB.batch(passed.flatMap((q) => notAppliedStatements(env, game, q, reason, now)));
+  // The night's actions are the site's own, whatever became of the rule changes: apply them now, so the day closes on this tick (rule 103.7).
+  await enactActions(env, game, day, nowMs);
 }
 
 // The passed actions of a night are applied (rule 103.7): each whose type the rules still have, in the game's own order, its points given

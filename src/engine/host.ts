@@ -135,7 +135,10 @@ export async function refusedActions(env: Env, game: any, n: number, nowMs: numb
   const out: { id: string; number: number; player_id: string; reason: string }[] = [];
   for (const q of rows) {
     const act = JSON.parse(q.action);
-    const r = rules.applyAction(ctx, { type: act.type, params: act.params, number: q.number, player: q.player_id });
+    let r: any;
+    // A rule that throws sends only its own action back: it must not fail the night's other changes (rule 107.7).
+    try { r = rules.applyAction(ctx, { type: act.type, params: act.params, number: q.number, player: q.player_id }); }
+    catch (e) { console.error(`action P${q.number}:`, (e as any)?.message || e); r = { error: "the rule for that action type could not be applied" }; }
     if (r === null) out.push({ id: q.id, number: q.number, player_id: q.player_id, reason: GONE_REASON });
     else if (!Array.isArray(r)) out.push({ id: q.id, number: q.number, player_id: q.player_id, reason: r.error });
   }

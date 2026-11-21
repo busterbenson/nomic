@@ -6,6 +6,7 @@
 import { readFileSync } from "node:fs";
 import { join as pjoin } from "node:path";
 import { createHash } from "node:crypto";
+import { DEPLOY_REASON } from "../src/lib/votes.js";
 import { ROOT, client, createGame, d1, join, migrate, newState, freePort, startRulesStub, startServer } from "./lib.mjs";
 import { draftOf, markFor, neededOf, parseBook, partsOf, readAction, readRequest } from "../src/lib/proposals.js";
 import { GONE_REASON } from "../src/lib/votes.js";
@@ -58,7 +59,7 @@ console.log("the votes it needs (rule 103.6): the stricter of its own rule and t
 const SRV_PORT = await freePort();
 const SITE = `http://localhost:${SRV_PORT}`;
 const TOKEN = "act-token-0123456789abcdefghij";
-const SHA1 = "a".repeat(40);
+const SHA1 = "a".repeat(40), SHA2 = "b".repeat(40), SHA3 = "c".repeat(40);
 let srv = null, stub = null;
 const state = newState();
 try {
@@ -156,13 +157,31 @@ try {
     prop(pRule).status === "enacted" && prop(pRule).rev === 1 && prop(pAct).status === "enacted" && score("Cy") === before.Cy + 10 + 7 && score("Bo") === before.Bo + 10 && game().rules_day === 3 && day(3).status === "done", J([prop(pRule), prop(pAct), seq, game()]));
   check("the night's records read in execution order: P4's points, then P5's action record, its points, then the grant", J(seq) === J([`points:+10: P${pRule} was applied`, `action:P${pAct} was applied: Grant points, to Cy, points 7.`, `points:+10: P${pAct} was applied`, `points:+7: P${pAct} granted points`]), J(seq));
 
+  console.log("a mixed night whose deploy never goes live: the action is still the site's to apply");
+  const pA2 = ins("Ana", "action", "901", act("Cy", 2)), pR2 = ins("Bo", "amend", "402.1");
+  const sc2 = score("Cy");
+  const d4 = await midnight();
+  await mod("POST", `days/${d4.n}/claim`, { sha: SHA2, outcomes: [{ number: pR2, applied: true, commit: SHA2, seq: 1 }] });
+  dev("clock", plus(d4.deadline_at, 31));
+  await cron();
+  check("the rule change is not applied (the deploy reason) and the action is, on the same tick: the day closes (timed_out) and the game moves on, nobody waits a tick", prop(pR2).status === "not_applied" && prop(pR2).not_applied_reason === DEPLOY_REASON && prop(pA2).status === "enacted" && score("Cy") === sc2 + 2 && day(d4.n).status === "timed_out" && game().day === d4.n + 1, J([prop(pR2), prop(pA2), day(d4.n), game()]));
+
+  console.log("a mixed night with the action numbered before the rule change: the rule change is applied first (103.7)");
+  const pA3 = ins("Ana", "action", "901", act("Bo", 3)), pR3 = ins("Cy", "amend", "402.1");
+  const d5 = await midnight();
+  await mod("POST", `days/${d5.n}/claim`, { sha: SHA3, outcomes: [{ number: pR3, applied: true, commit: SHA3, seq: 1 }] });
+  dev("bundle_sha:act", SHA3);
+  await cron();
+  const seq3 = d1(state, `SELECT kind, text FROM events WHERE game_id = '${gid}' AND day = ${d5.n} AND phase = 'night' ORDER BY night_seq`).map((e) => e.kind + ":" + e.text);
+  check("P(action) < P(rule): the rule change's points come first, then the action's record and its points (the action acts on the rules as they stand tonight)", prop(pA3).status === "enacted" && prop(pR3).status === "enacted" && seq3[0] === `points:+10: P${pR3} was applied` && seq3[1].startsWith(`action:P${pA3} was applied`) && game().rules_day === d5.n, J([seq3, game()]));
+
   console.log("an action of a type the rules no longer have is not applied (107.7)");
   const pGone = ins("Ana", "action", "901", act("Bo", 2, "resurrect")), pBad = ins("Bo", "action", "901", act("Cy", 11)), pSelf = ins("Cy", "action", "901", act("Cy", 3));
-  const s0 = J(names.map(score));
+  const s0 = J(names.map(score)), gd = game().day;
   await midnight();
   const gone = d1(state, `SELECT status, not_applied_reason FROM proposals WHERE game_id = '${gid}' AND number = ${pGone}`)[0];
   const told = d1(state, `SELECT body FROM notifications WHERE game_id = '${gid}' AND player_id = '${id.Ana}' AND kind = 'not_applied'`);
-  check("not applied, with the reason; its proposer is told with the reason; no points; the night ends (day 4 done)", gone.status === "not_applied" && gone.not_applied_reason === GONE_REASON && told.length === 1 && told[0].body.includes(GONE_REASON) && !told[0].body.includes("It gave no points. It gave") && day(4).status === "done" && game().day === 5 && game().rules_day === 3, J([gone, told, day(4), game()]));
+  check("not applied, with the reason; its proposer is told with the reason; no points; the night ends (day 4 done)", gone.status === "not_applied" && gone.not_applied_reason === GONE_REASON && told.length === 1 && told[0].body.includes(GONE_REASON) && !told[0].body.includes("It gave no points. It gave") && day(gd).status === "done" && game().day === gd + 1 && game().rules_day === d5.n, J([gone, told, day(gd), game()]));
 
   const refused = d1(state, `SELECT number, status, not_applied_reason FROM proposals WHERE game_id = '${gid}' AND number IN (${pBad}, ${pSelf}) ORDER BY number`);
   check("details the rules no longer allow when the night applies them (11 points; a grant to yourself) are not applied either, each with its own reason from rule 901, and nobody gets points that night", J(refused.map((r) => r.status)) === J(["not_applied", "not_applied"]) && /whole number from 1 to 10/.test(refused[0].not_applied_reason) && /another player/.test(refused[1].not_applied_reason) && J(names.map(score)) === s0, J([refused, s0, names.map(score)]));
