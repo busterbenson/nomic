@@ -49,11 +49,16 @@
 <section class="rbwrap" id="book" aria-label="Summary, rulebook, workshop and history">
   <div class="book">
     <div class="btabs" id="btabs" role="tablist" aria-label="Book"></div>
+    <!-- the tab beside the chat window (public/js/chat.js): a column on a desktop, a corner pill and a sheet on a phone -->
+    <div class="bwrap" id="bwrap" data-chat="off" data-sheet="closed">
     <div id="bpanel">
       <div id="p-summary" role="tabpanel" aria-labelledby="tab-summary"></div>
       <div id="p-rules" role="tabpanel" aria-labelledby="tab-rules" hidden><section class="rbwrap" id="rules" aria-label="Rulebook">Loading&hellip;</section></div>
       <div id="p-workshop" role="tabpanel" aria-labelledby="tab-workshop" hidden></div>
       <div id="p-history" role="tabpanel" aria-labelledby="tab-history" hidden></div>
+    </div>
+    <aside class="chatcol" id="chatcol" aria-label="Chat" hidden></aside>
+    <button type="button" class="chatfab" id="chatfab" hidden></button>
     </div>
   </div>
 </section>
@@ -76,6 +81,7 @@
   import { createBallot } from "/js/ballot.js";
   import { mini, playerPill, hexOf } from "/js/people.js";
 import { createWorkshop } from "/js/workshop.js";
+import { createChat } from "/js/chat.js";
  import { commissionHTML, wPill } from "/js/commission.js";
   const SLUG = location.pathname.split("/")[1] || "";
   const BASE = "/" + SLUG;
@@ -100,7 +106,7 @@ import { createWorkshop } from "/js/workshop.js";
   };
   let ME = null, DATA = null, INVITE = null;   // who is looking, and the last /api/game
   let DAY = null, END_ASK = false, START_ASK = false, DAY_AT = 0, DAY_TIMER = 0, DAY_TICK = 0;   // the last /api/day, the End turn confirm, when it was fetched
-  let PROP = null, BAL = null, BOOK = null, CARDS = null, WS = null;   // the proposal controller (propose.js), the mounted rulebook, the card host
+  let PROP = null, BAL = null, BOOK = null, CARDS = null, WS = null, CHAT = null;   // the proposal controller (propose.js), the mounted rulebook, the card host
   let BOARD = null, SEL = null, VIEW = null;   // the last /api/board, the selected tile {x,y}, the drawn board
   let TAB = "summary", BOARD_OPEN = true, LASTMOVE = null, NOTES = { list: [], unread: 0 }, RULES_OK = false;
   ensureDefs();
@@ -133,6 +139,7 @@ import { createWorkshop } from "/js/workshop.js";
     if (PROP) PROP.redraw();
     if (BOOK) BOOK.redraw();
     drawBook();   // the ballot's Yes / No and the Propose card depend on who is looking
+    if (CHAT) CHAT.sync(TAB);   // the chat window exists only for a signed-in player
     if (VIEW && ME && ME.player) VIEW.setMe(ME.player.color.key);
     drawWho();
     drawMoveBar();
@@ -232,7 +239,9 @@ import { createWorkshop } from "/js/workshop.js";
     showNotice();
     CARDS = createCards({ root: $("mroot"), describe });   // closing a card keeps what you were writing: it is there when the card opens again
     BAL = createBallot({ api, pill: by => pill(by, false), refreshed: refresh, player: () => !!(ME && ME.player) });
-    WS = createWorkshop({ api, me: () => ME, pill, rpill: n => PROP.rpill(n), when: whenText, canCommission: () => PROP.canPropose(), refresh: async () => { await refresh(); loadNotes(); }, cards: CARDS });
+    WS = createWorkshop({ api, me: () => ME, pill, rpill: n => PROP.rpill(n), when: whenText, canCommission: () => PROP.canPropose(), refresh: async () => { await refresh(); loadNotes(); }, cards: CARDS, chat: () => CHAT });
+    CHAT = createChat({ api, root: $("bwrap"), me: () => ME, slug: SLUG, rpill: n => PROP.rpill(n), wpill: wPill,
+      onTicket: async t => { WS.apply(t); await WS.load(); drawBook(); } });
     PROP = createProposer({ api, me: () => ME, day: () => DAY, pill, vote: n => BAL.box(n), refresh: async () => { await refresh(); loadNotes(); } });
     drawTabs(); drawBook();
     loadMe();
@@ -260,7 +269,7 @@ import { createWorkshop } from "/js/workshop.js";
   function setTab(k, scroll) {
     TAB = k;
     for (const t of ["summary", "rules", "workshop", "history"]) $("p-" + t).hidden = t !== k;
-    drawTabs(); drawBook();
+    drawTabs(); drawBook(); if (CHAT) CHAT.sync(TAB);
     if (scroll) $("book").scrollIntoView({ block: "start", behavior: reduced() ? "auto" : "smooth" });
   }
   $("btabs").addEventListener("keydown", e => {
@@ -535,7 +544,7 @@ import { createWorkshop } from "/js/workshop.js";
     if (g.ok) { DATA = g.data; }
     if (b.ok) { BOARD = b.data; if (VIEW) VIEW.setData(b.data, myKey()); }
     await Promise.all([PROP ? PROP.load() : 0, BAL ? BAL.load() : 0, WS ? WS.load() : 0]);
-    drawWho(); if (g.ok) drawGame(g.data); if (b.ok) drawBoard(b.data); drawTabs(); drawBook(); drawMoveBar();
+    drawWho(); if (g.ok) drawGame(g.data); if (b.ok) drawBoard(b.data); drawTabs(); drawBook(); drawMoveBar(); if (CHAT) CHAT.sync(TAB);
     if (BOOK) BOOK.redraw();
     if (CARDS && CARDS.isOpen()) CARDS.redraw();
   }

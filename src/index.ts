@@ -24,6 +24,8 @@ import * as apiRules from "./routes/api-rules";
 import * as apiTurn from "./routes/api-turn";
 import * as apiProposals from "./routes/api-proposals";
 import * as apiTickets from "./routes/api-tickets";
+import * as apiChat from "./routes/api-chat";
+import { AGENTS } from "./lib/chat.js";
 import * as apiBoard from "./routes/api-board";
 import * as apiAction from "./routes/api-action";
 import * as apiDay from "./routes/api-day";
@@ -154,6 +156,7 @@ async function route(request: Request, env: Env, execCtx: ExecutionContext): Pro
   if (sub === "api" && segs.length === 4 && segs[2] === "notifications" && segs[3] === "read") return run(apiNotificationsRead, method, ctx);
   // The moderator's routes (bearer token; src/routes/api-moderator.ts)
   if (sub === "api" && segs.length === 4 && segs[2] === "moderator" && segs[3] === "pending") return run({ get: apiModerator.pending }, method, ctx);
+  if (sub === "api" && segs.length === 4 && segs[2] === "moderator" && segs[3] === "agents") return run({ get: apiModerator.agents }, method, ctx);
   if (sub === "api" && segs.length === 6 && segs[2] === "moderator" && segs[3] === "days" && segs[5] === "claim" && /^\d{1,6}$/.test(segs[4])) {
     ctx.params.n = segs[4];
     return run({ post: apiModerator.claim }, method, ctx);
@@ -163,6 +166,8 @@ async function route(request: Request, env: Env, execCtx: ExecutionContext): Pro
     ctx.params.id = segs[3];
     return run({ post: apiProposals.action(segs[4]) }, method, ctx);
   }
+  // /api/chat/<agent>: a player's private chat with Gremlin (rules 106.3, 106.7)
+  if (sub === "api" && segs.length === 4 && segs[2] === "chat" && AGENTS.includes(segs[3])) return run(apiChat, method, ctx);
   // /api/tickets/<W3> (the ticket page), and /api/tickets/<W3>/edit, /confirm, /reopen and /post (rules 801, 804)
   if (sub === "api" && segs[2] === "tickets" && (segs.length === 4 || segs.length === 5)) {
     ctx.params.n = segs[3];

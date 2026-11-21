@@ -9,14 +9,15 @@
 //     canCommission()    {allowed, reason}: the proposals' own answer (rule 103.2)
 //     refresh()          reload the page's state after a confirm
 //     cards              the card host (cards.js)
-//   W.load()  W.count()  W.tabHTML()  W.summaryHTML()  W.card(spec)  W.open(n, push)  W.click(el)  W.input(el)
+//     chat()             the chat window (chat.js) or null: "Commission something" opens it on the new draft (rule 801.2)
+//   W.load()  W.count()  W.tabHTML()  W.summaryHTML()  W.card(spec)  W.open(n, push)  W.click(el)  W.input(el)  W.apply(page)
 // Nothing here decides what is allowed: the server's answers (the lock, one a day, a refusal) are shown as they come.
 import { commissionHTML, nights, points, wPill } from "/js/commission.js";
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const lines = (s) => String(s || "").split("\n").map((x) => x.trim()).filter(Boolean);
 
-export function createWorkshop({ api, me, pill, rpill, when, canCommission, refresh, cards }) {
+export function createWorkshop({ api, me, pill, rpill, when, canCommission, refresh, cards, chat }) {
   const S = { list: [], total: 0, counts: {}, view: "main", all: { rows: [], next: null, state: "", err: "" }, detail: {}, form: null, busy: false, err: "", note: "", openErr: "", draftPost: {} };
 
   /** @rule 801.2 */
@@ -92,18 +93,21 @@ ${S.list.length ? `<ul class="tlist">${S.list.map((t) => rowHTML(t)).join("")}</
   // ---- the ticket page (a card) ----------------------------------------------------------------------------------
   /** @rule 801.2 */
   function formFrom(t) {
-    return { n: t.n, title: t.title, brief: t.brief, entries: t.makes.filter((m) => m.kind === "entry").map((m) => m.name).join("\n"),
-      rules: t.makes.filter((m) => m.kind === "rule").map((m) => m.num).join(", "), estimate: t.estimate, running_cost: t.running_cost, tasks: t.tasks.map((x) => x.text).join("\n") };
+    const f = { n: t.n, title: t.title, brief: t.brief, entries: t.makes.filter((m) => m.kind === "entry").map((m) => m.name).join("\n"),
+      rules: t.makes.filter((m) => m.kind === "rule" && m.num).map((m) => m.num).join(", "), estimate: t.estimate, running_cost: t.running_cost, tasks: t.tasks.map((x) => x.text).join("\n") };
+    f.was = { entries: f.entries, rules: f.rules, held: t.makes.length };   // what the lists said when the form opened
+    return f;
   }
   /** @rule 801.2 */
+  const makesOf = (f) => [...lines(f.entries).map((name) => ({ kind: "entry", name })), ...String(f.rules || "").split(/[\s,]+/).filter(Boolean).map((num) => ({ kind: "rule", num }))];
   function bodyOf(f) {
-    return {
-      title: f.title, brief: f.brief, estimate: Number(f.estimate), running_cost: f.running_cost, tasks: lines(f.tasks),
-      makes: [...lines(f.entries).map((name) => ({ kind: "entry", name })), ...String(f.rules || "").split(/[\s,]+/).filter(Boolean).map((num) => ({ kind: "rule", num }))],
-    };
+    const b = { title: f.title, brief: f.brief, estimate: Number(f.estimate), running_cost: f.running_cost, tasks: lines(f.tasks) };
+    // The lists are sent only if the player changed them: what Gremlin drafted (kinds, sizes, a rule's draft) is kept when they didn't touch it.
+    if (!f.was || f.entries !== f.was.entries || f.rules !== f.was.rules) b.makes = makesOf(f);
+    return b;
   }
   /** @rule 801.3 */
-  const makesNothing = (f) => !bodyOf(f).makes.length;
+  const makesNothing = (f) => (f.was && f.entries === f.was.entries && f.rules === f.was.rules ? !f.was.held : !makesOf(f).length);
   /** @rule 801.2 */
   function formHTML(t) {
     const f = S.form;
@@ -117,12 +121,13 @@ ${S.list.length ? `<ul class="tlist">${S.list.map((t) => rowHTML(t)).join("")}</
 <label for="wfEstimate">Nights</label><input id="wfEstimate" type="number" min="1" max="99" step="1" value="${esc(f.estimate)}"${off}>
 <label for="wfCost">Running cost</label><input id="wfCost" maxlength="200" value="${esc(f.running_cost)}"${off}>
 <label for="wfTasks">Tasks</label><textarea id="wfTasks" rows="3"${off}>${esc(f.tasks)}</textarea>
+<label>Price</label><p class="wkprice">${esc(points(t.price))}${t.price_reason ? `<span class="mnote"> · ${esc(t.price_reason)}</span>` : ""}</p>
 ${S.err ? `<p class="notice err" role="alert">${esc(S.err)}</p>` : ""}${S.note ? `<p class="vmsg" role="status">${esc(S.note)}</p>` : ""}
-<div class="row"><button class="btn small" type="button" data-w="confirm"${off}${can && !nothing ? "" : " disabled"}>Put it on tomorrow's ballot</button><button class="btn ghost small" type="button" data-w="save"${off}${t.can.edit.allowed ? "" : " disabled"}>Save</button>${can ? `<span class="mnote" id="wfWhy"${nothing ? "" : " hidden"}>It makes nothing yet.</span>` : `<span class="mnote">${esc(t.can.confirm.reason || "")}</span>`}</div></div>`;
+<div class="row"><button class="btn small" type="button" data-w="confirm"${off}${can && !nothing ? "" : " disabled"}>Put it on tomorrow's ballot</button><button class="btn ghost small" type="button" data-w="save"${off}${t.can.edit.allowed ? "" : " disabled"}>Save</button>${chat && chat() && player() ? `<button class="btn ghost small" type="button" data-w="gremlin">Talk to Gremlin</button>` : ""}${can ? `<span class="mnote" id="wfWhy"${nothing ? "" : " hidden"}>It makes nothing yet.</span>` : `<span class="mnote">${esc(t.can.confirm.reason || "")}</span>`}</div></div>`;
   }
   /** @rule 801.2 */
   function makesHTML(t) {
-    return t.makes.length ? `<span class="makes">${t.makes.map((m) => (m.kind === "rule" ? `<span class="mk dim">${rpill(m.num)}</span>` : `<span class="mk dim">${esc(m.name)}</span>`)).join("")}</span>` : '<span class="mnote">Nothing</span>';
+    return t.makes.length ? `<span class="makes">${t.makes.map((m) => (m.kind === "rule" ? `<span class="mk dim">${m.num ? rpill(m.num) : esc(m.draft || "New rule")}</span>` : `<span class="mk dim">${esc(m.name)}</span>`)).join("")}</span>` : '<span class="mnote">Nothing</span>';
   }
   /** @rule 801.2, 801.4, 803.1 */
   function factsHTML(t) {
@@ -181,6 +186,8 @@ ${editing ? formHTML(t) : factsHTML(t)}${reopenHTML(t)}${editing ? "" : tasksHTM
       if (!r.ok) { S.openErr = (r.data && r.data.error) || "Something went wrong."; await refresh(); return; }
       await load();
       await open(r.data.ticket, false);
+      const c = chat && chat();
+      if (c) await c.attach(r.data.ticket, { open: true });   // the chat opens on the new draft (rule 801.2)
       return;
     }
     if (a === "all" || a === "main" || a === "filter" || a === "more") {
@@ -193,6 +200,7 @@ ${editing ? formHTML(t) : factsHTML(t)}${reopenHTML(t)}${editing ? "" : tasksHTM
       await refresh();
       return;
     }
+    if (a === "gremlin") { const c = chat && chat(); if (c && n) await c.attach(n, { open: true }); return; }
     if (!n || S.busy) return;
     S.busy = true; S.err = ""; S.note = ""; cards.redraw();
     try {
@@ -231,5 +239,12 @@ ${editing ? formHTML(t) : factsHTML(t)}${reopenHTML(t)}${editing ? "" : tasksHTM
     }
   }
 
-  return { load, count, tabHTML, summaryHTML, card, open, click, input, list: () => S.list };
+  /** A ticket page the chat window got back from a turn (Gremlin wrote the draft): the card shows it and the form is made again from it. @rule 801.2 */
+  function apply(t) {
+    S.detail[t.n] = t;
+    if (S.form && S.form.n === t.n) S.form = null;
+    if (cards.isOpen && cards.isOpen()) cards.redraw();
+  }
+
+  return { load, count, tabHTML, summaryHTML, card, open, click, input, apply, list: () => S.list };
 }

@@ -14,7 +14,7 @@ settings.json           every [setting: x] value; data, no code
 rules/<n>.ts            hooks for rule n (erasable TS only: no enums or namespaces)
 rules/<n>.test.ts       board fixtures in, expected outcome out (node --test)
 rules/rulebook.test.ts  RULES.md parses; [setting] tags = settings.json keys; every module's rule exists in the text
-rulings/                106.2
+rulings/                106.5
 package.json            devDep "promptocracy": "github:busterbenson/promptocracy#engine-v1"; "test": "node --test rules/"
 ```
 The engine API that games import must be **plain JS + `.d.ts`** (`src/engine/api.js`). Node 22 does not strip types under `node_modules`, and the repo already shares JS this way (`settings.js`, `geometry.js`).
@@ -175,7 +175,7 @@ Lean: **mini**. All the deterministic parts (order, test run, commit, tag, push,
 - **The mini is a single point of failure**, bounded by the deadline fallback and the pending-job alert.
 - **The hidden tally could leak** through `/api/game` events or MCP. Covered by tests.
 - **Text/code drift.** Rules are served from the bundle, and `rulebook.test.ts` checks text, settings and modules agree.
-- **Rules with no code after step 1:** 301 (appeals), 106.2/106.3 (rulings), 302 (site code), 403 (paradox). See Q5.
+- **Rules with no code after step 1:** 301 (appeals), 106.5/106.6 (rulings), 302 (site code), 403 (paradox). See Q5.
 
 **Open questions for Buster** (with my leans)
 1. **Early close when every living player has ended their turn?** As written (203.1), no: the day runs midnight to midnight. Lean: **no**, so results always land at one hour (the mockup's lean too).
