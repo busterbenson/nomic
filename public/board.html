@@ -279,6 +279,7 @@ import { createWorkshop } from "/js/workshop.js";
     return `${p.champion ? "made the Champion's change: " : "proposed "}${what}. ${need}`;
   }
   const ballotList = () => (PROP ? PROP.onBallot() : []);
+  const votable = () => (BAL && BAL.hasYou() ? BAL.total() : ballotList().length);   // today's ballot items you can vote on
   const votedCount = () => (DAY && DAY.you ? Number(DAY.you.voted) || 0 : 0);   // how many of today's ballot items you have voted on (/api/day); the Yes / No boxes go in the ballot-vote slots
 
   function proposeCard() {
@@ -347,17 +348,18 @@ import { createWorkshop } from "/js/workshop.js";
       const you = DAY.you, ended = !!(you && you.ended);
       const bl = ballotList();
       // End turn is the one filled button on the page once your move, your votes and your proposal are all in; before that it is ghost (OPEN-06 (3): lean yes)
-      const allDone = !!(you && you.moved && you.proposed && votedCount() === bl.length);
+      const nv = votable();   // the Champion does not vote on their own change (402.4)
+      const allDone = !!(you && you.moved && you.proposed && votedCount() === nv);
       const step = (done, jump, label, doneLabel, detail) => `<li><button type="button" class="dstep${done ? " done" : ended ? " skip" : ""}" data-jump="${jump}"><span class="ck" aria-hidden="true">${done ? "✓" : ended ? "–" : ""}</span><span class="dt"><span class="dn2">${done ? doneLabel : label}</span>${detail ? `<span class="ds">${esc(detail)}</span>` : ""}</span></button></li>`;
       const myPos = BOARD && ME && ME.player ? BOARD.pieces.find(p => p.color.key === myKey()) : null;
       let html = `<div class="dhead"><h2>Day ${esc(DAY.day)}</h2><span class="moon" data-slot="moon"></span></div>`;
-      if (you) html += `<ul class="dsteps">${step(you.moved, "board", ended ? "No move" : "Move", "Moved", you.moved && myPos ? noLevel(myPos.at.label) : "")}${step(bl.length > 0 && votedCount() === bl.length, "ballot", ended ? "No votes" : "Vote", "Voted", bl.length ? `${votedCount()} of ${bl.length}` : "")}${step(you.proposed, "propose", ended ? "No proposal" : "Propose", "Proposed", you.proposed && PROP ? PROP.mineList().map(p => p.n).join(", ") : "")}</ul>`;
+      if (you) html += `<ul class="dsteps">${step(you.moved, "board", ended ? "No move" : "Move", "Moved", you.moved && myPos ? noLevel(myPos.at.label) : "")}${step(nv > 0 && votedCount() === nv, "ballot", ended ? "No votes" : "Vote", "Voted", nv ? `${votedCount()} of ${nv}` : "")}${step(you.proposed, "propose", ended ? "No proposal" : "Propose", "Proposed", you.proposed && PROP ? PROP.mineList().map(p => p.n).join(", ") : "")}</ul>`;
       html += `<div class="dend">${ended ? `<span class="clock done">${LOCKSVG}Turn ended</span>`
         : `<span class="clock" id="clock">${esc(clockText())}</span>${you && !END_ASK ? `<button type="button" class="btn small${allDone ? "" : " ghost"}" data-endturn="ask"${you.can.end_turn.allowed ? "" : ` disabled title="${esc(you.can.end_turn.reason || "")}"`}>End turn</button>` : ""}`}</div>`;
       if (you && END_ASK && !ended) {
         const left = [];
         if (!you.moved) left.push("your move");
-        if (votedCount() < bl.length) left.push(plural(bl.length - votedCount(), "vote"));
+        if (votedCount() < nv) left.push(plural(nv - votedCount(), "vote"));
         if (!you.proposed) left.push("your proposal");
         const skips = left.join(", ").replace(/, ([^,]*)$/, " and $1");
         html += `<div class="dask" role="group" aria-label="End turn"><span>${left.length ? `You skip ${skips}.` : ""}</span><span class="row"><button type="button" class="btn small" data-endturn="yes">End turn</button><button type="button" class="linkbtn" data-endturn="no">Keep playing</button></span></div><div id="day-msg" role="status"></div>`;

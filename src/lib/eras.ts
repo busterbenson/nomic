@@ -3,6 +3,8 @@
 // src/lib/votes.js; this file reads the state and runs the one write a Champion has besides a proposal: naming the Era.
 import { getPlayer } from "./auth";
 import { clockNow, dayOpenBinds, dayOpenSql, loadToday } from "./day";
+import { bundleFor } from "../engine/host";
+import { hasEraNaming, parseBook } from "./proposals.js";
 import { refusalBody, turnBlock } from "./turn";
 import { Ctx, Env, colorOf, json, nowIso, readJson, who } from "./util";
 
@@ -63,13 +65,15 @@ export const post = async (ctx: Ctx) => {
   const { game, day, turn } = await loadToday(env, ctx.data.game!, nowMs, player.id);
   const blocked = turnBlock(game, day, turn, player, "end_turn", nowMs); // the day's gates only: naming is not a proposal
   if (blocked) return json(refusalBody(blocked), blocked.status);
+  if (!hasEraNaming(parseBook(bundleFor(game).bundle.rulesMd))) return json({ error: "The game's rules have no naming of Eras (rule 402.3)." }, 409);
   if ((await championId(env, game.id)) !== player.id) return json({ error: "Only the Champion names the Era (rule 402.3)." }, 403);
   const era = await openEra(env, game.id);
   if (!era) return json({ error: "There is no Era yet." }, 409);
   if (era.name !== null) return json({ error: `This Era is already named ${era.name}.` }, 409);
-  const now = nowIso(nowMs);
+  const now = nowIso(nowMs), line = `${who(player.display_name, player.color)} named Era ${era.n}: ${name}.`;
   // Both writes carry the same guards: the day is open and this turn not ended, you are the Champion, the Era is still unnamed.
-  const named = `EXISTS (SELECT 1 FROM eras WHERE game_id = ? AND n = ? AND name = ? AND named_by = ?)`;
+  const named = `EXISTS (SELECT 1 FROM eras WHERE game_id = ? AND n = ? AND name = ? AND named_by = ?)
+    AND NOT EXISTS (SELECT 1 FROM events WHERE game_id = ? AND kind = 'era_named' AND day = ? AND player_id = ? AND text = ?)`;
   const res = await env.DB.batch([
     env.DB.prepare(
       `UPDATE eras SET name = ?, named_by = ? WHERE game_id = ? AND n = ? AND ended_day IS NULL AND name IS NULL
@@ -80,7 +84,7 @@ export const post = async (ctx: Ctx) => {
     env.DB.prepare(
       `INSERT INTO events (game_id, kind, text, created_at, day, phase, player_id)
        SELECT ?, 'era_named', ?, ?, ?, 'day', ? WHERE ${named}`,
-    ).bind(game.id, `${who(player.display_name, player.color)} named Era ${era.n}: ${name}.`, now, game.day, player.id, game.id, era.n, name, player.id),
+    ).bind(game.id, line, now, game.day, player.id, game.id, era.n, name, player.id, game.id, game.day, player.id, line),
   ]);
   if (!(res[0]?.meta?.changes > 0)) return json({ error: "The day changed under you. Reload and try again." }, 409);
   return json({ ok: true, era: { n: era.n, name } });

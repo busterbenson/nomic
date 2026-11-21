@@ -34,7 +34,8 @@ export const get = async (ctx: Ctx) => {
      FROM players p LEFT JOIN day_turns t ON t.game_id = p.game_id AND t.day = ? AND t.player_id = p.id
      WHERE p.game_id = ? ORDER BY p.turn_order`,
   ).bind(game.day, game.day, game.day, game.day, game.day, game.id).all()).results as any[];
-  const ballot: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'on_ballot'").bind(game.id, game.day).first();
+  // The items you can vote on: the Champion does not vote on their own change (rule 402.4).
+  const ballot: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'on_ballot' AND NOT (champion = 1 AND player_id = ?)").bind(game.id, game.day, player?.id ?? "").first();
   const mine = player ? rows.find((r) => r.turn_order === player.turn_order) : null;
   const era = await eraView(env, game.id, player?.id); // the Era and the Champion (rule 402), and whether your change is still unused
   const perDay: number = settingsOf(game)["proposals.per_day"];

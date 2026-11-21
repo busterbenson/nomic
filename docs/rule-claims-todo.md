@@ -7,7 +7,7 @@ Every function that carries out the game should say which rule it implements, wi
 `src/` is only reported for now: these functions have no claim yet. Site plumbing such as sign-in and email goes
 under rule 101 or 102; a follow-up change claims them and moves `src/` into the strict set.
 
-138 of 294 functions outside `src/engine/` are unclaimed.
+138 of 296 functions outside `src/engine/` are unclaimed.
 
 ## src/index.ts (5)
 
@@ -97,14 +97,14 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/lib/proposals.js (8)
 
-- line 146: `own`
-- line 147: `cites`
-- line 178: `own`
-- line 182: `add`
-- line 268: `obj`
-- line 383: `refuse`
-- line 385: `own`
-- line 465: `typeOf`
+- line 151: `own`
+- line 152: `cites`
+- line 183: `own`
+- line 187: `add`
+- line 273: `obj`
+- line 388: `refuse`
+- line 390: `own`
+- line 470: `typeOf`
 
 ## src/lib/settings.js (12)
 
@@ -161,7 +161,7 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/routes/api-day.ts (1)
 
-- line 41: `can`
+- line 42: `can`
 
 ## src/routes/api-login.ts (1)
 

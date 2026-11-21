@@ -4,6 +4,9 @@
 // tests/moderator.mjs. Run: node tests/eras.mjs. Real `wrangler dev`, LOCAL D1 only.
 import { createGame, d1, join, migrate, newState, startPlaying, freePort, startRulesStub, startServer } from "./lib.mjs";
 import { CHAMPION_NO_VOTE, resultSentence, tally } from "../src/lib/votes.js";
+import { hasChampionChange, hasEraNaming, parseBook } from "../src/lib/proposals.js";
+import { readFileSync } from "node:fs";
+import { ROOT } from "./lib.mjs";
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = "") => {
@@ -28,6 +31,14 @@ console.log("the count of the Champion's change (rule 402.4)");
   check("the totals say how many others there are and the sentence reads as the reverse rule", count([v("b", "no")]).needed === 3 && resultSentence(count([v("b", "no")])) === "1 of 3 other players voted no; it fails only if all 3 do." && resultSentence(tally({ mark: "majority", electorate: 1, electors: ["a"], votes: [], champion: true, proposer: "a" })) === "There are no other players, so it takes effect.");
   const plain = tally({ mark: "majority", electorate: 4, electors: E, votes: [v("a", "yes"), v("b", "yes")] });
   check("an ordinary proposal is counted as before: not voting counts as no, and it needs more than half", plain.passed === false && plain.needed === 3 && tally({ mark: "majority", electorate: 4, electors: E, votes: [v("a", "yes"), v("b", "yes"), v("c", "yes")] }).passed === true && resultSentence(plain) === "2 of 4 voted yes; it needed 3.");
+}
+
+console.log("the site enforces the Champion's change only while the rules still say so (rule 2 of AGENTS.md)");
+{
+  const md = readFileSync(`${ROOT}/templates/RULES.md`, "utf8");
+  const without = md.replace(/\*\*402\.4\*\*[\s\S]*?(?=### 403)/, "").replace(/\*\*402\.3\*\*[\s\S]*?(?=### 403)/, "");
+  check("the starter rules have 402.3 and 402.4; the same rules with the two clauses repealed do not, and the helpers say so",
+    hasChampionChange(parseBook(md)) && hasEraNaming(parseBook(md)) && !hasChampionChange(parseBook(without)) && !hasEraNaming(parseBook(without)));
 }
 
 // ---------------------------------------------------------------- the running site
@@ -109,6 +120,9 @@ try {
   d1(state, `UPDATE proposals SET status = 'not_applied' WHERE id = '${redo.data.proposal.id}'`);
   check("a change that is not applied (107.7) does not use the Era's change: she can draft again", redoC.status === 200 && (await draft("Ana", { champion: true })).status === 200);
 
+  d1(state, `UPDATE proposals SET status = 'enacted', day_proposed = 1, day_ballot = 2 WHERE id = '${redo.data.proposal.id}'`);
+  check("a change made in an earlier Era (before this Era's first day) does not use this Era's: she can draft again", (await draft("Ana", { champion: true })).status === 200 && (await P.Ana.get("/era/api/day")).data.you.champion.change.allowed === true);
+
   console.log("the same checks as any proposal");
   const fixed = await P.Ana.post(API, { kind: "repeal", target: "104.4", champion: true });
   check("a Champion's change to a part no proposal can change is refused at the draft, with rule 110.1's reason, like any proposal", fixed.status === 422 && fixed.data.rule === "110.1", fixed.text);
@@ -144,6 +158,10 @@ try {
   const gm3 = (await P.Bo.get("/era/api/game")).data;
   check("the Champion names it: stored (control and direction characters stripped, spaces folded), shown to everyone, and put in the history", named.status === 200 && gm3.era.name === "The Long Dusk" && eras()[1].name === "The Long Dusk" && gm3.events.some((e) => e.kind === "era_named" && /Ana \(Teal\) named Era 2: The Long Dusk\./.test(e.text)), named.text + J(gm3.events.slice(0, 2)));
   const twice = await P.Ana.post("/era/api/era", { name: "Another" });
+  d1(state, `UPDATE eras SET name = NULL, named_by = NULL WHERE game_id = '${gid}' AND n = 2; DELETE FROM events WHERE game_id = '${gid}' AND kind = 'era_named'`);
+  const race = await Promise.all([P.Ana.post("/era/api/era", { name: "Racing" }), P.Ana.post("/era/api/era", { name: "Racing" })]);
+  check("two namings at once: one lands (200), the other is refused (409), and History has one line", J(race.map((r) => r.status).sort()) === J([200, 409]) && d1(state, `SELECT COUNT(*) AS n FROM events WHERE game_id = '${gid}' AND kind = 'era_named'`)[0].n === 1, race.map((r) => r.text).join(" | "));
+  d1(state, `UPDATE eras SET name = 'The Long Dusk' WHERE game_id = '${gid}' AND n = 2`);
   check("it is named once: a second name is refused (409) and the first stays", twice.status === 409 && eras()[1].name === "The Long Dusk", twice.text);
   const anonPost = await fetch(`${A}/era/api/era`, { method: "POST", headers: { "content-type": "application/json" }, body: J({ name: "x" }) });
   check("signed out it is 401", anonPost.status === 401);

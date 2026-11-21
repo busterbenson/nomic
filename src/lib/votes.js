@@ -32,9 +32,8 @@ export function tally({ mark, electorate, electors, votes, needed, champion = fa
   return { yes, no, absent, needed: need, electorate, passed: yes >= need };
 }
 
-// "3 of 5 voted yes; it needed 3." Written on every counted proposal.
-/** @rule 104.1 */
-// The Champion's change (rule 402.4) says how many of the other players voted no.
+// "3 of 5 voted yes; it needed 3." Written on every counted proposal; the Champion's change (rule 402.4) says how many of
+// the other players voted no.
 /** @rule 104.1, 402.4 */
 export const resultSentence = (t) => (t.champion
   ? t.needed ? `${t.no} of ${t.needed} other players voted no; it fails only if all ${t.needed} do.` : "There are no other players, so it takes effect."

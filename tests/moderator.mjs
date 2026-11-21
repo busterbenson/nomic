@@ -145,6 +145,7 @@ try {
   check("the claimed commit live only at 2:40 am (past 2:30 and the next tick): not applied, no points, the lock ends", prop(p9).status === "not_applied" && prop(p9).not_applied_reason === DEPLOY_REASON && score("Cy") === 0 && day(6).status === "timed_out" && game().phase === "open", J([prop(p9), day(6)]));
 
   console.log("winning (rule 402)");
+  d1(state, `DELETE FROM eras WHERE game_id = '${gid}'`);   // a game that began before migration 0011 has no Era row yet: the night makes it (Era 1, from day 1)
   d1(state, `UPDATE players SET score = 95 WHERE id = '${id.Ana}'; UPDATE players SET score = 98 WHERE id = '${id.Bo}'`);
   const p6 = ballot(7, "Ana", "401.1"), p7 = ballot(7, "Bo", "402.1");
   await midnight();
