@@ -23,6 +23,8 @@ import { refusalBody, turnBlock } from "../lib/turn";
 import { COLS, FROM, ticketView } from "../lib/ticket-view";
 import { Ctx, colorOf, json, nowIso, readJson } from "../lib/util";
 import { bookFor, confirm as confirmProposal } from "./api-proposals";
+import { catalogFor, viewContext } from "./api-catalog";
+import { entryView } from "../lib/catalog.js";
 
 type Out = { status: number; body: any };
 const out = (body: any, status = 200): Out => ({ status, body });
@@ -131,8 +133,12 @@ async function page(ctx: Ctx, r: any, player: any, nowMs: number) {
     const { game: g, day } = await loadToday(env, game, nowMs);
     if (g.status === "playing" && day && isLocked(g, day, nowMs)) post = { allowed: false, reason: lockMessage(day.n), locked: true };
   }
+  // each entry it makes comes with the view a card shows (rules 701.1, 704.2): its kind, attribute rows and flavor, in the order of the entries in `makes`
+  const view = ticketView(r, player?.id);
+  const cat = viewContext(catalogFor(game));
   return {
-    ...ticketView(r, player?.id),
+    ...view,
+    entry_views: view.makes.filter((m: any) => m.kind === "entry").map((m: any) => entryView(m, cat)),
     tasks: (tasks.results as any[]).map((t) => ({ text: t.text, done: !!t.done, done_day: t.done_day ?? null })),
     log: (log.results as any[]).map((l) => ({ day: l.day ?? null, kind: l.kind, text: l.text, at: l.at })),
     posts: (posts.results as any[]).map((x) => ({
@@ -194,7 +200,8 @@ export async function edit(ctx: Ctx, player: any, raw: unknown, body: any, nowMs
   const m = await mine(ctx, player, raw, nowMs);
   if ("status" in m) return m;
   const { t, game } = m;
-  const r = readFields(body);
+  const cat = catalogFor(game);
+  const r = readFields(body, { registry: cat.registry, required: cat.required });
   if ("error" in r) return out({ error: r.error }, 400);
   const f = r.fields as any;
   const now = nowIso(nowMs);
@@ -215,6 +222,36 @@ export async function edit(ctx: Ctx, player: any, raw: unknown, body: any, nowMs
   if (!(res[0]?.meta?.changes > 0)) return out({ error: "The day changed under you. Reload and try again." }, 409);
   const fresh = await findTicket(env, game.id, t.number);
   return out({ ok: true, ticket: await page(ctx, fresh, player, nowMs) });
+}
+
+// The ticket page for a ticket number, for the chat window (Gremlin's slip): the same page the ticket route serves.
+/** @rule 801.2 */
+export async function pageOf(ctx: Ctx, raw: unknown, player: any, nowMs: number) {
+  const game = ctx.data.game!;
+  const r = await findTicket(ctx.env, game.id, raw);
+  return visible(r, player) ? page(ctx, r, player, nowMs) : null;
+}
+
+// What Gremlin writes (rules 106.3, 801.2, 801.4): the player's own draft, through the same guard as their own edit (EDIT_GUARD: their draft,
+// not tied to a proposal, the whole day gate re-checked in the write), so he can never write an approved ticket, write during the lock, or
+// write after End turn. `patch` is what readGremlinAnswer returned: the only route by which `price` and `price_reason` are ever written
+// (readFields, the player's reader, does not read them). Returns whether it landed.
+/** @rule 801.2, 801.4, 106.3, 107.1, 202.4 */
+export async function gremlinWrite(env: Ctx["env"], game: any, player: any, t: any, patch: Record<string, any>, nowMs: number): Promise<boolean> {
+  const sets: string[] = [], binds: unknown[] = [];
+  for (const k of ["title", "brief", "estimate", "running_cost", "price", "price_reason"]) if (k in patch) { sets.push(`${k} = ?`); binds.push(patch[k]); }
+  if ("makes" in patch) { sets.push("makes = ?"); binds.push(JSON.stringify(patch.makes)); }
+  const f = patch as any;
+  if (!sets.length && !("tasks" in f)) return true;   // nothing to write is not a failed write
+  const gate = dayOpenBinds(game.day, nowMs, player.id);
+  const stmts = [env.DB.prepare(`UPDATE tickets SET ${[...sets, "updated_at = ?"].join(", ")} WHERE ${EDIT_GUARD}`).bind(...binds, nowIso(nowMs), t.id, player.id, ...gate)];
+  if ("tasks" in f) {
+    const ok = `EXISTS (SELECT 1 FROM tickets x JOIN games g ON g.id = x.game_id WHERE x.id = ? AND x.state = 'Draft' AND x.player_id = ? AND x.proposal_id IS NULL AND ${dayOpenSql})`;
+    stmts.push(env.DB.prepare(`DELETE FROM ticket_tasks WHERE ticket_id = ? AND ${ok}`).bind(t.id, t.id, player.id, ...gate));
+    f.tasks.forEach((text: string, i: number) => stmts.push(env.DB.prepare(`INSERT INTO ticket_tasks (ticket_id, pos, text) SELECT ?, ?, ? WHERE ${ok}`).bind(t.id, i + 1, text, t.id, player.id, ...gate)));
+  }
+  const res = await env.DB.batch(stmts);
+  return res[0]?.meta?.changes > 0;
 }
 
 // POST /api/tickets/<W3>/confirm: the commission is one of your proposals for the day (rule 801.1). It goes through the same

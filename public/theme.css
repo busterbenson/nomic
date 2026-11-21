@@ -17,6 +17,8 @@
   --fog: rgba(24, 32, 43, .07);
   /* a rule that changed lately: warm sand (<= 2 days), pale sand (<= 6 days); the page's other surfaces stay cool */
   --warm1: #F2DFB4; --warm2: #F6EBD2; --warm-line: #C9B383;
+  /* the chat window: its body and its header, and the dim behind the phone's sheet */
+  --chat: #FFFFFF; --chat-head: #EDE8FA; --scrim: rgba(24, 32, 43, .42);
 
   /* monster-only colors (never offered to players) */
   --bog: #6E9A3C; --bog-shade: #3F5E27; --wraith: #471C47; --hex-pink: #AD1A6C;
@@ -32,6 +34,7 @@
     --tile-seam: rgba(0, 0, 0, .28); --shade-1: rgba(5, 10, 20, .22); --shade-2: rgba(5, 10, 20, .42);
     --fog: rgba(255, 255, 255, .05);
     --warm1: #4C4023; --warm2: #38342B; --warm-line: #7A683A;
+    --chat: #26344B; --chat-head: #332C4F; --scrim: rgba(0, 0, 0, .6);
     --hex-pink: #FF7BC5;
     color-scheme: dark;
   }

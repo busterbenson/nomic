@@ -10,7 +10,8 @@
 //                                                day n is processing and before its deadline (107.6); the day goes to
 //                                                deploying. seq is the order the moderator applied them in (1..n, each
 //                                                once); the enactment follows it (107.2).
-import { clockNow, deployDeadline, notAppliedStatements } from "../lib/day";
+import { monthSpend } from "../lib/agent";
+import { clockNow, deployDeadline, notAppliedStatements, timeZoneOf } from "../lib/day";
 import { orderPassed } from "../engine/host";
 import { Ctx, json, nowIso, readJson, sha256Hex } from "../lib/util";
 
@@ -47,15 +48,41 @@ export const pending = async (ctx: Ctx) => {
               q.settings, q.conflicts, q.mark, q.yes, q.no, q.needed, q.budget_minutes, q.budget_effort, q.base_sha, q.commit_sha,
               q.day_proposed, p.display_name AS player
        FROM proposals q JOIN players p ON p.id = q.player_id AND p.game_id = q.game_id
-       WHERE q.game_id = ? AND q.day_ballot = ? AND q.status = 'passed' AND q.kind != 'commission' ORDER BY q.number`,
+       WHERE q.game_id = ? AND q.day_ballot = ? AND q.status = 'passed' AND q.kind NOT IN ('commission', 'action') ORDER BY q.number`,
     ).bind(game.id, day.n).all()).results as any[];
+    // A night with only actions (rule 103.8) is the site's own: the moderator has nothing to apply and sees no job.
     const passed = (await orderPassed(env, game, rows, nowMs)).map((r) => ({ ...r, settings: JSON.parse(r.settings || "{}"), conflicts: JSON.parse(r.conflicts || "[]"), player: { name: r.player } }));
     const deadline = Date.parse(day.deadline_at);
-    job = { day: day.n, status: day.status, locked_at: day.locked_at, deadline_at: day.deadline_at, deploy_deadline_at: Number.isFinite(deadline) ? nowIso(deployDeadline(deadline)) : null, commit_sha: day.commit_sha, tag: day.tag, passed };
+    if (!(day.status === "processing" && !passed.length)) job = { day: day.n, status: day.status, locked_at: day.locked_at, deadline_at: day.deadline_at, deploy_deadline_at: Number.isFinite(deadline) ? nowIso(deployDeadline(deadline)) : null, commit_sha: day.commit_sha, tag: day.tag, passed };
   }
   const notApplied = (await env.DB.prepare("SELECT number, day_ballot AS day, not_applied_reason AS reason FROM proposals WHERE game_id = ? AND status = 'not_applied' ORDER BY number").bind(game.id).all()).results;
   const processed = (await env.DB.prepare("SELECT n, status, commit_sha, tag FROM days WHERE game_id = ? AND status IN ('done', 'timed_out') ORDER BY n DESC LIMIT 3").bind(game.id).all()).results;
   return json({ game: { slug: game.slug, repo: game.repo, status: game.status, day: game.day, rules_day: game.rules_day }, now: nowIso(nowMs), job, not_applied: notApplied, processed });
+};
+
+// GET /api/moderator/agents[?day=N]: the night's read of the agents (rules 106.3, 106.7): what the model calls did that day, what the game has
+// spent this month against its budget, the reasons of everything that was refused or invalid, and who hit the cap. Counts, outcomes and short
+// reasons only: no prompt and no chat text (a player's chat is private to them).
+/** @rule 106.3, 106.7 */
+export const agents = async (ctx: Ctx) => {
+  if (!(await authorized(ctx))) return unauthorized();
+  const { env } = ctx;
+  const game = ctx.data.game!;
+  const raw = new URL(ctx.request.url).searchParams.get("day");
+  const n = raw === null ? game.day : Number(raw);
+  if (!Number.isInteger(n) || n < 0) return json({ error: "Bad day." }, 400);
+  if (n === 0) return json({ day: 0, calls: [], reasons: [], players_at_cap: 0, month: { spent_micro: 0, budget_micro: 0, over: false } });   // a game in setup has no day yet
+  const day: any = await env.DB.prepare("SELECT starts_at, ends_at FROM days WHERE game_id = ? AND n = ?").bind(game.id, n).first();
+  if (!day) return json({ error: "No such day." }, 404);
+  const win = [game.id, day.starts_at, day.ends_at];
+  const [calls, reasons, capped] = await Promise.all([
+    env.DB.prepare(`SELECT agent, purpose, outcome, COUNT(*) AS calls, COALESCE(SUM(input_tokens), 0) AS input_tokens, COALESCE(SUM(cache_read), 0) AS cache_read, COALESCE(SUM(cache_write), 0) AS cache_write,
+        COALESCE(SUM(output_tokens), 0) AS output_tokens, COALESCE(SUM(cost_micro), 0) AS cost_micro FROM agent_calls WHERE game_id = ? AND at >= ? AND at < ? GROUP BY agent, purpose, outcome ORDER BY agent, purpose, outcome`).bind(...win).all(),
+    env.DB.prepare(`SELECT outcome, reason, COUNT(*) AS n FROM agent_calls WHERE game_id = ? AND at >= ? AND at < ? AND outcome NOT IN ('ok', 'pending') AND reason IS NOT NULL GROUP BY outcome, reason ORDER BY n DESC LIMIT 50`).bind(...win).all(),
+    env.DB.prepare(`SELECT COUNT(DISTINCT player_id) AS n FROM chat_messages WHERE game_id = ? AND at >= ? AND at < ? AND role = 'excuse'`).bind(...win).first(),
+  ]);
+  const spend = await monthSpend(env, game, timeZoneOf(game), await clockNow(env));
+  return json({ day: n, calls: calls.results, reasons: reasons.results, players_at_cap: (capped as any)?.n ?? 0, month: { spent_micro: spend.spent, budget_micro: spend.budget, over: spend.over } });
 };
 
 /** @rule 107.6, 107.7, 107.8 */
@@ -75,7 +102,7 @@ export const claim = async (ctx: Ctx) => {
   if (day.status !== "processing") return json({ error: `Day ${n} is not waiting for the moderator (it is ${day.status}).` }, 409);
   if (!(nowMs < Date.parse(day.deadline_at))) return json({ error: `Too late: the deadline for day ${n} has passed (rule 107.6).` }, 409);
 
-  const passed = (await env.DB.prepare("SELECT id, number, player_id FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed' AND kind != 'commission'").bind(game.id, n).all()).results as any[];
+  const passed = (await env.DB.prepare("SELECT id, number, player_id FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed' AND kind NOT IN ('commission', 'action')").bind(game.id, n).all()).results as any[];
   const byNum = new Map(passed.map((q) => [q.number, q]));
   const seen = new Set<number>(), seqs = new Set<number>();
   for (const o of body.outcomes) {

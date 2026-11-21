@@ -11,6 +11,8 @@
 //
 // ENGINE CHANGES ARE ADDITIVE ONLY: a new hook or a new optional ctx field reaches every game in a separate
 // platform change. Nothing here may change what an existing module sees.
+// (The one exception, rule 402: the `win` effect became `champion` when Eras replaced the game-over win. Only the starter
+// pack and Rickshaw Game 1, then in setup, used it; the later only-one-alive win brings its own effect back.)
 import { validCoord } from "../lib/geometry.js";
 
 // HOW SEVERAL RULES SHARE A HOOK. A rule never edits another rule's code. Each rule module registers its own handler
@@ -34,6 +36,16 @@ export const HOOKS = Object.freeze({
   applyOrder: { mode: "decide", wired: true },
   onEnacted: { mode: "sequence", wired: true },
   dayEnd: { mode: "sequence", wired: true },
+  // What the Champion may do (rule 402.3 naming the Era, 402.4 the one change): `championChange(ctx, champion, power)` with power
+  // "change" or "name". A veto hook with one difference: a game whose rules have NO module for it gives the Champion neither
+  // power (the site refuses both), so repealing the rule that carries them removes them, wherever that rule is numbered. A module
+  // answers null (allowed) or refuses with a reason.
+  championChange: { mode: "veto", wired: true },
+  // An action type (rule 103.5): actionType() names it (its type, its parameters, the rules it touches) and applyAction(ctx, action)
+  // does it when a passed action proposal is applied. A module implements both or neither; the engine calls applyAction of the one
+  // module whose actionType names the action's type, so these two are not run in sequence over every module.
+  actionType: { mode: "sequence", wired: true },
+  applyAction: { mode: "sequence", wired: true },
 });
 
 export const ACTION_KINDS = Object.freeze(["move", "propose", "vote", "end_turn"]);
@@ -143,19 +155,47 @@ export function makeContext(o) {
 //   chart  {type:"chart", tiles:[{x,y,z}]}            chart blank tiles (a no-op for charted ones)
 //   points {type:"points", player, delta, reason}      (applied once points arrive)
 //   log    {type:"log", template, args}                (applied once the day log arrives)
-//   win    {type:"win", player, reason}                (applied once winning arrives)
+//   champion {type:"champion", player, reason}         (dayEnd only: this player wins the Era, rule 402)
 /** @rule 101 */
 const isInt = (n) => Number.isSafeInteger(n);
 /** @rule 101 */
 const isStr = (s, max = 400) => typeof s === "string" && s.length > 0 && s.length <= max;
-export const EFFECT_TYPES = Object.freeze(["chart", "points", "log", "win"]);
+export const EFFECT_TYPES = Object.freeze(["chart", "points", "log", "champion"]);
 export const APPLIED_EFFECTS = Object.freeze(["chart"]);
 // What the night's hooks may return, and the engine applies at the unlock (src/lib/day.ts): points when a change takes
-// effect (rule 401) and a win at the end of the night (rule 402).
-export const NIGHT_EFFECTS = Object.freeze(["points", "win"]);
-// What each night hook's enactment applies (src/engine/host.ts): points from onEnacted, a win from dayEnd. Any other
+// effect (rule 401) and the Era won at the end of the night (rule 402).
+export const NIGHT_EFFECTS = Object.freeze(["points", "champion"]);
+// What each night hook's enactment applies (src/engine/host.ts): points from onEnacted, the Era's winner from dayEnd. Any other
 // effect is refused, never dropped, so a rule can't pass its tests with an effect that would silently do nothing.
-export const NIGHT_HOOK_EFFECTS = Object.freeze({ onEnacted: Object.freeze(["points"]), dayEnd: Object.freeze(["win"]) });
+export const NIGHT_HOOK_EFFECTS = Object.freeze({ onEnacted: Object.freeze(["points"]), dayEnd: Object.freeze(["champion"]), applyAction: Object.freeze(["points"]) });
+
+// ---- action types (rule 103.5) ----------------------------------------------------
+// What a module's actionType() answers: {type, name, touches: [rule numbers], params: [{key, label, kind: "player" | "int", ...}]}.
+//   type     the id a proposal carries ("grant"), lower case and underscores
+//   name     what a player sees ("Grant points")
+//   touches  the rules the action reaches into: the votes it needs are the strictest mark among them and its own rule (103.7)
+//   params   what the player fills in. A "player" names a player of the game (other: true leaves out the proposer); an "int" is a whole
+//            number from min to max.
+export const PARAM_KINDS = Object.freeze(["player", "int"]);
+const TYPE_ID = /^[a-z][a-z_]{0,29}$/;
+const PARAM_KEY = /^[a-z][a-z_]{0,19}$/;
+/** @rule 103.5 */
+export function validateActionType(d) {
+  if (!d || typeof d !== "object" || Array.isArray(d)) return "actionType must answer an object";
+  if (typeof d.type !== "string" || !TYPE_ID.test(d.type)) return "an action type needs a type id of lower case letters and underscores";
+  if (!isStr(d.name, 60)) return "an action type needs a name of at most 60 characters";
+  if (!Array.isArray(d.touches) || !d.touches.length || d.touches.length > 8 || !d.touches.every((n) => Number.isInteger(n) && n >= 100 && n <= 9999)) return "an action type needs touches: 1 to 8 rule numbers (the rules it reaches into)";
+  if (!Array.isArray(d.params) || d.params.length > 6) return "an action type needs params: a list of at most 6";
+  const keys = new Set();
+  for (const p of d.params) {
+    if (!p || typeof p !== "object" || typeof p.key !== "string" || !PARAM_KEY.test(p.key) || keys.has(p.key)) return "each param needs its own key of lower case letters and underscores";
+    keys.add(p.key);
+    if (!isStr(p.label, 40)) return `param ${p.key} needs a label of at most 40 characters`;
+    if (!PARAM_KINDS.includes(p.kind)) return `param ${p.key} must be a player or an int`;
+    if (p.kind === "int" && !(isInt(p.min) && isInt(p.max) && p.min <= p.max)) return `param ${p.key} needs a whole min and max, min first`;
+  }
+  return null;
+}
 
 /** @rule 101 */
 export function validateEffect(e) {
@@ -169,8 +209,8 @@ export function validateEffect(e) {
       return isStr(e.player, 100) && isInt(e.delta) && isStr(e.reason) ? null : "points needs player, whole delta and reason";
     case "log":
       return isStr(e.template, 100) && e.args && typeof e.args === "object" && !Array.isArray(e.args) ? null : "log needs template and args";
-    case "win":
-      return isStr(e.player, 100) && isStr(e.reason) ? null : "win needs player and reason";
+    case "champion":
+      return isStr(e.player, 100) && isStr(e.reason) ? null : "champion needs player and reason";
     default:
       return `unknown effect type ${JSON.stringify(e.type)}`;
   }
@@ -190,7 +230,7 @@ export const effects = Object.freeze({
   /** @rule 101 */
   log: (template, args = {}) => ({ type: "log", template, args }),
   /** @rule 402 */
-  win: (player, reason) => ({ type: "win", player, reason }),
+  champion: (player, reason) => ({ type: "champion", player, reason }),
 });
 /** @rule 101 */
 export const refuse = (error, status = 400) => ({ error, status });
@@ -238,6 +278,19 @@ export function assembleRules(modules, { label = "rules" } = {}) {
       if (n !== 1) problems.push(`${hook} needs exactly one rule to implement it, found ${n}${n ? ` (${implementers(hook).map((m) => m.rule).join(", ")})` : ""}`);
     }
   }
+  // Action types: a module has both hooks or neither, its descriptor is valid, and no two modules name the same type.
+  const types = [];
+  for (const m of sorted) {
+    const hasType = typeof m.actionType === "function", hasApply = typeof m.applyAction === "function";
+    if (hasType !== hasApply) { problems.push(`rule ${m.rule}: actionType and applyAction go together (it has only ${hasType ? "actionType" : "applyAction"})`); continue; }
+    if (!hasType) continue;
+    let d;
+    try { d = m.actionType(); } catch (e) { problems.push(`rule ${m.rule}: actionType failed: ${e?.message ?? e}`); continue; }
+    const bad = validateActionType(d);
+    if (bad) problems.push(`rule ${m.rule}: ${bad}`);
+    else if (types.some((t) => t.type === d.type)) problems.push(`rule ${m.rule}: the action type ${d.type} is named by two rules`);
+    else types.push(deepFreeze({ ...JSON.parse(JSON.stringify(d)), rule: m.rule }));
+  }
   if (problems.length) throw new RuleSetError(problems.map((p) => `${label}: ${p}`));
 
   /** @rule 101 */
@@ -274,6 +327,23 @@ export function assembleRules(modules, { label = "rules" } = {}) {
       }
       return null;
     },
+    // null, or {error, status, rule}: whether the Champion may draft their change ("change", rule 402.4) or name the Era ("name", rule
+    // 402.3). With no module for the hook the game gives the Champion neither, and the answer is a refusal; otherwise the first
+    // refusal in rule order wins, as above.
+    /** @rule 402.3, 402.4 */
+    championChange(ctx, champion, power = "change") {
+      const mods = implementers("championChange");
+      if (!mods.length) return { error: power === "name" ? "The game's rules have no naming of Eras." : "The game's rules have no Champion's change.", status: 409, rule: 0 };
+      for (const m of mods) {
+        const r = call(m, "championChange", [ctx, champion, power]);
+        if (r === null || r === undefined) continue;
+        if (typeof r?.error !== "string" || !r.error || (r.status !== undefined && !REFUSAL_STATUSES.includes(r.status))) {
+          throw new RuleError(m.rule, "championChange", new Error("must return null or {error, status?}"));
+        }
+        return { error: r.error, status: r.status ?? 400, rule: m.rule };
+      }
+      return null;
+    },
     // every module's effects, joined in rule order, each list validated.
     /** @rule 504 */
     afterAction(ctx, actor, action) {
@@ -300,12 +370,30 @@ export function assembleRules(modules, { label = "rules" } = {}) {
       }
       return r.map((p) => passed.find((q) => q.number === p.number));
     },
-    // Effects when a passed proposal takes effect (rule 401), every rule's, joined in rule order. Only points and win.
+    // Effects when a passed proposal takes effect (rule 401), every rule's, joined in rule order. Only points.
     /** @rule 401 */
     onEnacted(ctx, proposal) {
       return nightEffects("onEnacted", [ctx, deepFreeze({ ...proposal })]);
     },
-    // Effects at the end of the night, after every onEnacted (rule 402): `results` is {enacted: [...], scores: {ref: n}}.
+    // The action types this game has (rule 103.5), one per module that names one, in rule order. Frozen plain data.
+    /** @rule 103.5 */
+    actionTypes: () => types,
+    // What a passed action does when it is applied (rule 103.5): the points the one module of its type gives, validated. `action` is
+    // {type, params, number, player}. A type this game does not have answers null, and a module may refuse the details with refuse(...):
+    // answers {error}. Either way the proposal is not applied (rule 107.7).
+    /** @rule 103.5 */
+    applyAction(ctx, action) {
+      const t = types.find((x) => x.type === action?.type);
+      if (!t) return null;
+      const m = sorted.find((x) => x.rule === t.rule);
+      const r = call(m, "applyAction", [ctx, deepFreeze(JSON.parse(JSON.stringify(action)))]) ?? [];
+      if (!Array.isArray(r) && typeof r?.error === "string" && r.error) return { error: r.error };
+      const bad = validateEffects(r) ?? r.map((e) => (NIGHT_HOOK_EFFECTS.applyAction.includes(e.type) ? null : `the ${e.type} effect can't be returned by applyAction (it takes: ${NIGHT_HOOK_EFFECTS.applyAction.join(", ")})`)).find(Boolean);
+      if (bad) throw new RuleError(m.rule, "applyAction", new Error(bad));
+      return r.map((e) => ({ ...e, rule: m.rule }));
+    },
+    // Effects at the end of the night, after every onEnacted (rule 402): `results` is {before: {ref: n}, given: [{player, delta}], enacted: [...]}.
+    // Only champion: the player who wins the Era.
     /** @rule 402 */
     dayEnd(ctx, results) {
       return nightEffects("dayEnd", [ctx, deepFreeze(JSON.parse(JSON.stringify(results)))]);

@@ -5,13 +5,15 @@
 //   processing_day, message   while locked: the day being processed, and the sentence every write answers with
 //   failed      while locked: the last processing attempt failed (the lock stays on until it succeeds)
 //   deadline_at while processing: the 2 am deadline (rule 107.6), when play resumes at the latest
-//   ballot      how many items today's ballot has
+//   ballot      how many items today's ballot has that you can vote on (the Champion does not vote on their own change, 402.4)
 //   players     each player's name, color and what they have done today (moved, proposed, ended, and on how many
 //               ballot items they have voted: never how, rule 104.4)
 //   you         (signed in) moved / proposed / proposals {made, limit: proposals.per_day, rule 103.2} / ended / voted, and can: {move, propose, end_turn, vote} each
 //               {allowed, reason?}, the same answers the write routes give (turnBlock)
 import { getPlayer } from "../lib/auth";
 import { clockNow, electorsOf, isLocked, loadToday, lockMessage, settingsOf, timeZoneOf } from "../lib/day";
+import { checkChampionChange, lightContext } from "../engine/host";
+import { eraView } from "../lib/eras";
 import { proposalLimitMessage } from "../lib/proposals.js";
 import { turnBlock } from "../lib/turn";
 import { Ctx, colorOf, json } from "../lib/util";
@@ -26,15 +28,17 @@ export const get = async (ctx: Ctx) => {
   if (day) await electorsOf(env, game.id, day.n); // a day opened without its electorate rows gets them (rule 104.2)
   const rows = (await env.DB.prepare(
     `SELECT p.display_name AS name, p.color, p.turn_order, t.moved_at, t.ended_at,
-            (SELECT COUNT(*) FROM proposals u WHERE u.game_id = p.game_id AND u.player_id = p.id AND u.day_proposed = ? AND u.status NOT IN ('draft', 'withdrawn')) AS proposed,
+            (SELECT COUNT(*) FROM proposals u WHERE u.game_id = p.game_id AND u.player_id = p.id AND u.day_proposed = ? AND u.champion = 0 AND u.status NOT IN ('draft', 'withdrawn')) AS proposed,
             (SELECT COUNT(*) FROM votes v JOIN proposals q ON q.id = v.proposal_id
               WHERE v.game_id = p.game_id AND v.player_id = p.id AND v.day = ? AND q.day_ballot = ?) AS voted,
             EXISTS (SELECT 1 FROM electors e WHERE e.game_id = p.game_id AND e.day = ? AND e.player_id = p.id) AS elector
      FROM players p LEFT JOIN day_turns t ON t.game_id = p.game_id AND t.day = ? AND t.player_id = p.id
      WHERE p.game_id = ? ORDER BY p.turn_order`,
   ).bind(game.day, game.day, game.day, game.day, game.day, game.id).all()).results as any[];
-  const ballot: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'on_ballot'").bind(game.id, game.day).first();
+  // The items you can vote on: the Champion does not vote on their own change (rule 402.4).
+  const ballot: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'on_ballot' AND NOT (champion = 1 AND player_id = ?)").bind(game.id, game.day, player?.id ?? "").first();
   const mine = player ? rows.find((r) => r.turn_order === player.turn_order) : null;
+  const era = await eraView(env, game, player?.id); // the Era and the Champion (rule 402), and whether your change is still unused
   const perDay: number = settingsOf(game)["proposals.per_day"];
   const can = (kind: "move" | "propose" | "end_turn" | "vote") => {
     const b = player && turnBlock(game, day, turn, player, kind, nowMs);
@@ -57,10 +61,16 @@ export const get = async (ctx: Ctx) => {
     failed: locked && !!day!.last_error,
     deadline_at: locked && (day!.status === "processing" || day!.status === "deploying") ? day!.deadline_at ?? null : null,
     ballot: ballot?.n ?? 0,
+    era: era && { n: era.n, name: era.name, champion: era.champion },
     players: rows.map((r) => ({ name: r.name, color: colorOf(r.color), moved: !!r.moved_at, proposed: r.proposed > 0, ended: !!r.ended_at, voted: r.voted ?? 0 })),
     you: player ? {
       moved: !!turn?.moved_at, proposed: !!mine?.proposed, proposals: { made: mine?.proposed ?? 0, limit: perDay }, ended: !!turn?.ended_at, voted: mine?.voted ?? 0,
       can: { move: can("move"), propose: can("propose"), end_turn: can("end_turn"), vote: can("vote") },
+      champion: era?.you.champion ? (() => {
+        const no = checkChampionChange(game, lightContext(game), { ref: player!.id });   // a game whose rules have no Champion's change offers none
+        const used = era.you.change_used;
+        return { change: { allowed: !used && !no, reason: used ? "You've made your change this Era (402.4)." : no ? no.error : undefined } };
+      })() : null,
     } : null,
   });
 };

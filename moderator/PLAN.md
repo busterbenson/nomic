@@ -13,7 +13,7 @@ committed, tagged, deployed, and the day unlocks with points, before 2 am. Rules
 | `moderator/schedule.mjs` | the register of games and night windows, the launchd schedule generated from it, the reload (below) |
 | `moderator/test.mjs` | the runner's tests: a temp bare git repo for the game, an in-process stand-in for the Worker's moderator API, a scripted stand-in for `claude -p` |
 | `src/routes/api-moderator.ts` | `GET /<slug>/api/moderator/pending`, `POST /<slug>/api/moderator/days/:n/claim` |
-| `src/lib/day.ts` | the night's moderator step: wait, claim -> deploying, unlock on sha match with points (401, `onEnacted`) and win (402, `dayEnd`), deploy deadline |
+| `src/lib/day.ts` | the night's moderator step: wait, claim -> deploying, unlock on sha match with points (401, `onEnacted`) and the Era won (402, `dayEnd`: the champion effect), deploy deadline |
 | `src/engine/hooks.js` | `applyOrder` (decide, exactly one), `onEnacted`, `dayEnd` (sequence) wired; the refusal of unwired hooks now covers only voteMark, electorate, tally |
 | `templates/rules/107.ts, 401.ts, 402.ts` (+ Rickshaw) | the starter modules for those hooks |
 | `tests/moderator.mjs` | the Worker side, on `wrangler dev` with a local D1 |

@@ -153,14 +153,36 @@ try {
   await mod("POST", "days/7/claim", { sha: SHA1.replace(/a/g, "e"), outcomes: [{ number: p6, applied: true, commit: SHA1.replace(/a/g, "e"), seq: 2 }, { number: p7, applied: true, commit: SHA1.replace(/a/g, "e"), seq: 1 }] });
   dev("bundle_sha:mod", SHA1.replace(/a/g, "e"));
   await cron();
-  const won = d1(state, `SELECT player_id, text FROM events WHERE game_id = '${gid}' AND kind = 'won'`);
-  check("two pass 100 the same night: the first given points wins (402.2), in the order the moderator applied them (P7 seq 1, so Bo, though P6 has the lower number); the game is over (402.3)", score("Ana") === 105 && score("Bo") === 108 && won.length === 1 && won[0].player_id === id.Bo && game().status === "over", J([won, game()]));
+  const ended = d1(state, `SELECT player_id, text, args FROM events WHERE game_id = '${gid}' AND kind = 'era_ended'`);
+  const eraRows = d1(state, `SELECT n, name, started_day, ended_day, champion_id, final_scores FROM eras WHERE game_id = '${gid}' ORDER BY n`);
+  check("two pass 100 the same night: the first given points wins the Era (402.2), in the order the moderator applied them (P7 seq 1, so Bo, though P6 has the lower number); Bo is the Champion", ended.length === 1 && ended[0].player_id === id.Bo && eraRows[0].champion_id === id.Bo, J([ended, eraRows]));
+  check("the Era's final scores are kept (Ana 105, Bo 108, Cy 0) and everyone's points go back to 0 (402.3); the game is still playing", J(JSON.parse(eraRows[0].final_scores)) === J({ [id.Ana]: 105, [id.Bo]: 108, [id.Cy]: 0 }) && score("Ana") === 0 && score("Bo") === 0 && score("Cy") === 0 && game().status === "playing", J([eraRows[0].final_scores, game()]));
+  check("Era 1 (opened by Start) began on day 1 and ended on day 7; Era 2 opened on day 8, unnamed, with no end", eraRows.length === 2 && eraRows[0].n === 1 && eraRows[0].started_day === 1 && eraRows[0].ended_day === 7 && eraRows[1].n === 2 && eraRows[1].started_day === 8 && eraRows[1].ended_day === null && eraRows[1].name === null && game().day === 8, J([eraRows, game()]));
+  check("History says so: the Era, the Champion, how, and the final scores", /^Era 1 ended\. Bo reached 108 points and is the Champion\. Final scores: Bo 108, Ana 105, Cy 0\.$/.test(ended[0].text), ended[0].text);
   check("the claim's sequence is stored with each proposal (apply_seq)", J(d1(state, `SELECT number, apply_seq FROM proposals WHERE game_id = '${gid}' AND number IN (${p6}, ${p7}) ORDER BY apply_seq`).map((r) => [r.number, r.apply_seq])) === J([[p7, 1], [p6, 2]]));
   const night7 = d1(state, `SELECT kind, player_id, night_seq FROM events WHERE game_id = '${gid}' AND day = 7 AND phase = 'night' ORDER BY night_seq`);
-  check("every event the night writes carries its per-night sequence, 1..n in execution order: P7's points, P6's points, the win", J(night7.map((e) => [e.kind, e.player_id, e.night_seq])) === J([["points", id.Bo, 1], ["points", id.Ana, 2], ["won", id.Bo, 3]]), J(night7));
+  check("every event the night writes carries its per-night sequence, 1..n in execution order: P7's points, P6's points, the Era's end", J(night7.map((e) => [e.kind, e.player_id, e.night_seq])) === J([["points", id.Bo, 1], ["points", id.Ana, 2], ["era_ended", id.Bo, 3]]), J(night7));
   check("rule 401's revisions, counted by rule: P6 (on clause 401.1) is the second change to rule 401 (rev 2)", prop(p6).rev === 2 && prop(p6).status === "enacted");
   const over = await client(A).get("/mod/api/day");
-  check("the game over: the day status still reads (the board, rules and history stay readable)", over.status === 200);
+  check("play goes on: day 8 is open and the day status reads", over.status === 200 && over.data.day === 8 && over.data.locked === false, J(over.data));
+  await cron();
+  check("the cron again changes nothing: one Era end, no second reset", d1(state, `SELECT COUNT(*) AS n FROM events WHERE game_id = '${gid}' AND kind = 'era_ended'`)[0].n === 1 && d1(state, `SELECT COUNT(*) AS n FROM eras WHERE game_id = '${gid}'`)[0].n === 2);
+
+  console.log("the Champion's change at the count (rule 402.4)");
+  // Bo is the Champion. Day 8's ballot: three of his changes (the proposer's own votes are ignored; the helper gives everyone the same vote first).
+  const champ = (pn) => d1(state, `UPDATE proposals SET champion = 1 WHERE game_id = '${gid}' AND number = ${pn}`);
+  const vote = (pn, who, v) => d1(state, v === null ? `DELETE FROM votes WHERE proposal_id = 'q${pn}' AND player_id = '${id[who]}'` : `UPDATE votes SET vote = '${v}' WHERE proposal_id = 'q${pn}' AND player_id = '${id[who]}'`);
+  const pc1 = ballot(8, "Bo", "401", "no"), pc2 = ballot(8, "Bo", "402.1", "no"), pc3 = ballot(8, "Bo", "105", "no"), pc4 = ballot(8, "Cy", "504", "no");
+  for (const n of [pc1, pc2, pc3]) champ(n);
+  vote(pc2, "Cy", null);          // Ana votes no, Cy does not vote: not against
+  vote(pc3, "Ana", null);         // a unanimous-marked rule's change: Cy votes no, Ana does not vote
+  d1(state, `UPDATE proposals SET mark = 'unanimous' WHERE game_id = '${gid}' AND number = ${pc3}`);
+  await midnight();
+  const res = (n) => d1(state, `SELECT status, yes, no, absent, needed, electorate, why, champion FROM proposals WHERE game_id = '${gid}' AND number = ${n}`)[0];
+  check("every other player voting no stops it (Bo's own no is not counted): it failed, and the result says 2 of 2", res(pc1).status === "failed" && res(pc1).no === 2 && res(pc1).needed === 2 && res(pc1).why === "2 of 2 other players voted no; it fails only if all 2 do.", J(res(pc1)));
+  check("one no and one player who did not vote: it passes; not voting does not count as against", res(pc2).status === "passed" && res(pc2).no === 1 && res(pc2).absent === 1 && res(pc2).why === "1 of 2 other players voted no; it fails only if all 2 do.", J(res(pc2)));
+  check("a change to a rule with a unanimous mark passes the same way: its mark is not what counts", res(pc3).status === "passed" && res(pc3).no === 1 && res(pc3).absent === 1, J(res(pc3)));
+  check("an ordinary proposal on the same ballot is counted as before: three no votes, it failed", res(pc4).status === "failed" && res(pc4).why === "0 of 3 voted yes; it needed 2." && !res(pc4).champion, J(res(pc4)));
 } catch (e) {
   fail++; console.log("  FAIL  harness:", e?.stack || e);
   if (srv) console.log(srv.log().slice(-3000));

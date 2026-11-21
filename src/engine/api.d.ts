@@ -32,7 +32,14 @@ export type Effect =
   | { type: "chart"; tiles: Tile[] }
   | { type: "points"; player: string; delta: number; reason: string }
   | { type: "log"; template: string; args: Record<string, unknown> }
-  | { type: "win"; player: string; reason: string };
+  | { type: "champion"; player: string; reason: string };
+
+/** An action type's parameter (rule 103.5): a player of the game (other: true leaves out the proposer) or a whole number from min to max. */
+export type ActionParam = { key: string; label: string; kind: "player"; other?: boolean } | { key: string; label: string; kind: "int"; min: number; max: number };
+/** What actionType() answers: the type id a proposal carries, its name, the rules it touches (the votes it needs include theirs) and its parameters. */
+export type ActionType = { type: string; name: string; touches: number[]; params: ActionParam[] };
+/** A passed action as applyAction sees it: params hold a player's ref for a "player" param. */
+export type ActionProposal = { type: string; params: Record<string, string | number>; number: number; player: string };
 
 export type Hooks = {
   /** Called before a turn action, after the engine's own gates. Rule order; the first refusal wins. An action
@@ -49,6 +56,14 @@ export type Hooks = {
   applyOrder?(ctx: Ctx, passed: unknown[]): unknown[];
   onEnacted?(ctx: Ctx, proposal: unknown): Effect[];
   dayEnd?(ctx: Ctx, results: unknown): Effect[];
+  /** Whether the Champion may use a power (rule 402): "change" drafts their one change (402.4), "name" names the Era (402.3).
+   *  null, or a refusal. A game with no module for this hook gives the Champion neither. */
+  championChange?(ctx: Ctx, champion: Actor, power: "change" | "name"): Refusal | null;
+  /** An action type (rule 103.5). A module has both or neither; its type id is unique in the game. */
+  actionType?(): ActionType;
+  /** Does the action when a passed action proposal of this module's type is applied. Only points effects. Answer refuse(...) when the
+   *  details are no longer allowed (a rule changed tonight): the proposal is not applied, with that reason. */
+  applyAction?(ctx: Ctx, action: ActionProposal): Effect[] | Refusal;
 };
 export type RuleModule = { rule: number } & Hooks;
 
@@ -58,7 +73,8 @@ export const effects: {
   chart(tiles: Array<{ x: number; y: number; z?: number }>): Effect;
   points(player: string, delta: number, reason: string): Effect;
   log(template: string, args?: Record<string, unknown>): Effect;
-  win(player: string, reason: string): Effect;
+  /** dayEnd only: this player wins the Era (rule 402): the Era ends, points reset, they are the Champion. */
+  champion(player: string, reason: string): Effect;
 };
 export const HOOKS: Readonly<Record<string, { mode: "veto" | "sequence" | "decide"; wired: boolean }>>;
 export const ACTION_KINDS: readonly string[];
@@ -70,3 +86,4 @@ export function validCoord(x: number, y: number, z?: number): boolean;
 export const DIAGONAL_MOVES: boolean;
 export const SHARED_TILES: boolean;
 export const ENGINE_VERSION: number;
+export function attr(entry: { attrs?: Record<string, unknown> } | null | undefined, key: string): unknown;

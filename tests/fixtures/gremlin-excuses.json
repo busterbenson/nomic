@@ -1,0 +1,22 @@
+[
+  {
+    "text": "Bell's too loud for my ears today. Shop's closed till midnight PST, go bang your own gong.",
+    "usage": {
+      "input_tokens": 359,
+      "output_tokens": 36,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0
+    },
+    "readable": "Bell's too loud for my ears today. Shop's closed till midnight PST, go bang your own gong."
+  },
+  {
+    "text": "Frog tile got me cackling. Shop's shut till midnight PST, go bother the frogs.",
+    "usage": {
+      "input_tokens": 323,
+      "output_tokens": 34,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0
+    },
+    "readable": "Frog tile got me cackling. Shop's shut till midnight PST, go bother the frogs."
+  }
+]

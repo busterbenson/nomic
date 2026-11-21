@@ -35,7 +35,7 @@ switch (step.action) {
     break;
   }
   case "win": { // 402.1: win at N
-    edit("RULES.md", "The first player to reach 100 points wins.", `The first player to reach ${step.to} points wins.`);
+    edit("RULES.md", "The first player to reach 100 points wins the Era", `The first player to reach ${step.to} points wins the Era`);
     edit("rules/402.ts", ">= 100", `>= ${step.to}`);
     writeFileSync(join(cwd, "rules/402.test.ts"), `import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -64,7 +64,7 @@ test("402.1: reaching ${step.to} wins", () => {
     edit("rules/401.ts", "proposal.player, 10,", "proposal.player, 15,");
     edit("rules/401.test.ts", "delta: 10,", "delta: 15,");
     if (step.weaken) writeFileSync(join(cwd, "rules/505.test.ts"), `import { test } from "node:test";\ntest("505", () => {});\n`);
-    else { edit("RULES.md", "The first player to reach 100 points wins.", "The first player to reach 20 points wins."); edit("rules/402.ts", ">= 100", ">= 20"); }
+    else { edit("RULES.md", "The first player to reach 100 points wins the Era", "The first player to reach 20 points wins the Era"); edit("rules/402.ts", ">= 100", ">= 20"); }
     result({ outcome: "applied" });
     break;
   }

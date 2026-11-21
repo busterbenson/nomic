@@ -54,8 +54,8 @@ with sync_playwright() as p:
         # ---- the Workshop tab
         page.click("#tab-workshop"); page.wait_for_selector("#p-workshop .tlist")
         lst = text(page, "#p-workshop")
-        check(f"{tag}: the Workshop tab lists the tickets first (number, title, requester, state, nights, points), the catalog under them", re.search(r"W2.*A drum.*Cy.*Approved.*1 night.*2 points", lst, re.I) and re.search(r"W1.*lantern.*Bo.*Proposed.*3 nights.*0 points", lst, re.I) and lst.index("A drum") < lst.index("Catalog") and "No entries yet." in lst, lst)
-        check(f"{tag}: 'Commission something' is there and enabled for an active player; no helper text on the tab", page.locator('[data-w="open"]').is_enabled() and page.locator("#p-workshop .mnote").count() == 1, str(page.locator("#p-workshop .mnote").count()))
+        check(f"{tag}: the Workshop tab lists the tickets (number, title, requester, state, nights, points) and nothing under them while the catalog is empty: no Catalog heading, no empty-state line", re.search(r"W2.*A drum.*Cy.*Approved.*1 night.*2 points", lst, re.I) and re.search(r"W1.*lantern.*Bo.*Proposed.*3 nights.*0 points", lst, re.I) and "Catalog" not in lst and "No entries" not in lst and page.locator("#p-workshop .cgroup").count() == 0, lst)
+        check(f"{tag}: 'Commission something' is there and enabled for an active player; no helper text on the tab", page.locator('[data-w="open"]').is_enabled() and page.locator("#p-workshop .mnote").count() == 0, str(page.locator("#p-workshop .mnote").count()))
         shot(page, f"workshop-{tag}", full_page=True); sideways(page, w, f"{tag} workshop")
         # ---- an approved ticket's page
         page.click('#p-workshop [data-ticket="W2"]'); page.wait_for_selector("#mroot .mcard .tk, #mroot .mcard.tk")
@@ -76,14 +76,14 @@ with sync_playwright() as p:
     page.click("#tab-workshop"); page.click('[data-w="open"]'); page.wait_for_selector("#wfTitle")
     check("390-dark: Commission something opens a draft ticket (W3) with the form; 'Put it on tomorrow's ballot' is disabled while it makes nothing", "W3" in text(page, "#mroot .mcard") and page.locator('[data-w="confirm"]').is_disabled() and page.locator("#wfWhy").is_visible())
     shot(page, "draft-empty-390-dark")
-    page.fill("#wfTitle", "A kite"); page.fill("#wfBrief", "A kite that flies on its own."); page.fill("#wfEntries", "Kite"); page.fill("#wfRules", "801.2, 804.1"); page.fill("#wfEstimate", "2"); page.fill("#wfTasks", "Draw it\nTeach it to fly")
+    page.fill("#wfTitle", "A kite"); page.fill("#wfBrief", "A kite that flies on its own."); page.click('[data-w="addentry"]'); page.fill("#wfEn0", "Kite"); page.fill("#wfRules", "801.2, 804.1"); page.fill("#wfEstimate", "2"); page.fill("#wfTasks", "Draw it\nTeach it to fly")
     shot(page, "draft-filled-390-dark"); sideways(page, 390, "390-dark draft form")
     check("390-dark: no console errors", not errors, str(errors)); c.close()
     # ---- commissioning, once, at 1280 light
     c, page, errors = new_page(b, 1280, 900, "light")
     page.click("#tab-workshop"); page.click('[data-w="open"]'); page.wait_for_selector("#wfTitle")
     check("1280-light: the blank draft is opened again (still W3)", "W3" in text(page, "#mroot .mcard"))
-    page.fill("#wfTitle", "A kite"); page.fill("#wfBrief", "A kite that flies on its own."); page.fill("#wfEntries", "Kite"); page.fill("#wfRules", "801.2, 804.1"); page.fill("#wfEstimate", "2"); page.fill("#wfTasks", "Draw it\nTeach it to fly")
+    page.fill("#wfTitle", "A kite"); page.fill("#wfBrief", "A kite that flies on its own."); page.click('[data-w="addentry"]'); page.fill("#wfEn0", "Kite"); page.fill("#wfRules", "801.2, 804.1"); page.fill("#wfEstimate", "2"); page.fill("#wfTasks", "Draw it\nTeach it to fly")
     check("1280-light: filling in what it makes enables the button and hides the reason", page.locator('[data-w="confirm"]').is_enabled() and not page.locator("#wfWhy").is_visible())
     shot(page, "draft-filled-1280-light")
     page.click('[data-w="save"]'); page.wait_for_selector("#mroot .vmsg")

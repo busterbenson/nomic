@@ -25,7 +25,7 @@ const settingValue = (v) => (v && typeof v === "object" ? Object.values(v).join(
 /** The settings a draft sets, as plain text: "board.island = 10x10, mcp_enabled = off". @rule 103.1 */
 export const settingsText = (settings) => Object.entries(settings || {}).map(([k, v]) => `${k} = ${settingValue(v)}`).join(", ");
 
-export const KINDS = ["amend", "addclause", "add", "repeal", "move", "mark"];
+export const KINDS = ["amend", "addclause", "add", "repeal", "move", "mark", "action"];
 // The words the API also accepts for a kind ("reword" is what the menu calls "amend").
 const KIND_ALIASES = { reword: "amend", edit: "amend", lock: "mark", unlock: "mark", remove: "repeal" };
 /** @rule 103.1 */
@@ -66,8 +66,12 @@ export function markOf(book, num) {
 export const strictestMark = (book, nums) => (nums.some((n) => markOf(book, n) === "unanimous") ? "unanimous" : "majority");
 // What a draft touches, for its mark: the rule (or block) it changes; a move touches its rule and the block it goes to;
 // a new rule, its block (105.1: "change, add or repeal any rule in the block"); a mark change, the thing marked (105.3).
-/** @rule 103.4, 105.1, 105.3 */
+// An action's parts (rule 103.7): its own rule (the target) and every rule it touches.
+/** @rule 103.5, 103.7 */
+export const actionOf = (d) => (typeof d.action === "string" ? JSON.parse(d.action) : d.action);
+/** @rule 103.4, 103.7, 105.1, 105.3 */
 export function partsOf(d) {
+  if (d.kind === "action") return [d.target, ...actionOf(d).touches.map(String)];
   if (d.kind === "add") return [d.to_block];
   if (d.kind === "move") return [d.target, d.to_block];
   return [d.target];
@@ -143,7 +147,7 @@ export function notWiredConflictRefusal(book, conflicts) {
 // anything else that touches a not-wired part is refused. Returns the refusal sentence, or null.
 /** @rule 103.6 */
 export function notWiredRefusal(book, d) {
-  if (d.kind === "add") return null;
+  if (d.kind === "add" || d.kind === "action") return null;
   const hit = notWiredTouched(book, d.target);
   if (!hit.length) return null;
   if (d.kind === "addclause") return null;
@@ -292,12 +296,13 @@ function settingValueOk(key, v) {
 // ---- the request ----------------------------------------------------------------------------------------------------
 // The request's shape, checked against the book. Returns {error} or the normalized request
 // {kind, scope, target, words, to_block, title, prefilled}.
-/** @rule 103.1 */
-export function readRequest(book, body) {
+/** @rule 103.1, 103.5 */
+export function readRequest(book, body, actions = {}) {
   const kind = normKind(body?.kind);
   if (!KINDS.includes(kind)) return { error: "Say what kind of change: reword, add a clause, add a rule, repeal, move, or lock/unlock." };
+  if (kind === "action") return readAction(book, body, actions);
   const words = typeof body?.words === "string" ? body.words.trim() : typeof body?.prompt === "string" ? body.prompt.trim() : "";
-  if ([...words].length > 2000) return { error: "Your words need at most 2000 characters." };
+  if ([...words].length > 2500) return { error: "Your words need at most 2500 characters." };
   const target = String(body?.target ?? body?.rule ?? (kind === "add" ? body?.block ?? body?.sec ?? "" : "")).trim();
   const node = has(book, target) ? book.byNum[target] : null;
   if (!node) return { error: target ? `There is no rule ${target.slice(0, 20)}.` : "Say which rule the change is to." };
@@ -329,6 +334,38 @@ export function readRequest(book, body) {
   return { kind, scope, target, words, to_block, title: title || null, prefilled: body?.prefilled === true };
 }
 
+// An action proposal's request (rule 103.5): a type from the game's catalog and its parameters, checked against the type's own
+// description. `actions` is {catalog: [{type, name, rule, touches, params}], players: [{id, name}], proposer}. A player is named by
+// their name in the game. Returns {error} or the normalized request, with `action` as the draft will keep it:
+// {type, name, rule, touches, params: {key: value}, shown: [[label, text], ...]}. Nothing here decides what the action does.
+/** @rule 103.5 */
+export function readAction(book, body, { catalog = [], players = [], proposer = null } = {}) {
+  const t = typeof body?.type === "string" ? catalog.find((x) => x.type === body.type) : null;
+  if (!t) return { error: catalog.length ? "Pick an action type from the list." : "This game has no action types." };
+  if (!has(book, String(t.rule))) return { error: `The rules have no rule ${t.rule} for this action.` };
+  const gone = t.touches.find((n) => !has(book, String(n)));
+  if (gone !== undefined) return { error: `This action touches rule ${gone}, which the rules don't have.` };
+  const given = body.params && typeof body.params === "object" && !Array.isArray(body.params) ? body.params : {};
+  const params = {}, shown = [];
+  for (const p of t.params) {
+    const v = Object.hasOwn(given, p.key) ? given[p.key] : undefined;
+    if (p.kind === "player") {
+      const want = typeof v === "string" ? v.trim().toLowerCase() : "";
+      const hits = want ? players.filter((x) => String(x.name).toLowerCase() === want) : [];
+      if (hits.length > 1) return { error: `${p.label}: more than one player is called ${String(v).trim().slice(0, 40)}.` };
+      if (hits.length < 1) return { error: `${p.label}: pick a player of this game.` };
+      if (p.other && hits[0].id === proposer) return { error: `${p.label}: pick another player, not yourself.` };
+      params[p.key] = hits[0].id; shown.push([p.label, hits[0].name]);
+    } else {
+      const n = typeof v === "number" ? v : typeof v === "string" && /^\d{1,9}$/.test(v.trim()) ? Number(v.trim()) : NaN;
+      if (!Number.isInteger(n) || n < p.min || n > p.max) return { error: `${p.label}: a whole number from ${p.min} to ${p.max}.` };
+      params[p.key] = n; shown.push([p.label, String(n)]);
+    }
+  }
+  return { kind: "action", scope: "rule", target: String(t.rule), words: "", to_block: null, title: null, prefilled: false,
+    action: { type: t.type, name: t.name, rule: t.rule, touches: t.touches, params, shown } };
+}
+
 // Does this request need the small model? Only rewording in the player's own words does. Rewording from the current
 // text (the slip's "Edit the wording", prefilled) is exact already, and every other kind is mechanical.
 /** @rule 103.1 */
@@ -336,11 +373,13 @@ export const needsModel = (req) => req.kind === "amend" && !req.prefilled;
 
 // The moderator's code draft (rule 103.1), after the mockup's makeDraft. For "amend" it needs `after` (the prefilled
 // words, or the model's text). Returns {head, before_text, after_text, new_num, conflicts} or {error}.
-/** @rule 103.1, 108.3 */
+/** @rule 103.1, 103.5, 108.3 */
 export function draftOf(book, req, after = null) {
   const node = book.byNum[req.target];
   const t = textOf(node);
   const k = req.kind;
+  // An action is no change to the text: its slip names the type and the details (rule 103.5).
+  if (k === "action") return { head: `${req.action.name} (rule ${req.action.rule}):`, before_text: "", after_text: req.action.shown.map(([l, v]) => `${l}: ${v}`).join("\n"), new_num: null, conflicts: [] };
   if (k === "add") {
     const nn = nextRuleNum(book, req.target);
     if (!nn) return { error: `Block ${req.target} has no free number left.` };
@@ -508,18 +547,30 @@ export function answerSchema() {
 export const DRAFT_INSERT_SQL = `INSERT INTO proposals (id, game_id, player_id, day_proposed, kind, scope, target, new_num, to_block, words, title,
     draft_head, before_text, after_text, conflicts, settings, drafted_by, base_sha, status, created_at)
   SELECT ?, g.id, ?, g.day, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ? FROM games g WHERE g.id = ? AND ${dayOpenSql}`;
+// Draft of an action (rule 103.5): the same row as DRAFT_INSERT_SQL with the action JSON after `settings`. Binds: id, player_id, kind,
+// scope, target, new_num, to_block, words, title, draft_head, before_text, after_text, conflicts, settings, action, drafted_by,
+// base_sha, created_at, game_id, then dayOpenBinds.
+/** @rule 103.5 */
+export const ACTION_DRAFT_INSERT_SQL = `INSERT INTO proposals (id, game_id, player_id, day_proposed, kind, scope, target, new_num, to_block, words, title,
+    draft_head, before_text, after_text, conflicts, settings, action, drafted_by, base_sha, status, created_at)
+  SELECT ?, g.id, ?, g.day, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ? FROM games g WHERE g.id = ? AND ${dayOpenSql}`;
 // Confirm (rule 103.2): the game's next P-number, taken in the statement that confirms; the mark fixed now (rule 105.4).
 // The same statement counts the player's confirmed proposals of the day (drafts and withdrawn ones don't count) and
 // confirms only while that count is under the limit, so two confirms arriving together cannot both pass it: D1 runs one
 // statement at a time. Binds: mark, confirmed_at, id, day, then dayOpenBinds, then the limit (proposals.per_day).
+// The Champion's change (rule 402.4) is on top of the day's proposals: it is not counted toward the limit and is not held to
+// it, but only one is confirmed an Era (the same statement checks that, from the Era's first day).
 export const CONFIRM_SQL = `UPDATE proposals SET status = 'confirmed', mark = ?, day_ballot = day_proposed + 1, confirmed_at = ?,
     number = (SELECT COALESCE(MAX(q.number), 0) + 1 FROM proposals q WHERE q.game_id = proposals.game_id)
   WHERE id = ? AND status = 'draft' AND day_proposed = ?
     AND EXISTS (SELECT 1 FROM games g WHERE g.id = proposals.game_id AND ${dayOpenSql})
-    AND (SELECT COUNT(*) FROM proposals c WHERE c.game_id = proposals.game_id AND c.player_id = proposals.player_id
-           AND c.day_proposed = proposals.day_proposed AND c.status NOT IN ('draft', 'withdrawn')) < ?`;
+    AND (proposals.champion = 1 OR (SELECT COUNT(*) FROM proposals c WHERE c.game_id = proposals.game_id AND c.player_id = proposals.player_id
+           AND c.day_proposed = proposals.day_proposed AND c.champion = 0 AND c.status NOT IN ('draft', 'withdrawn')) < ?)
+    AND (proposals.champion = 0 OR NOT EXISTS (SELECT 1 FROM proposals c WHERE c.game_id = proposals.game_id AND c.player_id = proposals.player_id
+           AND c.champion = 1 AND c.status NOT IN ('draft', 'withdrawn', 'not_applied')
+           AND c.day_proposed >= COALESCE((SELECT e.started_day FROM eras e WHERE e.game_id = proposals.game_id AND e.ended_day IS NULL), 1)))`;
 // How many proposals a player has confirmed on a day (not drafts, not withdrawn ones). Binds: game id, player id, day.
-export const CONFIRMED_TODAY_SQL = `SELECT COUNT(*) AS n FROM proposals WHERE game_id = ? AND player_id = ? AND day_proposed = ? AND status NOT IN ('draft', 'withdrawn')`;
+export const CONFIRMED_TODAY_SQL = `SELECT COUNT(*) AS n FROM proposals WHERE game_id = ? AND player_id = ? AND day_proposed = ? AND champion = 0 AND status NOT IN ('draft', 'withdrawn')`;
 // What the site says when a player is at the limit.
 /** @rule 103.2 */
 export const proposalLimitMessage = (n) => `You've proposed ${n} today, the most a day (103.2).`;

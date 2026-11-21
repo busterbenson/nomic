@@ -23,7 +23,10 @@ import * as apiMe from "./routes/api-me";
 import * as apiRules from "./routes/api-rules";
 import * as apiTurn from "./routes/api-turn";
 import * as apiProposals from "./routes/api-proposals";
+import * as apiCatalog from "./routes/api-catalog";
 import * as apiTickets from "./routes/api-tickets";
+import * as apiChat from "./routes/api-chat";
+import { AGENTS } from "./lib/chat.js";
 import * as apiBoard from "./routes/api-board";
 import * as apiAction from "./routes/api-action";
 import * as apiDay from "./routes/api-day";
@@ -33,6 +36,7 @@ import * as apiBallot from "./routes/api-ballot";
 import * as apiModerator from "./routes/api-moderator";
 import * as apiInvite from "./routes/api-invite";
 import * as apiStart from "./routes/api-start";
+import * as apiEra from "./lib/eras";
 import { clockNow, runMidnight } from "./lib/day";
 import * as apiNotifications from "./routes/api-notifications";
 import * as apiNotificationsRead from "./routes/api-notifications-read";
@@ -52,7 +56,7 @@ type Methods = { get?: Handler; post?: Handler };
 const API: Record<string, Methods> = {
   game: apiGame, me: apiMe, join: apiJoin, login: apiLogin, logout: apiLogout,
   turn: apiTurn, rules: apiRules, notifications: apiNotifications, board: apiBoard, action: apiAction,
-  day: apiDay, "end-turn": apiEndTurn, proposals: apiProposals, tickets: apiTickets, votes: apiVotes, ballot: apiBallot, invite: apiInvite, start: apiStart,
+  day: apiDay, "end-turn": apiEndTurn, proposals: apiProposals, tickets: apiTickets, catalog: apiCatalog, votes: apiVotes, ballot: apiBallot, invite: apiInvite, start: apiStart, era: apiEra,
 };
 
 const secure = (res: Response) => {
@@ -154,6 +158,7 @@ async function route(request: Request, env: Env, execCtx: ExecutionContext): Pro
   if (sub === "api" && segs.length === 4 && segs[2] === "notifications" && segs[3] === "read") return run(apiNotificationsRead, method, ctx);
   // The moderator's routes (bearer token; src/routes/api-moderator.ts)
   if (sub === "api" && segs.length === 4 && segs[2] === "moderator" && segs[3] === "pending") return run({ get: apiModerator.pending }, method, ctx);
+  if (sub === "api" && segs.length === 4 && segs[2] === "moderator" && segs[3] === "agents") return run({ get: apiModerator.agents }, method, ctx);
   if (sub === "api" && segs.length === 6 && segs[2] === "moderator" && segs[3] === "days" && segs[5] === "claim" && /^\d{1,6}$/.test(segs[4])) {
     ctx.params.n = segs[4];
     return run({ post: apiModerator.claim }, method, ctx);
@@ -163,6 +168,10 @@ async function route(request: Request, env: Env, execCtx: ExecutionContext): Pro
     ctx.params.id = segs[3];
     return run({ post: apiProposals.action(segs[4]) }, method, ctx);
   }
+  // /api/catalog/<id>: one catalog entry (rule 701.1)
+  if (sub === "api" && segs.length === 4 && segs[2] === "catalog") { ctx.params.id = segs[3]; return run({ get: apiCatalog.one }, method, ctx); }
+  // /api/chat/<agent>: a player's private chat with Gremlin (rules 106.3, 106.7)
+  if (sub === "api" && segs.length === 4 && segs[2] === "chat" && AGENTS.includes(segs[3])) return run(apiChat, method, ctx);
   // /api/tickets/<W3> (the ticket page), and /api/tickets/<W3>/edit, /confirm, /reopen and /post (rules 801, 804)
   if (sub === "api" && segs[2] === "tickets" && (segs.length === 4 || segs.length === 5)) {
     ctx.params.n = segs[3];

@@ -28,7 +28,7 @@ script runs them after you and tells you what failed.
    nothing and write the result file with outcome `not_applied` and the reason.
 3. Make the code match the text. A rule that does something has a module `rules/<n>.ts` exporting
    `defineRule({ rule: <n>, <hook>(...) {...} })` from `promptocracy/engine`. Hooks: `actionAllowed` (refuse an action),
-   `afterAction` (chart effects), `spawnTile`, `applyOrder` (rule 107.2), `onEnacted` (points), `dayEnd` (win). Every
+   `afterAction` (chart effects), `spawnTile`, `applyOrder` (rule 107.2), `onEnacted` (points), `dayEnd` (champion: the player who wins the Era). Every
    function carries a JSDoc `/** @rule <n> */` tag naming a rule or clause that exists in `RULES.md`. Import nothing but
    `promptocracy/engine` (tests may also import `node:test`, `node:assert/strict` and `promptocracy/engine/testing`). No
    `fetch`, `globalThis`, `eval`, `Function`, `process`, `env`, `caches` or dynamic `import(`.

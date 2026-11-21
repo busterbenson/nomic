@@ -25,8 +25,9 @@ import { isMainRun } from "./schedule.mjs";
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const ROOT = resolve(HERE, "..");
 // The only paths a night may change in a game repo (AGENTS.md; rule 107.4). game.json is rewritten by this script
-// (its module list follows rules/), never by the model.
-export const ALLOWED = [/^RULES\.md$/, /^settings\.json$/, /^rules\/[A-Za-z0-9_.-]+$/, /^rulings\/[A-Za-z0-9_./-]+$/];
+// (its module list follows rules/), never by the model. catalog.json (the game's catalog entries, rule 701.1) is allowed so the night's
+// commissions can write it (step 3); a proposal to change a rule never changes it (checked below).
+export const ALLOWED = [/^RULES\.md$/, /^settings\.json$/, /^catalog\.json$/, /^rules\/[A-Za-z0-9_.-]+$/, /^rulings\/[A-Za-z0-9_./-]+$/];
 export const RESULT_FILE = "MODERATOR-RESULT.json";
 export const MAX_FIXES = 2;
 export const CLAIM_MARGIN_MIN = 5; // stop applying this long before the deadline, so the claim lands in time
@@ -163,7 +164,7 @@ const tagsIn = (t) => [...String(t ?? "").matchAll(/\[setting:\s*([A-Za-z0-9_.]+
 //     prevailing proposal overrides (108.4) may only gain a short note at its end
 //   - the voted draft is in the changed rule's own section, word for word (unless redrafted, 107.3)
 //   - under rules/, only those rules' <n>.ts and <n>.test.ts; rulebook.test.ts only when the set of modules changes;
-//     nothing under rulings/ (rulings are not made by a proposal, 106.2)
+//     nothing under rulings/ (rulings are not made by a proposal, 106.5)
 //   - settings.json changes only the keys the proposal sets, or that the voted draft or the rule as it stood names
 /** @rule 107.4, 108.4 */
 export function scopeProblems({ beforeMd, afterMd, beforeSettings, afterSettings, changed, p, conflictRule, moduleSetChanged = false, rulebookBefore = "", rulebookAfter = "", modulesComeOrGo = [] }) {
@@ -237,7 +238,7 @@ export function scopeProblems({ beforeMd, afterMd, beforeSettings, afterSettings
       out.push("rules/rulebook.test.ts changed beyond the lines for the rules this proposal changes");
       continue;
     }
-    if (f.startsWith("rules/") || f.startsWith("rulings/")) out.push(`${f} is not part of the rule this proposal changes`);
+    if (f.startsWith("rules/") || f.startsWith("rulings/") || f === "catalog.json") out.push(`${f} is not part of the rule this proposal changes`);
   }
   if (!markChange) for (const n of rules) if (a[`r${n}`] && b[`r${n}`] && markOf(beforeMd, n) !== markOf(afterMd, n)) out.push(`rule ${n}'s mark changed`);
   if (markChange) {
@@ -488,10 +489,10 @@ export async function applyOne({ dir, job, p, tonight, budgetMs, model = runMode
 const oneLine = (s) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, 100);
 const clean = (s) => oneLine(s).replace(/[.\s]+$/, "").slice(0, 300);
 
-// ---- the drafter audit (rule 106.3) -----------------------------------------------------------------------------
+// ---- the drafter audit (rule 106.6) -----------------------------------------------------------------------------
 // One model call on the proposer's own words and the voted draft, read-only (no tools), JSON out:
 // {material: bool, reading, gap, case: {expect}}. Never changes what is applied.
-/** @rule 106.3 */
+/** @rule 106.6 */
 export async function auditOne({ p, model = runModel, claude, cwd, timeoutMs = AUDIT_MIN * 60_000 }) {
   const prompt = `${readFileSync(join(HERE, "AUDIT.md"), "utf8")}\n\n${fence({ number: p.number, kind: p.kind, target: p.target, words: p.words, before_text: p.before_text, after_text: p.after_text })}\n`;
   const r = await model({ prompt, cwd, timeoutMs, effort: "low", claude, tools: "" });
@@ -502,7 +503,7 @@ export async function auditOne({ p, model = runModel, claude, cwd, timeoutMs = A
 }
 
 // The case a material gap adds to tests/drafter-cases.json (docs/drafter-eval.md).
-/** @rule 106.3 */
+/** @rule 106.6 */
 export function auditCase(slug, day, p, a) {
   const expect = { outcome: "drafted" };
   for (const k of ["after_includes", "after_includes_any", "after_excludes"]) if (Array.isArray(a.expect?.[k])) expect[k] = a.expect[k].filter((x) => typeof x === "string").slice(0, 8).map((x) => x.slice(0, 80));
@@ -800,7 +801,7 @@ async function runPass(opts) {
       log({ event: r.applied ? "applied" : "not_applied", number: p.number, commit: r.commit, reason: r.reason, redrafted: r.redrafted });
     }
 
-    // The drafter audit (rule 106.3): a separate reading of each passed proposal's own words.
+    // The drafter audit (rule 106.6): a separate reading of each passed proposal's own words.
     // Only while there is time left before the claim's margin; the claim never waits for an audit.
     const notes = [], cases = [];
     if (opts.audit !== false) {
@@ -850,7 +851,7 @@ function readState(dir, slug) { try { return JSON.parse(readFileSync(statePath(d
 function writeState(dir, slug, s) { writeFileSync(statePath(dir, slug), JSON.stringify(s)); }
 
 // The drafter audit's case goes to the platform repo as a draft PR on its own branch, never merged by the moderator.
-/** @rule 106.3 */
+/** @rule 106.6 */
 export function openAuditPrWith({ platformRepo, gh = "gh" }) {
   return async (c) => {
     const work = mkdtempSync(join(tmpdir(), "moderator-audit-"));
@@ -866,7 +867,7 @@ export function openAuditPrWith({ platformRepo, gh = "gh" }) {
       git(["add", "tests/drafter-cases.json"], dir);
       git(["commit", "-q", "-m", `Drafter case from the moderator's audit: ${c.id}`], dir);
       git(["push", "-q", "origin", `HEAD:refs/heads/${branch}`], dir);
-      execFileSync(gh, ["pr", "create", "--repo", platformRepo, "--draft", "--head", branch, "--title", `Drafter case: ${c.id}`, "--body", `${c.note}\n\nOpened by the moderator's drafter audit (rule 106.3). Not merged by the moderator.`], { cwd: dir, timeout: 60_000, stdio: "ignore" });
+      execFileSync(gh, ["pr", "create", "--repo", platformRepo, "--draft", "--head", branch, "--title", `Drafter case: ${c.id}`, "--body", `${c.note}\n\nOpened by the moderator's drafter audit (rule 106.6). Not merged by the moderator.`], { cwd: dir, timeout: 60_000, stdio: "ignore" });
     } finally { rmSync(work, { recursive: true, force: true }); }
   };
 }

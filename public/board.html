@@ -49,11 +49,16 @@
 <section class="rbwrap" id="book" aria-label="Summary, rulebook, workshop and history">
   <div class="book">
     <div class="btabs" id="btabs" role="tablist" aria-label="Book"></div>
+    <!-- the tab beside the chat window (public/js/chat.js): a column on a desktop, a corner pill and a sheet on a phone -->
+    <div class="bwrap" id="bwrap" data-chat="off" data-sheet="closed">
     <div id="bpanel">
       <div id="p-summary" role="tabpanel" aria-labelledby="tab-summary"></div>
       <div id="p-rules" role="tabpanel" aria-labelledby="tab-rules" hidden><section class="rbwrap" id="rules" aria-label="Rulebook">Loading&hellip;</section></div>
       <div id="p-workshop" role="tabpanel" aria-labelledby="tab-workshop" hidden></div>
       <div id="p-history" role="tabpanel" aria-labelledby="tab-history" hidden></div>
+    </div>
+    <aside class="chatcol" id="chatcol" aria-label="Chat" hidden></aside>
+    <button type="button" class="chatfab" id="chatfab" hidden></button>
     </div>
   </div>
 </section>
@@ -76,6 +81,7 @@
   import { createBallot } from "/js/ballot.js";
   import { mini, playerPill, hexOf } from "/js/people.js";
 import { createWorkshop } from "/js/workshop.js";
+import { createChat } from "/js/chat.js";
  import { commissionHTML, wPill } from "/js/commission.js";
   const SLUG = location.pathname.split("/")[1] || "";
   const BASE = "/" + SLUG;
@@ -100,7 +106,7 @@ import { createWorkshop } from "/js/workshop.js";
   };
   let ME = null, DATA = null, INVITE = null;   // who is looking, and the last /api/game
   let DAY = null, END_ASK = false, START_ASK = false, DAY_AT = 0, DAY_TIMER = 0, DAY_TICK = 0;   // the last /api/day, the End turn confirm, when it was fetched
-  let PROP = null, BAL = null, BOOK = null, CARDS = null, WS = null;   // the proposal controller (propose.js), the mounted rulebook, the card host
+  let PROP = null, BAL = null, BOOK = null, CARDS = null, WS = null, CHAT = null;   // the proposal controller (propose.js), the mounted rulebook, the card host
   let BOARD = null, SEL = null, VIEW = null;   // the last /api/board, the selected tile {x,y}, the drawn board
   let TAB = "summary", BOARD_OPEN = true, LASTMOVE = null, NOTES = { list: [], unread: 0 }, RULES_OK = false;
   ensureDefs();
@@ -133,6 +139,7 @@ import { createWorkshop } from "/js/workshop.js";
     if (PROP) PROP.redraw();
     if (BOOK) BOOK.redraw();
     drawBook();   // the ballot's Yes / No and the Propose card depend on who is looking
+    if (CHAT) CHAT.sync(TAB);   // the chat window exists only for a signed-in player
     if (VIEW && ME && ME.player) VIEW.setMe(ME.player.color.key);
     drawWho();
     drawMoveBar();
@@ -232,7 +239,9 @@ import { createWorkshop } from "/js/workshop.js";
     showNotice();
     CARDS = createCards({ root: $("mroot"), describe });   // closing a card keeps what you were writing: it is there when the card opens again
     BAL = createBallot({ api, pill: by => pill(by, false), refreshed: refresh, player: () => !!(ME && ME.player) });
-    WS = createWorkshop({ api, me: () => ME, pill, rpill: n => PROP.rpill(n), when: whenText, canCommission: () => PROP.canPropose(), refresh: async () => { await refresh(); loadNotes(); }, cards: CARDS });
+    WS = createWorkshop({ api, me: () => ME, pill, rpill: n => PROP.rpill(n), when: whenText, canCommission: () => PROP.canCommission(), refresh: async () => { await refresh(); loadNotes(); }, cards: CARDS, chat: () => CHAT });
+    CHAT = createChat({ api, root: $("bwrap"), me: () => ME, slug: SLUG, rpill: n => PROP.rpill(n), wpill: wPill,
+      onTicket: async t => { WS.apply(t); await WS.load(); drawBook(); } });
     PROP = createProposer({ api, me: () => ME, day: () => DAY, pill, vote: n => BAL.box(n), refresh: async () => { await refresh(); loadNotes(); } });
     drawTabs(); drawBook();
     loadMe();
@@ -260,7 +269,7 @@ import { createWorkshop } from "/js/workshop.js";
   function setTab(k, scroll) {
     TAB = k;
     for (const t of ["summary", "rules", "workshop", "history"]) $("p-" + t).hidden = t !== k;
-    drawTabs(); drawBook();
+    drawTabs(); drawBook(); if (CHAT) CHAT.sync(TAB);
     if (scroll) $("book").scrollIntoView({ block: "start", behavior: reduced() ? "auto" : "smooth" });
   }
   $("btabs").addEventListener("keydown", e => {
@@ -274,11 +283,12 @@ import { createWorkshop } from "/js/workshop.js";
   function sentence(p) {
     const r = n => PROP.rpill(String(n));
     const k = p.kind, t = String(p.target);
-    const what = k === "commission" ? `a commission ${p.ticket ? wPill(p.ticket.n) : ""}` : k === "amend" ? `a change to ${t.includes(".") ? "clause" : "rule"} ${r(t)}` : k === "addclause" ? `a new clause for rule ${r(t.split(".")[0])}` : k === "add" ? `a new rule${p.new_num ? " " + r(p.new_num) : ""}` : k === "repeal" ? `to repeal ${t.includes(".") ? "clause" : "rule"} ${r(t)}` : k === "move" ? `to move rule ${r(t)}` : k === "mark" ? `a change to how ${BOOK && BOOK.rulebook.byNum[t] && BOOK.rulebook.byNum[t].kind === "block" ? "block" : "rule"} ${r(t)} is changed` : "a change";
-    const need = p.needs ? (p.needs.mark === "unanimous" ? `It needs all ${p.needs.of} votes to pass.` : `It needs ${p.needs.needed} of ${p.needs.of} votes to pass.`) : "";
-    return `proposed ${what}. ${need}`;
+    const what = k === "commission" ? `a commission ${p.ticket ? wPill(p.ticket.n) : ""}` : k === "action" && p.action ? `an action: ${esc(p.action.name)}` : k === "amend" ? `a change to ${t.includes(".") ? "clause" : "rule"} ${r(t)}` : k === "addclause" ? `a new clause for rule ${r(t.split(".")[0])}` : k === "add" ? `a new rule${p.new_num ? " " + r(p.new_num) : ""}` : k === "repeal" ? `to repeal ${t.includes(".") ? "clause" : "rule"} ${r(t)}` : k === "move" ? `to move rule ${r(t)}` : k === "mark" ? `a change to how ${BOOK && BOOK.rulebook.byNum[t] && BOOK.rulebook.byNum[t].kind === "block" ? "block" : "rule"} ${r(t)} is changed` : "a change";
+    const need = p.needs && p.needs.champion ? (p.needs.needed ? `Stopped at ${p.needs.needed} of ${p.needs.needed} against.` : "") : p.needs ? (p.needs.mark === "unanimous" ? `It needs all ${p.needs.of} votes to pass.` : `It needs ${p.needs.needed} of ${p.needs.of} votes to pass.`) : "";
+    return `${p.champion ? `made the Champion's change ${r("402.4")}: ` : "proposed "}${what}. ${need}`;
   }
   const ballotList = () => (PROP ? PROP.onBallot() : []);
+  const votable = () => (BAL && BAL.hasYou() ? BAL.total() : ballotList().length);   // today's ballot items you can vote on
   const votedCount = () => (DAY && DAY.you ? Number(DAY.you.voted) || 0 : 0);   // how many of today's ballot items you have voted on (/api/day); the Yes / No boxes go in the ballot-vote slots
 
   function proposeCard() {
@@ -296,13 +306,20 @@ import { createWorkshop } from "/js/workshop.js";
       <div class="ptiles"><button type="button" class="ptile" data-tab="rules"${off}><span class="pt2">Rulebook</span><span class="pm2">${BOOK && BOOK.count() ? plural(BOOK.count(), "rule") : ""}</span><span class="pa2">+ Change or add a rule</span></button>
       <button type="button" class="ptile" data-tab="workshop"${off}><span class="pt2">Workshop</span><span class="pm2">${WS && WS.count() ? plural(WS.count(), "ticket") : ""}</span><span class="pa2">+ Commission something</span></button></div>${active && !c.allowed ? `<p class="mnote">${esc(c.reason)}</p>` : ""}</section>`;
   }
+  // The Era (rule 402): its number and name, the Champion, and the Champion's one write besides a proposal: naming the Era (402.3).
+  function eraHTML() {
+    const e = DATA && DATA.era;
+    if (!e) return "";
+    const form = e.you && e.you.can_name ? `<form class="eraform" data-eraform><input type="text" id="era-name" maxlength="60" autocomplete="off" aria-label="Name for Era ${esc(e.n)}"><button type="submit" class="btn small">Name the Era</button><span id="era-msg" class="notice err" role="alert" hidden></span></form>` : "";
+    return `<section class="sw era" id="sera" aria-label="Era"><div class="swh"><h2>Era ${esc(e.n)}${e.name ? ` · ${esc(e.name)}` : ""}</h2>${e.champion ? `<span class="m">Champion</span>${pill(e.champion, false)}` : ""}</div>${form}</section>`;
+  }
   function summaryHTML() {
     const bl = ballotList();
     const ballot = `<section class="sw" id="sballot" aria-label="Today's ballot"><div class="swh"><h2>Today's ballot</h2><span class="m" data-slot="ballot-count">${!bl.length ? "" : BAL && BAL.hasYou() ? `${BAL.voted()} of ${BAL.total()} voted` : plural(bl.length, "proposal")}</span></div>
       ${bl.length ? `<ul class="sl">${bl.map(p => `<li id="sb-${esc(p.n)}"><p class="sbs">${PROP.pPill(p)} ${pill(p.by, p.mine)} ${sentence(p)}</p>
-        <div class="sdiff">${p.kind === "commission" && p.ticket ? commissionHTML(p.ticket) : `${p.title ? `<p class="sdh">${esc(p.title)}</p>` : ""}<p class="mono head">${esc(p.head || "")}</p><p>${diffOf(p)}</p>`}</div><div class="vrow slot" data-slot="ballot-vote" data-pn="${esc(p.n)}">${BAL ? BAL.box(p.n) : ""}</div></li>`).join("")}</ul>` : `<p class="mnote">Nothing is on today's ballot.</p>`}</section>`;
+        <div class="sdiff">${p.kind === "commission" && p.ticket ? commissionHTML(p.ticket) : p.kind === "action" && p.action ? PROP.actionBody(p) : `${p.title ? `<p class="sdh">${esc(p.title)}</p>` : ""}<p class="mono head">${esc(p.head || "")}</p><p>${diffOf(p)}</p>`}</div><div class="vrow slot" data-slot="ballot-vote" data-pn="${esc(p.n)}">${BAL ? BAL.box(p.n) : ""}</div></li>`).join("")}</ul>` : `<p class="mnote">Nothing is on today's ballot.</p>`}</section>`;
     const cat = WS ? WS.summaryHTML() : "";
-    return `<div class="sgrid"><section class="sw day" id="sday" aria-label="Today"></section>
+    return `<div class="sgrid">${eraHTML()}<section class="sw day" id="sday" aria-label="Today"></section>
       <div class="slot recapw" data-slot="recap"></div>
       <div class="scol">${ballot}${cat}</div>
       <div class="scol">${proposeCard()}<div class="slot" data-slot="recent-days"></div><button type="button" class="linkbtn" data-tab="history">Full history →</button></div></div>`;
@@ -340,17 +357,18 @@ import { createWorkshop } from "/js/workshop.js";
       const you = DAY.you, ended = !!(you && you.ended);
       const bl = ballotList();
       // End turn is the one filled button on the page once your move, your votes and your proposal are all in; before that it is ghost (OPEN-06 (3): lean yes)
-      const allDone = !!(you && you.moved && you.proposed && votedCount() === bl.length);
+      const nv = votable();   // the Champion does not vote on their own change (402.4)
+      const allDone = !!(you && you.moved && you.proposed && votedCount() === nv);
       const step = (done, jump, label, doneLabel, detail) => `<li><button type="button" class="dstep${done ? " done" : ended ? " skip" : ""}" data-jump="${jump}"><span class="ck" aria-hidden="true">${done ? "✓" : ended ? "–" : ""}</span><span class="dt"><span class="dn2">${done ? doneLabel : label}</span>${detail ? `<span class="ds">${esc(detail)}</span>` : ""}</span></button></li>`;
       const myPos = BOARD && ME && ME.player ? BOARD.pieces.find(p => p.color.key === myKey()) : null;
       let html = `<div class="dhead"><h2>Day ${esc(DAY.day)}</h2><span class="moon" data-slot="moon"></span></div>`;
-      if (you) html += `<ul class="dsteps">${step(you.moved, "board", ended ? "No move" : "Move", "Moved", you.moved && myPos ? noLevel(myPos.at.label) : "")}${step(bl.length > 0 && votedCount() === bl.length, "ballot", ended ? "No votes" : "Vote", "Voted", bl.length ? `${votedCount()} of ${bl.length}` : "")}${step(you.proposed, "propose", ended ? "No proposal" : "Propose", "Proposed", you.proposed && PROP ? PROP.mineList().map(p => p.n).join(", ") : "")}</ul>`;
+      if (you) html += `<ul class="dsteps">${step(you.moved, "board", ended ? "No move" : "Move", "Moved", you.moved && myPos ? noLevel(myPos.at.label) : "")}${step(nv > 0 && votedCount() === nv, "ballot", ended ? "No votes" : "Vote", "Voted", nv ? `${votedCount()} of ${nv}` : "")}${step(you.proposed, "propose", ended ? "No proposal" : "Propose", "Proposed", you.proposed && PROP ? PROP.mineList().map(p => p.n).join(", ") : "")}</ul>`;
       html += `<div class="dend">${ended ? `<span class="clock done">${LOCKSVG}Turn ended</span>`
         : `<span class="clock" id="clock">${esc(clockText())}</span>${you && !END_ASK ? `<button type="button" class="btn small${allDone ? "" : " ghost"}" data-endturn="ask"${you.can.end_turn.allowed ? "" : ` disabled title="${esc(you.can.end_turn.reason || "")}"`}>End turn</button>` : ""}`}</div>`;
       if (you && END_ASK && !ended) {
         const left = [];
         if (!you.moved) left.push("your move");
-        if (votedCount() < bl.length) left.push(plural(bl.length - votedCount(), "vote"));
+        if (votedCount() < nv) left.push(plural(nv - votedCount(), "vote"));
         if (!you.proposed) left.push("your proposal");
         const skips = left.join(", ").replace(/, ([^,]*)$/, " and $1");
         html += `<div class="dask" role="group" aria-label="End turn"><span>${left.length ? `You skip ${skips}.` : ""}</span><span class="row"><button type="button" class="btn small" data-endturn="yes">End turn</button><button type="button" class="linkbtn" data-endturn="no">Keep playing</button></span></div><div id="day-msg" role="status"></div>`;
@@ -413,7 +431,7 @@ import { createWorkshop } from "/js/workshop.js";
     return { cls: "crit", label: p.name, backLabel: p.name,
       html: `<div class="mtop"><div class="cart">${mini(p, "cartico")}</div><h2>${esc(p.name)}${me ? ' <span class="you">(you)</span>' : ""}</h2><span class="mmeta">${esc(p.color.name)} · player</span><span class="mpill">Living</span></div><dl class="cstats">${rows.join("")}</dl>` };
   }
-  function describe(spec) { return spec.kind === "player" ? playerCard(spec) : spec.kind === "ticket" ? WS.card(spec) : BOOK ? BOOK.describe(spec) : null; }
+  function describe(spec) { return spec.kind === "player" ? playerCard(spec) : spec.kind === "ticket" || spec.kind === "entry" ? WS.card(spec) : BOOK ? BOOK.describe(spec) : null; }
   const openPlayer = (key, push) => CARDS.open({ kind: "player", key }, { push: !!push });
 
   // 504's card carries its own action: move your piece (it takes you to the board).
@@ -535,7 +553,7 @@ import { createWorkshop } from "/js/workshop.js";
     if (g.ok) { DATA = g.data; }
     if (b.ok) { BOARD = b.data; if (VIEW) VIEW.setData(b.data, myKey()); }
     await Promise.all([PROP ? PROP.load() : 0, BAL ? BAL.load() : 0, WS ? WS.load() : 0]);
-    drawWho(); if (g.ok) drawGame(g.data); if (b.ok) drawBoard(b.data); drawTabs(); drawBook(); drawMoveBar();
+    drawWho(); if (g.ok) drawGame(g.data); if (b.ok) drawBoard(b.data); drawTabs(); drawBook(); drawMoveBar(); if (CHAT) CHAT.sync(TAB, true);   // the day or the lock changed: the chat reads its state again
     if (BOOK) BOOK.redraw();
     if (CARDS && CARDS.isOpen()) CARDS.redraw();
   }
@@ -577,6 +595,8 @@ import { createWorkshop } from "/js/workshop.js";
     if (use) { CARDS.close(); jumpTo("board"); return; }
     const tk = t.closest("[data-ticket]");
     if (tk && WS) { CARDS.hidePreview(); WS.open(tk.dataset.ticket, inCard); return; }
+    const en = t.closest("[data-entry]");
+    if (en && WS && !en.dataset.w) { CARDS.hidePreview(); WS.openEntry(en.dataset.entry, inCard); return; }
     const wb = t.closest("[data-w]");
     if (wb && WS) { if (!wb.disabled) WS.click(wb); return; }
     const vb = t.closest("[data-vote]");
@@ -601,6 +621,18 @@ import { createWorkshop } from "/js/workshop.js";
     const m = $("day-msg"); if (m) { m.className = "notice err"; m.textContent = text; }
   });
 
+  document.addEventListener("submit", async e => {
+    const f = e.target.closest && e.target.closest("[data-eraform]");
+    if (!f) return;
+    e.preventDefault();
+    const btn = f.querySelector("button"), inp = $("era-name"), msg = $("era-msg");
+    if (btn.disabled) return;
+    btn.disabled = true;
+    const r = await api("/api/era", { name: inp.value });
+    if (r.ok) { await refresh(); return; }
+    btn.disabled = false;
+    msg.hidden = false; msg.textContent = (r.data && r.data.error) || "Something went wrong.";
+  });
   document.addEventListener("input", e => { if (WS) WS.input(e.target); });
   initBoard();
   load();

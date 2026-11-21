@@ -7,7 +7,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync,
 import { tmpdir } from "node:os";
 import { join as pjoin } from "node:path";
 import { ROOT } from "./lib.mjs";
-import { ACTION_KINDS, HOOKS, RuleError, RuleSetError, assembleRules, deepFreeze, defineRule, effects, makeContext, makeTiles, refuse, seededRng, validateEffect } from "../src/engine/hooks.js";
+import { ACTION_KINDS, HOOKS, RuleError, RuleSetError, assembleRules, deepFreeze, defineRule, effects, makeContext, makeTiles, refuse, seededRng, validateActionType, validateEffect } from "../src/engine/hooks.js";
 import { lintModule } from "../src/engine/lint.js";
 import { checkRulebook, parseRulesMd } from "../src/engine/rulesmd.js";
 import { DEFAULT_SETTINGS, validateSettings } from "../src/lib/settings.js";
@@ -31,6 +31,38 @@ console.log("hook composition");
 const m = (rule, hooks) => defineRule({ rule, ...hooks });
 const one = m(505, { spawnTile: (c, cand) => cand[0] ?? null });
 const order = m(107, { applyOrder: (c, p) => [...p].sort((a, b) => a.number - b.number) }); // the one order rule every rule set needs (107.2)
+
+console.log("action types (rule 103.5): actionType names one, applyAction does it");
+{
+  const grant = { type: "grant", name: "Grant points", touches: [401, 402], params: [{ key: "to", label: "To", kind: "player", other: true }, { key: "amount", label: "Points", kind: "int", min: 1, max: 10 }] };
+  const mod = (rule, d = grant, apply = (c, a) => [effects.points(a.params.to, a.params.amount, `P${a.number}`)]) => m(rule, { actionType: () => d, applyAction: apply });
+  const base = [one, order];
+  const rs = assembleRules([...base, mod(901)]);
+  check("the engine lists each module's action type, tagged with its rule, as frozen plain data", J(rs.actionTypes()) === J([{ ...grant, rule: 901 }]) && Object.isFrozen(rs.actionTypes()[0]) && assembleRules(base).actionTypes().length === 0);
+  check("applyAction runs the module of that type and tags its points with the rule", J(rs.applyAction(ctx, { type: "grant", params: { to: "a", amount: 4 }, number: 9, player: "b" })) === J([{ type: "points", player: "a", delta: 4, reason: "P9", rule: 901 }]));
+  check("applyAction of a type the game doesn't have answers null (never an empty list: the proposal is not applied)", rs.applyAction(ctx, { type: "resurrect", params: {}, number: 1, player: "a" }) === null);
+  check("applyAction takes only points: a chart or a champion is refused with a RuleError naming the hook", (() => {
+    const e = throws(() => assembleRules([...base, mod(901, grant, () => [effects.champion("a", "x")])]).applyAction(ctx, { type: "grant", params: { to: "a", amount: 1 }, number: 1, player: "b" }));
+    return e instanceof RuleError && e.rule === 901 && /champion effect can't be returned by applyAction \(it takes: points\)/.test(e.message);
+  })());
+  check("the action it is given is frozen: a module can't change the proposal it was handed", (() => {
+    const e = throws(() => assembleRules([...base, mod(901, grant, (c, a) => { a.params.amount = 99; return []; })]).applyAction(ctx, { type: "grant", params: { to: "a", amount: 1 }, number: 1, player: "b" }));
+    return e instanceof RuleError;
+  })());
+  const bad = (what, d) => { const e = throws(() => assembleRules([...base, mod(901, d)])); return e instanceof RuleSetError && e.message.includes(what); };
+  check("a module with actionType and no applyAction (or the reverse) fails assembly", throws(() => assembleRules([...base, m(901, { actionType: () => grant })])) instanceof RuleSetError && throws(() => assembleRules([...base, m(901, { applyAction: () => [] })])) instanceof RuleSetError);
+  check("two modules naming one action type fail assembly", throws(() => assembleRules([...base, mod(901), mod(902)]))?.message.includes("named by two rules") === true);
+  check("a bad descriptor fails assembly, with the reason: type id, name, touches, params, int bounds, duplicate key",
+    bad("type id", { ...grant, type: "Grant!" }) && bad("name", { ...grant, name: "" }) && bad("touches", { ...grant, touches: [] }) && bad("touches", { ...grant, touches: [12] }) &&
+    bad("min and max", { ...grant, params: [{ key: "n", label: "N", kind: "int", min: 5, max: 1 }] }) && bad("player or an int", { ...grant, params: [{ key: "n", label: "N", kind: "text" }] }) &&
+    bad("its own key", { ...grant, params: [{ key: "n", label: "N", kind: "player" }, { key: "n", label: "M", kind: "player" }] }) && validateActionType(grant) === null);
+  check("a module may refuse the details when applying: applyAction answers {error} (never an empty list), and a type the game lacks still answers null", (() => {
+    const rr = assembleRules([...base, mod(901, grant, () => refuse("too many"))]);
+    const r = rr.applyAction(ctx, { type: "grant", params: { to: "a", amount: 1 }, number: 1, player: "b" });
+    return r && !Array.isArray(r) && r.error === "too many" && rr.applyAction(ctx, { type: "x", params: {}, number: 1, player: "b" }) === null;
+  })());
+  check("an action type that throws in actionType fails assembly instead of being skipped", throws(() => assembleRules([...base, m(901, { actionType: () => { throw new Error("no"); }, applyAction: () => [] })])) instanceof RuleSetError);
+}
 check("actionAllowed: modules run in RULE order, not list order, and the first refusal wins", (() => {
   const calls = [];
   const r = assembleRules([
@@ -98,19 +130,19 @@ check("applyOrder: the order rule's answer, as the caller's own rows; an answer 
   const dup = throws(() => assembleRules([one, m(107, { applyOrder: (c, p) => [p[0], p[0]] })]).applyOrder(ctx, rows));
   return J(got.map((r) => r.id)) === '["x2","x5"]' && got[0] === rows[1] && drop instanceof RuleError && dup instanceof RuleError;
 })());
-check("onEnacted (401) and dayEnd (402): effects joined in rule order, each tagged with its rule; only points and win at night", (() => {
-  const rs = assembleRules([one, order, m(401, { onEnacted: (c, p) => [effects.points(p.player, 10, "x")] }), m(402, { dayEnd: (c, r) => r.given.map((g) => effects.win(g.player, "y")) }), m(403, { onEnacted: () => [effects.points("b", 1, "z")] })]);
+check("onEnacted (401) and dayEnd (402): effects joined in rule order, each tagged with its rule; only points and champion at night", (() => {
+  const rs = assembleRules([one, order, m(401, { onEnacted: (c, p) => [effects.points(p.player, 10, "x")] }), m(402, { dayEnd: (c, r) => r.given.map((g) => effects.champion(g.player, "y")) }), m(403, { onEnacted: () => [effects.points("b", 1, "z")] })]);
   const e = rs.onEnacted(ctx, { number: 1, player: "a" });
   const w = rs.dayEnd(ctx, { before: {}, given: [{ player: "a", delta: 10 }] });
   const chart = throws(() => assembleRules([one, order, m(401, { onEnacted: () => [effects.chart([{ x: 0, y: 0 }])] })]).onEnacted(ctx, { number: 1, player: "a" }));
   const frozen = throws(() => assembleRules([one, order, m(401, { onEnacted: (c, p) => { p.player = "me"; return []; } })]).onEnacted(ctx, { number: 1, player: "a" }));
-  return J(e.map((x) => [x.rule, x.player, x.delta])) === '[[401,"a",10],[403,"b",1]]' && w.length === 1 && w[0].type === "win" && w[0].rule === 402 && chart instanceof RuleError && frozen instanceof RuleError;
+  return J(e.map((x) => [x.rule, x.player, x.delta])) === '[[401,"a",10],[403,"b",1]]' && w.length === 1 && w[0].type === "champion" && w[0].rule === 402 && chart instanceof RuleError && frozen instanceof RuleError;
 })());
-check("each night hook takes only the effect its enactment applies: a win from onEnacted, or points from dayEnd, is refused with a RuleError naming the hook (never dropped)", (() => {
-  const winEnacted = throws(() => assembleRules([one, order, m(401, { onEnacted: (c, p) => [effects.win(p.player, "x")] })]).onEnacted(ctx, { number: 1, player: "a" }));
+check("each night hook takes only the effect its enactment applies: a champion from onEnacted, or points from dayEnd, is refused with a RuleError naming the hook (never dropped)", (() => {
+  const winEnacted = throws(() => assembleRules([one, order, m(401, { onEnacted: (c, p) => [effects.champion(p.player, "x")] })]).onEnacted(ctx, { number: 1, player: "a" }));
   const pointsEnd = throws(() => assembleRules([one, order, m(402, { dayEnd: () => [effects.points("a", 5, "y")] })]).dayEnd(ctx, { before: {}, given: [] }));
-  return winEnacted instanceof RuleError && winEnacted.rule === 401 && /win effect can't be returned by onEnacted \(it takes: points\)/.test(winEnacted.message) &&
-    pointsEnd instanceof RuleError && pointsEnd.rule === 402 && /points effect can't be returned by dayEnd \(it takes: win\)/.test(pointsEnd.message);
+  return winEnacted instanceof RuleError && winEnacted.rule === 401 && /champion effect can't be returned by onEnacted \(it takes: points\)/.test(winEnacted.message) &&
+    pointsEnd instanceof RuleError && pointsEnd.rule === 402 && /points effect can't be returned by dayEnd \(it takes: champion\)/.test(pointsEnd.message);
 })(), "");
 check("a bad module is refused: unknown hook, non-function hook, rule number missing or out of range, the same rule twice", (() => {
   const p = (mods) => throws(() => assembleRules(mods))?.problems ?? [];
@@ -141,10 +173,10 @@ check("the action kinds are move, propose, vote, end_turn; and deepFreeze is ide
 
 console.log("effects");
 check("a chart effect needs integer tiles inside the world, at most 500", validateEffect({ type: "chart", tiles: [{ x: 1, y: 2, z: 0 }] }) === null && validateEffect({ type: "chart", tiles: [{ x: 1.5, y: 0 }] }) !== null && validateEffect({ type: "chart", tiles: [{ x: 2e6, y: 0 }] }) !== null && validateEffect({ type: "chart", tiles: Array.from({ length: 501 }, () => ({ x: 0, y: 0 })) }) !== null && validateEffect({ type: "chart" }) !== null);
-check("points, log and win effects have their own shapes; an unknown type fails", validateEffect({ type: "points", player: "a", delta: 10, reason: "r" }) === null && validateEffect({ type: "points", player: "a", delta: 1.5, reason: "r" }) !== null && validateEffect({ type: "log", template: "t", args: {} }) === null && validateEffect({ type: "log", template: "t", args: [] }) !== null && validateEffect({ type: "win", player: "a", reason: "r" }) === null && validateEffect({ type: "spawn" }) !== null && validateEffect(null) !== null);
+check("points, log and champion effects have their own shapes; an unknown type fails", validateEffect({ type: "points", player: "a", delta: 10, reason: "r" }) === null && validateEffect({ type: "points", player: "a", delta: 1.5, reason: "r" }) !== null && validateEffect({ type: "log", template: "t", args: {} }) === null && validateEffect({ type: "log", template: "t", args: [] }) !== null && validateEffect({ type: "champion", player: "a", reason: "r" }) === null && validateEffect({ type: "champion", player: "a" }) !== null && validateEffect({ type: "win", player: "a", reason: "r" }) !== null && validateEffect({ type: "spawn" }) !== null && validateEffect(null) !== null);
 
 console.log("the engine API a game imports");
-check("promptocracy/engine exports exactly the promised names", J(Object.keys(api).sort()) === J(["ACTION_KINDS", "DIAGONAL_MOVES", "ENGINE_VERSION", "HOOKS", "SHARED_TILES", "chartOffsets", "chartedAround", "defineRule", "effects", "refuse", "tileLabel", "validCoord", "withinSteps"]), J(Object.keys(api).sort()));
+check("promptocracy/engine exports exactly the promised names", J(Object.keys(api).sort()) === J(["ACTION_KINDS", "DIAGONAL_MOVES", "ENGINE_VERSION", "HOOKS", "SHARED_TILES", "attr", "chartOffsets", "chartedAround", "defineRule", "effects", "refuse", "tileLabel", "validCoord", "withinSteps"]), J(Object.keys(api).sort()));
 check("package.json exports ./engine (+ types) and ./engine/testing, nothing else of src", (() => {
   const e = JSON.parse(readFileSync(pjoin(ROOT, "package.json"), "utf8")).exports;
   return e["./engine"].default === "./src/engine/api.js" && e["./engine"].types === "./src/engine/api.d.ts" && e["./engine/testing"] === "./src/engine/testing.js" && Object.keys(e).length === 3;
@@ -273,7 +305,16 @@ check("hookClaimProblems: every hook the LOADED module has must be a tagged func
 }
 
 console.log("how rules share a hook");
-check("every wired hook declares one combine mode: veto (can-I), sequence (effects), decide (one handler)", J(Object.fromEntries(Object.entries(HOOKS).filter(([, h]) => h.wired).map(([k, h]) => [k, h.mode]))) === '{"actionAllowed":"veto","afterAction":"sequence","spawnTile":"decide","applyOrder":"decide","onEnacted":"sequence","dayEnd":"sequence"}' && Object.values(HOOKS).every((h) => ["veto", "sequence", "decide"].includes(h.mode)));
+check("every wired hook declares one combine mode: veto (can-I), sequence (effects), decide (one handler)", J(Object.fromEntries(Object.entries(HOOKS).filter(([, h]) => h.wired).map(([k, h]) => [k, h.mode]))) === '{"actionAllowed":"veto","afterAction":"sequence","spawnTile":"decide","applyOrder":"decide","onEnacted":"sequence","dayEnd":"sequence","championChange":"veto","actionType":"sequence","applyAction":"sequence"}' && Object.values(HOOKS).every((h) => ["veto", "sequence", "decide"].includes(h.mode)));
+check("championChange (402.4): a game with no module for it has no Champion's change (a refusal); with one it is allowed; any module may refuse, with its rule named; a bad answer is a RuleError", (() => {
+  const none = assembleRules([one, order]).championChange(ctx, A);
+  const yes = assembleRules([one, order, m(402, { championChange: () => null })]).championChange(ctx, A);
+  const no = assembleRules([one, order, m(402, { championChange: () => null }), m(406, { championChange: () => refuse("not this Era", 409) })]).championChange(ctx, A);
+  const bad = throws(() => assembleRules([one, order, m(402, { championChange: () => ({ status: 409 }) })]).championChange(ctx, A));
+  const byPower = assembleRules([one, order, m(402, { championChange: (c, a, p) => (p === "name" ? refuse("no naming", 409) : null) })]);
+  const names = byPower.championChange(ctx, A, "name"), changes = byPower.championChange(ctx, A), noneName = assembleRules([one, order]).championChange(ctx, A, "name");
+  return none && none.status === 409 && /no Champion's change/.test(none.error) && yes === null && no && no.rule === 406 && no.error === "not this Era" && no.status === 409 && bad instanceof RuleError && bad.rule === 402 && names && names.error === "no naming" && changes === null && /no naming of Eras/.test(noneName.error);
+})(), "");
 check("veto: a refusal names the rule that made it", (() => {
   const r = assembleRules([m(202, { actionAllowed: () => null }), m(504, { actionAllowed: () => refuse("no", 409) }), one, order]).actionAllowed(ctx, A, { kind: "move" });
   return r.rule === 504 && r.status === 409;
