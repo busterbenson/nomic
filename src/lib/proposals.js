@@ -1,7 +1,7 @@
 // Proposals, the pure parts (plain JavaScript, so the Worker and the plain-node tests share ONE implementation):
 // the moderator's code draft of the mechanical kinds (rule 103.1), the votes a proposal needs (rule 105), the next free
-// number (rule 109.1 is not text yet; the numbering follows public/js/rulebook.js), the parts no proposal can change
-// (not wired yet), the other rules a change would conflict with (rule 108.3), and the check of the small model's answer for
+// number (rule 109.1 is not text yet; the numbering follows public/js/rulebook.js), the parts that are not wired yet,
+// the other rules a change would conflict with (rule 108.3), and the check of the small model's answer for
 // rewording. The rulebook is parsed by the same parser the page uses (public/js/rulebook.js), so the server and the page
 // agree on what each number is.
 import { parseRules } from "../../public/js/rulebook.js";
@@ -80,6 +80,9 @@ export const markFor = (book, d) => strictestMark(book, partsOf(d));
 export const neededOf = (mark, electorate) => (mark === "unanimous" ? electorate : Math.floor(electorate / 2) + 1);
 
 // ---- numbers --------------------------------------------------------------------------------------------------------
+// Numbers no rule is given again: rule 110 was deleted from the file, not struck, so it would otherwise come back as the next
+// free number of block 100, and the moderator's age of a rule is read from the file's history.
+const RETIRED_NUMBERS = new Set(["110"]);
 // The next free number in a block: one more than the highest number it has ever used. A repealed rule stays in the file
 // (struck), and a moved rule leaves a note at its old number, so neither number is used again. null when the block is
 // full.
@@ -87,7 +90,8 @@ export const neededOf = (mark, electorate) => (mark === "unanimous" ? electorate
 export function nextRuleNum(book, block) {
   const sec = book.byNum[block];
   if (!sec || sec.kind !== "block") return null;
-  const n = Math.max(Number(block), ...sec.rules.map((r) => Number(r.num))) + 1;
+  let n = Math.max(Number(block), ...sec.rules.map((r) => Number(r.num))) + 1;
+  while (RETIRED_NUMBERS.has(String(n))) n++;
   return n % 100 === 0 ? null : String(n);
 }
 /** @rule 103.1 */
@@ -123,6 +127,9 @@ export function notWiredTouched(book, num) {
 // The refusal sentence: state, not helper text.
 /** @rule 103.1 */
 export const notWiredSentence = (parts) => `Not wired yet: ${parts.map((p) => `rule ${p}`).join(", ")}.`;
+// The same refusal when the change itself is elsewhere and only collides with the part: the player is told which part.
+/** @rule 103.1 */
+export const notWiredConflict = (parts) => `This would conflict with ${parts.map((p) => `rule ${p}`).join(", ")}, which ${parts.length > 1 ? "are" : "is"} not wired yet.`;
 // Refuse at drafting. Adding a clause or a rule changes nothing already there, and a reword that keeps the text and only
 // sets a setting the part names is allowed (a setting is data the site already reads, so that change does take effect);
 // anything else that touches a not-wired part is refused. Returns the refusal sentence, or null.
@@ -399,8 +406,9 @@ export function readModelAnswer(book, req, raw) {
     return why ? refuse("declined", why) : { error: "malformed" };
   }
   if (a.settings !== undefined && (typeof a.settings !== "object" || a.settings === null || Array.isArray(a.settings))) return { error: "malformed" };
+  // A conflict with a part that is not wired yet refuses the draft: the change would reach that part by the back door.
   const unwired = conflicts.filter((n) => notWiredWhole(book, n));
-  if (unwired.length) return refuse(NOT_WIRED_REASON, notWiredSentence(unwired));
+  if (unwired.length) return refuse(NOT_WIRED_REASON, notWiredConflict(unwired));
   const text = typeof a.after_text === "string" ? a.after_text.trim() : "";
   if (!text || [...text].length > 4000) return { error: "malformed" };
   const node = book.byNum[req.target];

@@ -1,6 +1,6 @@
 # The drafter eval
 
-`tests/drafter-live.mjs` runs the real drafter (`src/lib/drafter.ts`: the same Messages API call the Worker makes) and the draft route's checks (`src/lib/proposals.js`: `readRequest`, `draftOf`, `fixedRefusal`, and the checks inside `readModelAnswer`) over a game's `RULES.md`, and grades each answer in code, never by a model. It is **not** part of `npm test` or the build: it needs the key and costs money. The answers that mattered are kept as recorded answers in `tests/proposals.mjs`, which `npm test` runs without the key.
+`tests/drafter-live.mjs` runs the real drafter (`src/lib/drafter.ts`: the same Messages API call the Worker makes) and the draft route's checks (`src/lib/proposals.js`: `readRequest`, `draftOf`, `notWiredRefusal`, and the checks inside `readModelAnswer`) over a game's `RULES.md`, and grades each answer in code, never by a model. It is **not** part of `npm test` or the build: it needs the key and costs money. The answers that mattered are kept as recorded answers in `tests/proposals.mjs`, which `npm test` runs without the key.
 
 ```
 node tests/drafter-live.mjs                       # every case in tests/drafter-cases.json, one run each
