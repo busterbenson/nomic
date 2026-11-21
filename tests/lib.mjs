@@ -199,11 +199,13 @@ export const sha256Hex = (s) => createHash("sha256").update(s).digest("hex");
 
 // A JSON-RPC call to /<slug>/mcp. `token` null sends no Authorization header.
 export async function mcp(base, slug, token, method, params, id = 1) {
-  const res = await fetch(`${base}/${slug}/mcp`, {
+  // A kept-alive socket the dev server closed while a blocking d1() call ran resets on reuse (see client()): retry once.
+  const send = () => fetch(`${base}/${slug}/mcp`, {
     method: "POST", signal: AbortSignal.timeout(20000),
     headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...(token ? { authorization: `Bearer ${token}` } : {}) },
     body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
   });
+  const res = await send().catch(() => send());
   const text = await res.text();
   let data = null; try { data = JSON.parse(text); } catch {}
   return { status: res.status, headers: res.headers, text, data };

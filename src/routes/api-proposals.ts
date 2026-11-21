@@ -10,7 +10,7 @@
 // Every write goes through the day's gate (rule 107.1 the lock, rule 202.4 End turn), in the handler and again in the
 // SQL of the write itself. Mechanical kinds are drafted by code (src/lib/proposals.js); rewording in the player's own
 // words by a small model (src/lib/drafter.ts).
-import { bundleFor, checkChampionChange, lightContext } from "../engine/host";
+import { bundleFor, checkChampionChange, lightContext, rulesFor } from "../engine/host";
 import { getPlayer } from "../lib/auth";
 import { clockNow, dayOpenBinds, loadToday, settingsOf } from "../lib/day";
 import { championId, changeUsed } from "../lib/eras";
@@ -18,7 +18,7 @@ import { DrafterError, draftRewording, drafterReady } from "../lib/drafter";
 import { notify } from "../lib/notify";
 import { commissionsFor } from "../lib/ticket-view";
 import { COMMISSION_SNAPSHOT_SQL } from "../lib/tickets.js";
-import { CONFIRMED_TODAY_SQL, CONFIRM_SQL, DRAFT_INSERT_SQL, NOT_WIRED_REASON, WITHDRAW_SQL, conflictSentence, draftOf, markFor, needsModel, neededOf, notWiredConflictRefusal, notWiredRefusal, parseBook, proposalLimitMessage, readRequest } from "../lib/proposals.js";
+import { ACTION_DRAFT_INSERT_SQL, CONFIRMED_TODAY_SQL, CONFIRM_SQL, DRAFT_INSERT_SQL, NOT_WIRED_REASON, WITHDRAW_SQL, conflictSentence, draftOf, markFor, needsModel, neededOf, normKind, notWiredConflictRefusal, notWiredRefusal, parseBook, proposalLimitMessage, readRequest } from "../lib/proposals.js";
 import { refusalBody, turnBlock } from "../lib/turn";
 import { Ctx, colorOf, json, nowIso, readJson, sha256Hex, siteUrl, who } from "../lib/util";
 
@@ -52,6 +52,15 @@ const confirmedToday = async (env: any, gameId: string, playerId: string, day: n
 // The statuses a proposal has once its ballot is counted: only then are its totals shown (rule 104.4).
 export const COUNTED = ["passed", "failed", "enacted", "not_applied", "approved"];
 
+// What an action shows: its type, the rule that defines it, the rules it touches and its details as the player read them. Never the
+// ids the details were resolved to.
+/** @rule 103.5 */
+const actionView = (a: any) => ({ type: a.type, name: a.name, rule: a.rule, touches: a.touches, shown: a.shown });
+
+// The action types a game has (rule 103.5): what its rules say, for the propose form.
+/** @rule 103.5 */
+export const catalogOf = (game: { slug: string }) => rulesFor(game).actionTypes();
+
 // What a proposal shows. A whitelist: the count's columns (yes, no, absent, why) are in it only once it is counted
 // (rule 104.4); before that, nothing about its votes. The votes it needs come from its ballot day's electorate once it
 // is on a ballot (stored when the day opened), else from `electorate` (today's players, for a draft's slip).
@@ -71,6 +80,7 @@ export function view(r: any, viewerId?: string | null, electorate?: number) {
     conflict_note: conflictSentence(JSON.parse(r.conflicts || "[]")),
     settings: JSON.parse(r.settings || "{}"),
     drafted_by: r.drafted_by,
+    action: r.action ? actionView(JSON.parse(r.action)) : null,
     mark: mark ?? null,
     champion: !!r.champion,
     // The Champion's change needs no votes to pass: `needed` is how many other players must ALL vote no to stop it (rule 402.4).
@@ -107,8 +117,13 @@ export async function draft(ctx: Ctx, player: any, body: any, nowMs: number): Pr
   } else if (made >= limit) return out({ error: proposalLimitMessage(made) }, 409);
 
   const { md, book, sha } = await bookFor(game);
-  const req = readRequest(book, body);
+  // An action names its players by their names in the game (rule 103.5): the request needs the catalog and who is in the game.
+  const actions = normKind(body?.kind) === "action"
+    ? { catalog: catalogOf(game), players: ((await env.DB.prepare("SELECT id, display_name AS name FROM players WHERE game_id = ?").bind(game.id).all()).results as any[]), proposer: player.id }
+    : undefined;
+  const req = readRequest(book, body, actions);
   if ("error" in req) return out({ error: req.error }, 400);
+  if (asChampion && req.kind === "action") return out({ error: "The Champion's change changes a rule (rule 402.4); an action changes none (rule 103.5)." }, 400);
   const draftCap = draftsPerDay(limit);
   // Count the attempt BEFORE any model call, in one statement, so refused, failed and parallel drafts all count.
   const slot = await env.DB.prepare(
@@ -149,12 +164,19 @@ export async function draft(ctx: Ctx, player: any, body: any, nowMs: number): Pr
   if (unwired) return out({ error: unwired, drafting: "refused", reason: NOT_WIRED_REASON }, 422);
 
   const id = crypto.randomUUID(), now = nowIso(nowMs);
-  const [res] = await env.DB.batch([
-    env.DB.prepare(DRAFT_INSERT_SQL).bind(
+  const insert = req.kind === "action"
+    ? env.DB.prepare(ACTION_DRAFT_INSERT_SQL).bind(
+      id, player.id, req.kind, req.scope, req.target, d.new_num, req.to_block, req.words, req.title, d.head,
+      d.before_text, d.after_text, "[]", "{}", JSON.stringify(req.action), "code", sha, now,
+      game.id, ...dayOpenBinds(game.day, nowMs, player.id),
+    )
+    : env.DB.prepare(DRAFT_INSERT_SQL).bind(
       id, player.id, req.kind, req.scope, req.target, d.new_num, req.to_block, req.words, req.title, d.head,
       d.before_text, d.after_text, JSON.stringify(conflicts), JSON.stringify(settings), after === null ? "code" : "model", sha, now,
       game.id, ...dayOpenBinds(game.day, nowMs, player.id),
-    ),
+    );
+  const [res] = await env.DB.batch([
+    insert,
     // The draft is flagged in the same batch, so it is never a plain proposal the player meant as the Champion's change.
     env.DB.prepare("UPDATE proposals SET champion = 1 WHERE id = ? AND status = 'draft' AND ? = 1").bind(id, asChampion ? 1 : 0),
   ]);
@@ -279,6 +301,7 @@ export const get = async (ctx: Ctx) => {
   const today = game.day;
   return json({
     day: today,
+    actions: catalogOf(game).map(({ type, name, rule, touches, params }: any) => ({ type, name, rule, touches, params })),
     proposals: rows.map((r) => ({ ...view(r, player?.id, n), ticket: tickets.get(r.id) })),
     ballot: rows.filter((r) => r.status === "on_ballot" && r.day_ballot === today).map((r) => `P${r.number}`),
   });

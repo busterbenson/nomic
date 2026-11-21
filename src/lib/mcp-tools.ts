@@ -93,7 +93,7 @@ export function registerTools(server: McpServer, ctx: Ctx, player: Player) {
   const proposalArgs = {
     kind: z.enum(["reword", "addclause", "add", "repeal", "move", "mark"]).describe("reword = change the text of a rule or one clause; addclause = add a clause to a rule (target a rule, or a clause to add after it); add = a new rule in a block (target the block, like 400); repeal = remove a rule or a clause; move = move a rule to another block (give `to`); mark = lock a rule (everyone must agree to change it) or remove the lock"),
     target: z.string().describe("The rule, clause or block number the change is to, like \"402\", \"402.1\" or, for a new rule, the block \"400\""),
-    words: z.string().optional().describe("The change in plain words (reword, addclause, add), up to 2000 characters. With prefilled: true, the exact new text instead"),
+    words: z.string().optional().describe("The change in plain words (reword, addclause, add), up to 2500 characters. With prefilled: true, the exact new text instead"),
     to: z.string().optional().describe("For move: the block the rule goes to, like \"300\""),
     title: z.string().optional().describe("For add: a short title for the new rule"),
     champion: z.boolean().optional().describe("true to make this your Champion's change (rule 402.4): only the Champion, once an Era, on top of the day's proposals, no vote of yours; it takes effect unless every other player votes against it"),

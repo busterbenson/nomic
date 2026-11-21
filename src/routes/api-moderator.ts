@@ -47,11 +47,12 @@ export const pending = async (ctx: Ctx) => {
               q.settings, q.conflicts, q.mark, q.yes, q.no, q.needed, q.budget_minutes, q.budget_effort, q.base_sha, q.commit_sha,
               q.day_proposed, p.display_name AS player
        FROM proposals q JOIN players p ON p.id = q.player_id AND p.game_id = q.game_id
-       WHERE q.game_id = ? AND q.day_ballot = ? AND q.status = 'passed' AND q.kind != 'commission' ORDER BY q.number`,
+       WHERE q.game_id = ? AND q.day_ballot = ? AND q.status = 'passed' AND q.kind NOT IN ('commission', 'action') ORDER BY q.number`,
     ).bind(game.id, day.n).all()).results as any[];
+    // A night with only actions (rule 103.8) is the site's own: the moderator has nothing to apply and sees no job.
     const passed = (await orderPassed(env, game, rows, nowMs)).map((r) => ({ ...r, settings: JSON.parse(r.settings || "{}"), conflicts: JSON.parse(r.conflicts || "[]"), player: { name: r.player } }));
     const deadline = Date.parse(day.deadline_at);
-    job = { day: day.n, status: day.status, locked_at: day.locked_at, deadline_at: day.deadline_at, deploy_deadline_at: Number.isFinite(deadline) ? nowIso(deployDeadline(deadline)) : null, commit_sha: day.commit_sha, tag: day.tag, passed };
+    if (!(day.status === "processing" && !passed.length)) job = { day: day.n, status: day.status, locked_at: day.locked_at, deadline_at: day.deadline_at, deploy_deadline_at: Number.isFinite(deadline) ? nowIso(deployDeadline(deadline)) : null, commit_sha: day.commit_sha, tag: day.tag, passed };
   }
   const notApplied = (await env.DB.prepare("SELECT number, day_ballot AS day, not_applied_reason AS reason FROM proposals WHERE game_id = ? AND status = 'not_applied' ORDER BY number").bind(game.id).all()).results;
   const processed = (await env.DB.prepare("SELECT n, status, commit_sha, tag FROM days WHERE game_id = ? AND status IN ('done', 'timed_out') ORDER BY n DESC LIMIT 3").bind(game.id).all()).results;
@@ -75,7 +76,7 @@ export const claim = async (ctx: Ctx) => {
   if (day.status !== "processing") return json({ error: `Day ${n} is not waiting for the moderator (it is ${day.status}).` }, 409);
   if (!(nowMs < Date.parse(day.deadline_at))) return json({ error: `Too late: the deadline for day ${n} has passed (rule 107.6).` }, 409);
 
-  const passed = (await env.DB.prepare("SELECT id, number, player_id FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed' AND kind != 'commission'").bind(game.id, n).all()).results as any[];
+  const passed = (await env.DB.prepare("SELECT id, number, player_id FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed' AND kind NOT IN ('commission', 'action')").bind(game.id, n).all()).results as any[];
   const byNum = new Map(passed.map((q) => [q.number, q]));
   const seen = new Set<number>(), seqs = new Set<number>();
   for (const o of body.outcomes) {

@@ -16,7 +16,7 @@
 //      by itself)
 //   3. finalize: day N done (or timed_out, when the deadline ended it), day N+1 open with its electorate and ballot,
 //      the game unlocked, in one batch
-import { NEXT_NIGHT_SEQ, bundleFor, enactStatements } from "../engine/host";
+import { NEXT_NIGHT_SEQ, bundleFor, enactStatements, refusedActions } from "../engine/host";
 import { getSettings, validTimeZone } from "./settings.js";
 import { Env, nowIso } from "./util";
 
@@ -156,6 +156,10 @@ export async function electorsOf(env: Env, gameId: string, n: number): Promise<s
 export type StepResult = "done" | "wait" | "timed_out";
 export type NightStep = { name: string; run(env: Env, game: any, day: DayRow, nowMs: number): Promise<StepResult> };
 
+// The kinds the moderator never applies: a commission is approved (rule 801), an action is applied by the site itself, each night, from its
+// type's own rule (rule 103.8). Neither gets the moderator's budget.
+/** @rule 103.8, 801.1 */
+export const NOT_FOR_MODERATOR = ["commission", "action"];
 // The count (rules 104.1, 104.2, 104.5). Every proposal on day n's ballot is counted from the votes of day n's
 // electorate: yes, no, didn't vote, needed, passed or failed, and the result sentence. Votes cannot change any more: the
 // lock was set (in its own batch) before this runs, and every vote's write checks it. Each item's write is guarded by
@@ -181,7 +185,7 @@ export async function countBallot(env: Env, game: any, day: DayRow, nowMs: numbe
          budget_minutes = ?, budget_effort = ?
        WHERE id = ? AND status = 'on_ballot' AND EXISTS (SELECT 1 FROM days WHERE game_id = ? AND n = ? AND status = 'locked')`,
     ).bind(t.passed ? (q.kind === "commission" ? "approved" : "passed") : "failed", t.yes, t.no, t.absent, t.needed, t.electorate, resultSentence(t), now,
-      t.passed && q.kind !== "commission" ? settings["night.apply_minutes"] : null, t.passed && q.kind !== "commission" ? settings["night.apply_effort"] : null, q.id, game.id, day.n)),
+      t.passed && !NOT_FOR_MODERATOR.includes(q.kind) ? settings["night.apply_minutes"] : null, t.passed && !NOT_FOR_MODERATOR.includes(q.kind) ? settings["night.apply_effort"] : null, q.id, game.id, day.n)),
     // A commission that passed is approved, not passed: there is nothing for the moderator to apply (rule 107.2 is about rule
     // changes), so it never joins the night's list. Its ticket joins the queue and its price is paid, or waits as Ready (rules 801.4, 803.1).
     ...writes.filter(({ q }) => q.kind === "commission").flatMap(({ q, t }) => countTicketStatements(env.DB, game, q, { passed: t.passed, sentence: resultSentence(t) }, day.n, now)),
@@ -211,9 +215,14 @@ export async function countBallot(env: Env, game: any, day: DayRow, nowMs: numbe
 // refuses to close a day that still has a passed proposal waiting.
 /** @rule 107.6, 107.7, 107.8 */
 export async function awaitModerator(env: Env, game: any, day: DayRow, nowMs: number): Promise<StepResult> {
-  const left: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed'").bind(game.id, day.n).first();
+  const left: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed' AND kind != 'action'").bind(game.id, day.n).first();
   const timedOut: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'not_applied' AND not_applied_reason IN (?, ?, ?)").bind(game.id, day.n, DEADLINE_REASON, DEPLOY_REASON, ENACT_REASON).first();
-  if (!(left?.n > 0)) return timedOut?.n > 0 ? "timed_out" : "done";
+  if (!(left?.n > 0)) {
+    // Nothing for the moderator tonight: the passed actions (rule 103.8) are applied now, by the site, from the rules as they stand.
+    const acts: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed' AND kind = 'action'").bind(game.id, day.n).first();
+    if (acts?.n > 0) await enactActions(env, game, day, nowMs);
+    return timedOut?.n > 0 ? "timed_out" : "done";
+  }
   const fresh: any = (await env.DB.prepare("SELECT status, deadline_at, commit_sha FROM days WHERE game_id = ? AND n = ?").bind(game.id, day.n).first()) ?? day;
   const deadline = Date.parse(fresh.deadline_at || "") || deadlineAfter(timeZoneOf(game), Date.parse(day.ends_at));
   if (fresh.status === "deploying") {
@@ -222,7 +231,9 @@ export async function awaitModerator(env: Env, game: any, day: DayRow, nowMs: nu
     if (fresh.commit_sha && nowMs < deployDeadline(deadline) + CRON_SLACK_MS && (await deployedSha(env, game)) === fresh.commit_sha) {
       try {
         if (await devControl(env, "enact_fail")) throw new Error("test failure: enact"); // local tests only
-        await env.DB.batch(await enactStatements(env, game, day.n, nowMs));
+        await dropRefusedActions(env, game, day, nowMs);
+        const stmts = await enactStatements(env, game, day.n, nowMs);
+        if (stmts.length) await env.DB.batch(stmts);
         return "done";
       } catch (e) {
         // A rule's night code failed (onEnacted, dayEnd, applyOrder). Before the deploy deadline this is a failure like
@@ -248,8 +259,37 @@ export async function awaitModerator(env: Env, game: any, day: DayRow, nowMs: nu
 /** @rule 107.7 */
 async function notApplyRemaining(env: Env, game: any, day: DayRow, nowMs: number, reason: string) {
   const now = nowIso(nowMs);
-  const passed = (await env.DB.prepare("SELECT id, number, player_id FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed' ORDER BY number").bind(game.id, day.n).all()).results as any[];
-  await env.DB.batch(passed.flatMap((q) => notAppliedStatements(env, game, q, reason, now)));
+  const passed = (await env.DB.prepare("SELECT id, number, player_id FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed' AND kind != 'action' ORDER BY number").bind(game.id, day.n).all()).results as any[];
+  if (passed.length) await env.DB.batch(passed.flatMap((q) => notAppliedStatements(env, game, q, reason, now)));
+  // The night's actions are the site's own, whatever became of the rule changes: apply them now, so the day closes on this tick (rule 103.8).
+  await enactActions(env, game, day, nowMs);
+}
+
+// The passed actions of a night are applied (rule 103.8): each the rules still allow (their type, their details), in the game's own order, its points given
+// and its record written (host.ts enactStatements). One that fails past the 2 am deadline plus the deploy grace is not applied (rule 107.7)
+// so the night can end; before it, the failure keeps the lock and the next tick tries again, like any other part of the night.
+/** @rule 103.8, 107.6, 107.7 */
+async function enactActions(env: Env, game: any, day: DayRow, nowMs: number) {
+  try {
+    await dropRefusedActions(env, game, day, nowMs);
+    const stmts = await enactStatements(env, game, day.n, nowMs);
+    if (stmts.length) await env.DB.batch(stmts);   // every action may have been sent back just now: nothing left to apply
+  } catch (e) {
+    const fresh: any = await env.DB.prepare("SELECT deadline_at FROM days WHERE game_id = ? AND n = ?").bind(game.id, day.n).first();
+    const deadline = Date.parse(fresh?.deadline_at || "") || deadlineAfter(timeZoneOf(game), Date.parse(day.ends_at));
+    if (nowMs < deployDeadline(deadline)) throw e;
+    console.error(`midnight ${game.slug} day ${day.n}: the actions could not be applied past the deadline:`, (e as any)?.message || e);
+    const left = (await env.DB.prepare("SELECT id, number, player_id FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed' AND kind = 'action' ORDER BY number").bind(game.id, day.n).all()).results as any[];
+    await env.DB.batch(left.flatMap((q) => notAppliedStatements(env, game, q, ENACT_REASON, nowIso(nowMs))));
+  }
+}
+
+// A passed action the rules won't apply tonight is not applied (rules 103.8, 107.7): its type is gone, or its type's rule refuses its
+// details as the rules now stand. It gives no points; its proposer is told why.
+/** @rule 103.8, 107.7 */
+async function dropRefusedActions(env: Env, game: any, day: DayRow, nowMs: number) {
+  const refused = await refusedActions(env, game, day.n, nowMs);
+  if (refused.length) await env.DB.batch(refused.flatMap((q) => notAppliedStatements(env, game, q, q.reason, nowIso(nowMs))));
 }
 
 // The statements that send one passed proposal back (rule 107.7), guarded by its status. Shared with the claim route.

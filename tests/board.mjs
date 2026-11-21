@@ -525,8 +525,8 @@ try {
   const webEmpty = await mia.post("/pilot/api/proposals", { ...pBase, words: "   " });
   const propRows = () => d1(state, `SELECT COUNT(*) AS n FROM proposals WHERE game_id = '${gidOf("pilot")}'`)[0].n;
   check("empty words go through the same validation as the web: same error, nothing recorded", emptyP.isError && emptyP.text === webEmpty.data.error && webEmpty.status === 400 && propRows() === 0, emptyP.text);
-  const tooLong = await tool(A, "pilot", tokMia, "propose", { ...pBase, words: "x".repeat(2001) });
-  check("so are words over 2000 characters", tooLong.isError && tooLong.text === (await mia.post("/pilot/api/proposals", { ...pBase, words: "x".repeat(2001) })).data.error && propRows() === 0, tooLong.text);
+  const tooLong = await tool(A, "pilot", tokMia, "propose", { ...pBase, words: "x".repeat(2501) });
+  check("so are words over 2500 characters", tooLong.isError && tooLong.text === (await mia.post("/pilot/api/proposals", { ...pBase, words: "x".repeat(2501) })).data.error && propRows() === 0, tooLong.text);
   const noRule = await tool(A, "pilot", tokMia, "propose", { kind: "reword", target: "999", words: "x" });
   check("a rule that does not exist is refused with the web's error", noRule.isError && noRule.text === (await mia.post("/pilot/api/proposals", { kind: "reword", target: "999", words: "x" })).data.error && propRows() === 0, noRule.text);
   const farM = await tool(A, "pilot", tokMia, "move", { x: 3, y: 0 });

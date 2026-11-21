@@ -307,6 +307,12 @@ a.ppill:hover{background:var(--surface-2)}
 .pf{display:flex;flex-direction:column;gap:10px;border:1.5px solid var(--ink);border-radius:12px;padding:12px;background:var(--surface);max-width:72ch}
 .pf label{font-weight:700;font-size:.9rem}
 .pf select{background:var(--sea);border:1.5px solid var(--line);border-radius:10px;padding:8px;min-height:40px;font:inherit;color:inherit}
+.pf input[type=number]{background:var(--sea);border:1.5px solid var(--line);border-radius:10px;padding:8px;min-height:40px;font:inherit;color:inherit;max-width:9rem}
+.adet{display:grid;grid-template-columns:max-content 1fr;gap:2px 14px;margin:0;font-size:.95rem}
+.adet dt{color:var(--ink-muted)}
+.adet dd{margin:0;font-weight:700;overflow-wrap:anywhere}
+.rbanner .pf,.rbanner .ruling{flex:1 1 100%}
+.rbanner .pf p,.rbanner .ruling p{flex:0 0 auto}
 .pf textarea.prefill{font-family:var(--font-mono);font-size:.78rem}
 .pf .row,.ruling .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .pf .linkbtn,.ruling .linkbtn{margin-top:0;align-self:flex-start}

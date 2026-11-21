@@ -58,6 +58,8 @@ export const DEPLOY_REASON = "the change was applied but did not go live by 2:30
 // deploy deadline, so the lock ended without it.
 /** @rule 107.6, 107.7 */
 export const ENACT_REASON = "its rules went live, but their points could not be given by 2:30 am";
+// A passed action whose type the rules no longer have (rule 103.8): a rule changed tonight may have removed it.
+export const GONE_REASON = "the rules no longer have that action type";
 // How long after the deadline a claimed night may take to go live (the build and deploy), in minutes.
 export const DEPLOY_GRACE_MINUTES = 30;
 
