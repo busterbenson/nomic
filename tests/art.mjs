@@ -190,7 +190,7 @@ try {
   console.log("the page for someone else shows saved drawings only");
   d1(state, `UPDATE tickets SET state = 'Proposed' WHERE id = '${tk(1).id}'`);
   const other = (await Bo.get(`${T}/W1`)).data.ticket.entry_views[0].art;
-  check("a visitor to a ticket sees the saved drawings, the default shown; the unsaved ones are the requester's", other.drawings.every((d) => d.saved) && other.shown === h2 && other.drawings.length === 2);
+  check("a visitor to a ticket sees the saved drawings, the default shown; the unsaved ones are the requester's", other.drawings.every((d) => d.saved) && other.shown === h2 && other.drawings.length === 2 && other.state === "ready");
   d1(state, `UPDATE tickets SET state = 'Draft' WHERE id = '${tk(1).id}'`);
 
   console.log("the lock");
@@ -221,6 +221,7 @@ try {
   const lateDraw = await act(1, { entry: "Frog", action: "redraw" });
   d1(state, `UPDATE tickets SET state = 'Proposed' WHERE id = '${tk(1).id}'`);
   check("the draw that was out when the ticket was confirmed finishes as failed (ticket changed) and stores no row; nobody is shown a picture the requester never kept", !!(await until(() => draws(1).length === dr0 + 1 && draws(1)[dr0].state !== "pending")) && draws(1)[dr0].state === "failed" && draws(1)[dr0].reason === "ticket changed" && refs(1).length === r0, J({ lateDraw: lateDraw.status, err: lateDraw.data?.error, draws: draws(1).slice(-2), refs: refs(1).length, r0 }));
+  check("and no orphan object row is left for it, and anyone but the requester sees the entry's kept picture as ready, never a failed call (that draw's own end, 'ticket changed', is not shown to anybody)", d1(state, "SELECT COUNT(*) AS n FROM art_objects o WHERE NOT EXISTS (SELECT 1 FROM art_refs r WHERE r.hash = o.hash)")[0].n === 0 && (await Bo.get(`${T}/W1`)).data.ticket.entry_views[0].art.state === "ready" && (await entryArt(1)).state !== "drawing");
   d1(state, `UPDATE tickets SET state = 'Draft' WHERE id = '${tk(1).id}'`);
 
   console.log("over the month's budget nothing more is drawn (rule 106.7)");

@@ -30,7 +30,7 @@ export const modelOf = (env: Env) => (env.IMAGE_MODEL && /^@cf\/[\w./-]+$/.test(
 export async function overlay(env: Env, ticketId: string, makes: any[], views: any[], owner: boolean, nowMs: number) {
   const entries = (Array.isArray(makes) ? makes : []).filter((m) => m && m.kind === "entry");
   const refs = ((await env.DB.prepare("SELECT hash, entry_name, prompt, saved, is_default, id FROM art_refs WHERE ticket_id = ? ORDER BY id").bind(ticketId).all()).results ?? []) as any[];
-  const draws = ((await env.DB.prepare("SELECT entry_name, state, started_at, id FROM art_draws WHERE ticket_id = ? ORDER BY id").bind(ticketId).all()).results ?? []) as any[];
+  const draws = ((await env.DB.prepare("SELECT entry_name, state, started_at, reason, id FROM art_draws WHERE ticket_id = ? ORDER BY id").bind(ticketId).all()).results ?? []) as any[];
   return views.map((v, i) => {
     const m = entries[i], name = String(m?.name ?? v.name ?? "").toLowerCase();
     const mine = refs.filter((r) => r.entry_name.toLowerCase() === name);
@@ -38,10 +38,12 @@ export async function overlay(env: Env, ticketId: string, makes: any[], views: a
     const seen = owner ? mine : saved;
     const dflt = saved.find((r) => r.is_default) ?? saved[saved.length - 1] ?? null;
     const shown = (dflt ?? (owner ? mine[mine.length - 1] : null) ?? null)?.hash ?? null;
-    const last = draws.filter((d) => d.entry_name.toLowerCase() === name).pop();
+    // a draw that ended because the ticket left Draft says nothing about the entry's picture: it is not a failure anyone should see
+    const last = draws.filter((d) => d.entry_name.toLowerCase() === name && d.reason !== "ticket changed").pop();
     let state = shown ? "ready" : "none";
     if (last?.state === "pending") state = nowMs - Date.parse(last.started_at) < DRAWING_STALE_MS ? "drawing" : "failed";
     else if (last?.state === "failed") state = "failed";
+    if (!owner && shown) state = "ready";   // nobody but the requester can Redraw: a failed call is theirs to see
     return { ...v, art: { prompt: String(m?.art?.prompt ?? mine[mine.length - 1]?.prompt ?? ""), shown, state: owner || shown ? state : "none", drawings: seen.map((r) => ({ hash: r.hash, saved: !!r.saved, default: !!r.is_default })) } };
   });
 }
@@ -103,7 +105,7 @@ export async function draw(env: Env, j: Draw): Promise<void> {
     await env.ART.put(tmpKey(hash), made.bytes, { httpMetadata: { contentType: made.type } });
     const now = nowIso(Date.now());
     await env.DB.batch([
-      env.DB.prepare("INSERT OR IGNORE INTO art_objects (hash, size_bytes, content_type, model, created_at) VALUES (?, ?, ?, ?, ?)").bind(hash, made.bytes.length, made.type, env.ART_STUB ? `stub:${env.ART_STUB}` : model, now),
+      env.DB.prepare("INSERT OR IGNORE INTO art_objects (hash, size_bytes, content_type, model, created_at) SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM tickets WHERE id = ? AND state = 'Draft')").bind(hash, made.bytes.length, made.type, env.ART_STUB ? `stub:${env.ART_STUB}` : model, now, j.ticket.id),
       // a drawing is the requester's while they draft: one that lands after the ticket has left Draft (confirmed, withdrawn into a ballot) is not tied to it
       env.DB.prepare("INSERT OR IGNORE INTO art_refs (hash, game_id, ticket_id, entry_name, prompt, saved, is_default, created_at) SELECT ?, ?, ?, ?, ?, 0, 0, ? WHERE EXISTS (SELECT 1 FROM tickets WHERE id = ? AND state = 'Draft')").bind(hash, j.game.id, j.ticket.id, j.name, j.prompt, now, j.ticket.id),
       env.DB.prepare("UPDATE art_draws SET state = CASE WHEN EXISTS (SELECT 1 FROM tickets WHERE id = ? AND state = 'Draft') THEN 'done' ELSE 'failed' END, reason = CASE WHEN EXISTS (SELECT 1 FROM tickets WHERE id = ? AND state = 'Draft') THEN NULL ELSE 'ticket changed' END, ended_at = ? WHERE id = ? AND state = 'pending'").bind(j.ticket.id, j.ticket.id, now, j.drawId),
@@ -140,8 +142,13 @@ export async function save(env: Env, game: any, player: any, ticket: any, name: 
   if (!ref) return { status: 404, body: { error: "That is not one of this entry's drawings." } };
   if (ref.saved) {
     // already kept: nothing changes, unless its copy in art/ is missing (a save that died between its row and its copy): then it is made now
-    try { const c = await ensureCopy(env, hash, false); return c.here ? { status: 200, body: { ok: true, copied: c.copied } } : { status: 409, body: { error: "That drawing is gone. Draw it again." } }; }
-    catch { return { status: 502, body: { error: "The drawing could not be kept just now. Try again." } }; }
+    try {
+      const c = await ensureCopy(env, hash, false);
+      if (c.here) return { status: 200, body: { ok: true, copied: c.copied } };
+    } catch { return { status: 502, body: { error: "The drawing could not be kept just now. Try again." } }; }
+    // neither copy exists any more (tmp/ expired before anything was copied): the row no longer names a picture, so it stops claiming one
+    await env.DB.prepare("UPDATE art_refs SET saved = 0, is_default = 0 WHERE id = ?").bind(ref.id).run();
+    return { status: 409, body: { error: "That drawing is gone. Draw it again." } };
   }
   const n: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM art_refs WHERE ticket_id = ? AND lower(entry_name) = lower(?) AND saved = 1").bind(ticket.id, name).first();
   if ((n?.n ?? 0) >= MAX_SAVED) return { status: 409, body: { error: `An entry keeps at most ${MAX_SAVED} drawings.` } };
@@ -155,11 +162,11 @@ export async function save(env: Env, game: any, player: any, ticket: any, name: 
     return again?.saved ? { status: 200, body: { ok: true, copied: false } } : { status: 409, body: { error: "The day changed under you. Reload and try again." } };
   }
   // the copy always happens on the first save, even when art/<hash> exists (the same bytes kept elsewhere): a sweep may be deleting it right now
-  let c = { here: false, copied: false };
-  try { c = await ensureCopy(env, hash, true); } catch (e: any) { console.error("art: the copy to art/ failed:", e?.message || "error"); }
+  let c = { here: false, copied: false }, threw = false;
+  try { c = await ensureCopy(env, hash, true); } catch (e: any) { threw = true; console.error("art: the copy to art/ failed:", e?.message || "error"); }
   if (!c.here) {
     await env.DB.prepare("UPDATE art_refs SET saved = 0, is_default = 0 WHERE id = ?").bind(ref.id).run();
-    return { status: 409, body: { error: "That drawing is gone. Draw it again." } };
+    return threw ? { status: 502, body: { error: "The drawing could not be kept just now. Try again." } } : { status: 409, body: { error: "That drawing is gone. Draw it again." } };
   }
   return { status: 200, body: { ok: true, copied: c.copied } };
 }

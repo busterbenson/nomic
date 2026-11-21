@@ -230,8 +230,12 @@ try {
     const [top, prev] = noComments.split(/^\[\[previews\.d1_databases\]\]/m);
     const id = (t) => /database_id\s*=\s*"([^"]+)"/.exec(t)?.[1], dbName = (t) => /database_name\s*=\s*"([^"]+)"/.exec(t)?.[1];
     check("the preview D1 is a different database from production", id(top) && id(prev) && id(top) !== id(prev) && dbName(top) === "promptocracy" && dbName(prev) !== "promptocracy", `${id(top)} / ${id(prev)}`);
-    check("previews get nothing but the preview D1: no other previews.* section, no email binding, no vars",
-      [...noComments.matchAll(/^\s*\[+\s*previews[^\]]*\]+/gm)].every((m) => /^\s*\[\[previews\.d1_databases\]\]/.test(m[0])) && !/^\s*previews\s*=/m.test(noComments) && !/send_email|vars/.test(prev));
+    // the one other thing a preview gets is the art's own: a preview bucket that is not production's, and the AI binding (previews do not inherit either)
+    check("previews get nothing but the preview D1, the preview art bucket and the AI binding: no other previews.* section, no email binding, no vars",
+      [...noComments.matchAll(/^\s*\[+\s*previews[^\]]*\]+/gm)].every((m) => ["[[previews.d1_databases]]", "[[previews.r2_buckets]]", "[previews.ai]"].includes(m[0].trim())) && !/^\s*previews\s*=/m.test(noComments) && !/send_email|vars/.test(prev));
+    const bucket = (t) => /bucket_name\s*=\s*"([^"]+)"/.exec(t ?? "")?.[1];
+    check("the preview art bucket is a different bucket from production's, and the preview AI binding is the same one name",
+      bucket(top) === "promptocracy-art" && bucket(prev.split(/^\[\[previews\.r2_buckets\]\]/m)[1]) === "promptocracy-art-preview" && /^\[previews\.ai\]\s*\nbinding = "AI"/m.test(prev));
     check("the preview migrations config targets the preview database", id(mig) === id(prev) && dbName(mig) === dbName(prev));
   }
   check("a 404 carries the security headers too", (await fetch(A + "/src/index.ts")).headers.get("x-content-type-options") === "nosniff");
