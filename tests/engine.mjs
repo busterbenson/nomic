@@ -56,6 +56,11 @@ console.log("action types (rule 103.5): actionType names one, applyAction does i
     bad("type id", { ...grant, type: "Grant!" }) && bad("name", { ...grant, name: "" }) && bad("touches", { ...grant, touches: [] }) && bad("touches", { ...grant, touches: [12] }) &&
     bad("min and max", { ...grant, params: [{ key: "n", label: "N", kind: "int", min: 5, max: 1 }] }) && bad("player or an int", { ...grant, params: [{ key: "n", label: "N", kind: "text" }] }) &&
     bad("its own key", { ...grant, params: [{ key: "n", label: "N", kind: "player" }, { key: "n", label: "M", kind: "player" }] }) && validateActionType(grant) === null);
+  check("a module may refuse the details when applying: applyAction answers {error} (never an empty list), and a type the game lacks still answers null", (() => {
+    const rr = assembleRules([...base, mod(901, grant, () => refuse("too many"))]);
+    const r = rr.applyAction(ctx, { type: "grant", params: { to: "a", amount: 1 }, number: 1, player: "b" });
+    return r && !Array.isArray(r) && r.error === "too many" && rr.applyAction(ctx, { type: "x", params: {}, number: 1, player: "b" }) === null;
+  })());
   check("an action type that throws in actionType fails assembly instead of being skipped", throws(() => assembleRules([...base, m(901, { actionType: () => { throw new Error("no"); }, applyAction: () => [] })])) instanceof RuleSetError);
 }
 check("actionAllowed: modules run in RULE order, not list order, and the first refusal wins", (() => {

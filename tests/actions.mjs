@@ -157,12 +157,15 @@ try {
   check("the night's records read in execution order: P4's points, then P5's action record, its points, then the grant", J(seq) === J([`points:+10: P${pRule} was applied`, `action:P${pAct} was applied: Grant points, to Cy, points 7.`, `points:+10: P${pAct} was applied`, `points:+7: P${pAct} granted points`]), J(seq));
 
   console.log("an action of a type the rules no longer have is not applied (107.7)");
-  const pGone = ins("Ana", "action", "901", act("Bo", 2, "resurrect"));
+  const pGone = ins("Ana", "action", "901", act("Bo", 2, "resurrect")), pBad = ins("Bo", "action", "901", act("Cy", 11)), pSelf = ins("Cy", "action", "901", act("Cy", 3));
+  const s0 = J(names.map(score));
   await midnight();
   const gone = d1(state, `SELECT status, not_applied_reason FROM proposals WHERE game_id = '${gid}' AND number = ${pGone}`)[0];
   const told = d1(state, `SELECT body FROM notifications WHERE game_id = '${gid}' AND player_id = '${id.Ana}' AND kind = 'not_applied'`);
   check("not applied, with the reason; its proposer is told with the reason; no points; the night ends (day 4 done)", gone.status === "not_applied" && gone.not_applied_reason === GONE_REASON && told.length === 1 && told[0].body.includes(GONE_REASON) && !told[0].body.includes("It gave no points. It gave") && day(4).status === "done" && game().day === 5 && game().rules_day === 3, J([gone, told, day(4), game()]));
 
+  const refused = d1(state, `SELECT number, status, not_applied_reason FROM proposals WHERE game_id = '${gid}' AND number IN (${pBad}, ${pSelf}) ORDER BY number`);
+  check("details the rules no longer allow when the night applies them (11 points; a grant to yourself) are not applied either, each with its own reason from rule 901, and nobody gets points that night", J(refused.map((r) => r.status)) === J(["not_applied", "not_applied"]) && /whole number from 1 to 10/.test(refused[0].not_applied_reason) && /another player/.test(refused[1].not_applied_reason) && J(names.map(score)) === s0, J([refused, s0, names.map(score)]));
   console.log("the win (402): a grant that takes a player past 100 ends the game");
   d1(state, `UPDATE players SET score = 97 WHERE id = '${id.Bo}'`);
   ins("Cy", "action", "901", act("Bo", 5));

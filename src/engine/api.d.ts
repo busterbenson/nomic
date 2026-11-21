@@ -58,8 +58,9 @@ export type Hooks = {
   dayEnd?(ctx: Ctx, results: unknown): Effect[];
   /** An action type (rule 103.5). A module has both or neither; its type id is unique in the game. */
   actionType?(): ActionType;
-  /** Does the action when a passed action proposal of this module's type is applied. Only points effects. */
-  applyAction?(ctx: Ctx, action: ActionProposal): Effect[];
+  /** Does the action when a passed action proposal of this module's type is applied. Only points effects. Answer refuse(...) when the
+   *  details are no longer allowed (a rule changed tonight): the proposal is not applied, with that reason. */
+  applyAction?(ctx: Ctx, action: ActionProposal): Effect[] | Refusal;
 };
 export type RuleModule = { rule: number } & Hooks;
 

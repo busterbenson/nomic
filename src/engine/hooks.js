@@ -355,13 +355,15 @@ export function assembleRules(modules, { label = "rules" } = {}) {
     /** @rule 103.5 */
     actionTypes: () => types,
     // What a passed action does when it is applied (rule 103.5): the points the one module of its type gives, validated. `action` is
-    // {type, params, number, player}; a type this game does not have answers null (the proposal is not applied, rule 107.7).
+    // {type, params, number, player}. A type this game does not have answers null, and a module may refuse the details with refuse(...):
+    // answers {error}. Either way the proposal is not applied (rule 107.7).
     /** @rule 103.5 */
     applyAction(ctx, action) {
       const t = types.find((x) => x.type === action?.type);
       if (!t) return null;
       const m = sorted.find((x) => x.rule === t.rule);
       const r = call(m, "applyAction", [ctx, deepFreeze(JSON.parse(JSON.stringify(action)))]) ?? [];
+      if (!Array.isArray(r) && typeof r?.error === "string" && r.error) return { error: r.error };
       const bad = validateEffects(r) ?? r.map((e) => (NIGHT_HOOK_EFFECTS.applyAction.includes(e.type) ? null : `the ${e.type} effect can't be returned by applyAction (it takes: ${NIGHT_HOOK_EFFECTS.applyAction.join(", ")})`)).find(Boolean);
       if (bad) throw new RuleError(m.rule, "applyAction", new Error(bad));
       return r.map((e) => ({ ...e, rule: m.rule }));

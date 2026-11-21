@@ -16,7 +16,7 @@
 //      by itself)
 //   3. finalize: day N done (or timed_out, when the deadline ended it), day N+1 open with its electorate and ballot,
 //      the game unlocked, in one batch
-import { NEXT_NIGHT_SEQ, bundleFor, enactStatements, rulesFor } from "../engine/host";
+import { NEXT_NIGHT_SEQ, bundleFor, enactStatements, refusedActions } from "../engine/host";
 import { getSettings, validTimeZone } from "./settings.js";
 import { Env, nowIso } from "./util";
 
@@ -46,7 +46,7 @@ export async function clockNow(env: Env): Promise<number> {
 export { addDays, dayGate, dayOpenBinds, dayOpenSql, isLocked, localDate, lockMessage, nextMidnight, startOfDate } from "./day-gate.js";
 import { deadlineAfter, nextMidnight } from "./day-gate.js";
 import { countTicketStatements, readyIds, readyStatements } from "./tickets.js";
-import { DEADLINE_REASON, DEPLOY_GRACE_MINUTES, DEPLOY_REASON, ENACT_REASON, GONE_REASON, resultSentence, returnedBody, tally } from "./votes.js";
+import { DEADLINE_REASON, DEPLOY_GRACE_MINUTES, DEPLOY_REASON, ENACT_REASON, resultSentence, returnedBody, tally } from "./votes.js";
 
 // The game's time zone: the bundled rules' setting when the game has a bundle that sets one, else the game's own.
 /** @rule 203.1 */
@@ -229,8 +229,9 @@ export async function awaitModerator(env: Env, game: any, day: DayRow, nowMs: nu
     if (fresh.commit_sha && nowMs < deployDeadline(deadline) + CRON_SLACK_MS && (await deployedSha(env, game)) === fresh.commit_sha) {
       try {
         if (await devControl(env, "enact_fail")) throw new Error("test failure: enact"); // local tests only
-        await dropGoneActions(env, game, day, nowMs);
-        await env.DB.batch(await enactStatements(env, game, day.n, nowMs));
+        await dropRefusedActions(env, game, day, nowMs);
+        const stmts = await enactStatements(env, game, day.n, nowMs);
+        if (stmts.length) await env.DB.batch(stmts);
         return "done";
       } catch (e) {
         // A rule's night code failed (onEnacted, dayEnd, applyOrder). Before the deploy deadline this is a failure like
@@ -266,9 +267,9 @@ async function notApplyRemaining(env: Env, game: any, day: DayRow, nowMs: number
 /** @rule 103.7, 107.6, 107.7 */
 async function enactActions(env: Env, game: any, day: DayRow, nowMs: number) {
   try {
-    await dropGoneActions(env, game, day, nowMs);
+    await dropRefusedActions(env, game, day, nowMs);
     const stmts = await enactStatements(env, game, day.n, nowMs);
-    if (stmts.length) await env.DB.batch(stmts);   // every action may have been dropped just now: nothing left to apply
+    if (stmts.length) await env.DB.batch(stmts);   // every action may have been sent back just now: nothing left to apply
   } catch (e) {
     const fresh: any = await env.DB.prepare("SELECT deadline_at FROM days WHERE game_id = ? AND n = ?").bind(game.id, day.n).first();
     const deadline = Date.parse(fresh?.deadline_at || "") || deadlineAfter(timeZoneOf(game), Date.parse(day.ends_at));
@@ -279,13 +280,12 @@ async function enactActions(env: Env, game: any, day: DayRow, nowMs: number) {
   }
 }
 
-// A passed action whose type the rules no longer have is not applied (rules 103.7, 107.7): a rule changed tonight may have removed it.
+// A passed action the rules won't apply tonight is not applied (rules 103.7, 107.7): its type is gone, or its type's rule refuses its
+// details as the rules now stand. It gives no points; its proposer is told why.
 /** @rule 103.7, 107.7 */
-async function dropGoneActions(env: Env, game: any, day: DayRow, nowMs: number) {
-  const have = new Set(rulesFor(game).actionTypes().map((t: any) => t.type));
-  const rows = (await env.DB.prepare("SELECT id, number, player_id, action FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed' AND kind = 'action' ORDER BY number").bind(game.id, day.n).all()).results as any[];
-  const gone = rows.filter((q) => !have.has(JSON.parse(q.action).type));
-  if (gone.length) await env.DB.batch(gone.flatMap((q) => notAppliedStatements(env, game, q, GONE_REASON, nowIso(nowMs))));
+async function dropRefusedActions(env: Env, game: any, day: DayRow, nowMs: number) {
+  const refused = await refusedActions(env, game, day.n, nowMs);
+  if (refused.length) await env.DB.batch(refused.flatMap((q) => notAppliedStatements(env, game, q, q.reason, nowIso(nowMs))));
 }
 
 // The statements that send one passed proposal back (rule 107.7), guarded by its status. Shared with the claim route.

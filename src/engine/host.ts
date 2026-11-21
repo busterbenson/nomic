@@ -7,6 +7,7 @@
 import { GAMES, STARTER } from "../generated/games";
 import { chartTile, loadTiles } from "../lib/board";
 import { getSettings } from "../lib/settings.js";
+import { GONE_REASON } from "../lib/votes.js";
 import { Env, nowIso } from "../lib/util";
 import { APPLIED_EFFECTS, RuleError, assembleRules, cryptoRng, makeContext, makeTiles } from "./hooks.js";
 
@@ -123,6 +124,24 @@ export async function orderPassed<T extends { number: number }>(env: Env, game: 
 /** @rule 107.2 */
 export const NEXT_NIGHT_SEQ = "(SELECT COALESCE(MAX(night_seq), 0) + 1 FROM events WHERE game_id = ? AND day = ?)";
 
+// The passed actions the rules won't apply tonight (rules 103.7, 107.7): their type is gone, or their type's rule refuses the details as the
+// rules now stand (a rule changed tonight may have narrowed them). [{id, number, player_id, reason}], in P-number order. applyAction is pure,
+// so asking before enacting does not change what enacting gives.
+/** @rule 103.7, 107.7 */
+export async function refusedActions(env: Env, game: any, n: number, nowMs: number) {
+  const rows = (await env.DB.prepare("SELECT id, number, player_id, action FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed' AND kind = 'action' ORDER BY number").bind(game.id, n).all()).results as any[];
+  if (!rows.length) return [];
+  const ctx = await nightContext(env, game, nowMs), rules = rulesFor(game);
+  const out: { id: string; number: number; player_id: string; reason: string }[] = [];
+  for (const q of rows) {
+    const act = JSON.parse(q.action);
+    const r = rules.applyAction(ctx, { type: act.type, params: act.params, number: q.number, player: q.player_id });
+    if (r === null) out.push({ id: q.id, number: q.number, player_id: q.player_id, reason: GONE_REASON });
+    else if (!Array.isArray(r)) out.push({ id: q.id, number: q.number, player_id: q.player_id, reason: r.error });
+  }
+  return out;
+}
+
 // The history's record of an applied action (rule 103.7): the proposal, its type and its details, in the night's sequence. Binds as
 // stillPassed: the proposal's id last.
 /** @rule 103.7 */
@@ -159,7 +178,8 @@ export async function enactStatements(env: Env, game: any, n: number, nowMs: num
   for (const q of ordered) {
     // An action also does its own thing (rule 103.7): the points its type's rule gives, after the proposal's own (401).
     const act = q.kind === "action" ? JSON.parse(q.action) : null;
-    const done = act ? rules.applyAction(ctx, { type: act.type, params: act.params, number: q.number, player: q.player_id }) ?? [] : [];
+    const applied = act ? rules.applyAction(ctx, { type: act.type, params: act.params, number: q.number, player: q.player_id }) : [];
+    const done = Array.isArray(applied) ? applied : [];   // a refused or unknown action was sent back before this (refusedActions)
     if (act) stmts.push(actionRecord(env, game, n, q, act, now, stillPassed));
     for (const e of [...rules.onEnacted(ctx, { number: q.number, player: q.player_id, target: q.target, kind: q.kind }), ...done]) {
       if (!known.has(e.player)) continue; // onEnacted can only return points (hooks.js refuses anything else)
