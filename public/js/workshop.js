@@ -355,7 +355,7 @@ ${editing ? formHTML(t) : factsHTML(t)}${reopenHTML(t)}${editing ? "" : tasksHTM
       else if (ef === "attr") entry.vals[el.dataset.key] = el.value;
       else if (ef === "kind") {   // the kind's required fields follow the kind, and take the values the entry already holds for them
         entry.kind = el.value;
-        for (const a of requiredOf(entry.kind)) if (entry.keep.attrs && Object.hasOwn(entry.keep.attrs, a.key) && !(a.key in entry.vals)) { entry.vals[a.key] = fieldValue(entry.keep.attrs[a.key]); delete entry.keep.attrs[a.key]; }
+        for (const a of requiredOf(entry.kind)) if (entry.keep.attrs && Object.hasOwn(entry.keep.attrs, a.key) && !Object.hasOwn(entry.vals, a.key)) { entry.vals[a.key] = fieldValue(entry.keep.attrs[a.key]); delete entry.keep.attrs[a.key]; }
         cards.redraw();
       }
     }

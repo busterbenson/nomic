@@ -24,6 +24,8 @@ export const KINDS = Object.freeze([
 export const KIND_IDS = Object.freeze(KINDS.map((k) => k.id));
 /** The types of value an attribute can hold (rule 703.1). */
 export const VALUE_TYPES = Object.freeze(["number", "yesno", "choice", "text", "size", "rule"]);
+/** The key of a drawing: the one pattern for a draft's art key and for catalog.json's saved drawings. @rule 705.1 */
+export const ART_KEY = /^[A-Za-z0-9._\/-]{1,200}$/;
 export const LIMITS = { name: 60, key: 40, text: 200, flavor: 100, needsBuild: 20, prompt: 500, artKey: 200, size: 4, number: 1e9, entries: 500, saved: 20, choices: 20 };
 export const KEY = /^[a-z][a-z_]{0,39}$/;
 export const ENTRY_ID = /^[ICTSF][1-9]\d{0,3}$/;
@@ -225,6 +227,7 @@ export function readEntryDraft(m, ctx = {}) {
       if (m.art[k] === undefined || m.art[k] === null) continue;
       const s = clean(m.art[k]);
       if (s.length > max) return { error: `An entry's art ${k} is at most ${max} characters.` };
+      if (k === "key" && s && (!ART_KEY.test(s) || s.includes(".."))) return { error: "An entry's art key may hold letters, digits and . _ / - only." };
       if (s) art[k] = s;
     }
     if (Object.keys(art).length) out.art = art;
@@ -285,7 +288,7 @@ export function readCatalog(raw, ctx = {}) {
     if (!isObject(art) || !Array.isArray(art.saved ?? []) || (art.saved ?? []).length > LIMITS.saved) return bad("art must hold a list of saved drawings and a default");
     const saved = [];
     for (const d of art.saved ?? []) {
-      if (!isObject(d) || typeof d.key !== "string" || !/^[A-Za-z0-9._\/-]{1,200}$/.test(d.key) || d.key.includes("..") || saved.some((x) => x.key === d.key)) return bad("each saved drawing needs its own key (letters, digits and . _ / -)");
+      if (!isObject(d) || typeof d.key !== "string" || !ART_KEY.test(d.key) || d.key.includes("..") || saved.some((x) => x.key === d.key)) return bad("each saved drawing needs its own key (letters, digits and . _ / -)");
       saved.push({ key: d.key, ...(typeof d.prompt === "string" && d.prompt ? { prompt: clean(d.prompt).slice(0, LIMITS.prompt) } : {}) });
     }
     const dflt = art.default ?? null;

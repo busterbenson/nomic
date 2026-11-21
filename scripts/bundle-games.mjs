@@ -16,7 +16,7 @@
 //     (the same check as the game's own rulebook test)
 //   * the catalog (rules 701-705): the attributes the modules export (`export const attributes`) and rule 704's required lists become
 //     the game's registry (one rule per key), catalog.json (none = no entries) is checked against them, and the three catalog claim
-//     checks pass (src/engine/claims.js catalogClaimProblems); all are written into the bundle
+//     checks pass (src/engine/catalog-claims.js catalogClaimProblems); all are written into the bundle
 //   * the game's own tests (node --test rules/*.test.ts) pass against THIS engine
 // Game code is only ever run in child processes with a scrubbed environment (no deploy token in reach), under Node's
 // permission model (read its own folder and the engine source; no writes, no processes, no workers).

@@ -56,8 +56,10 @@ function requiredProblems(registry, required) {
  * @rule 703.2
  */
 export function attrCalls(src) {
-  const code = canonical(src).replace(/^\s*(?:import|export)\b[^;"]*?\bfrom\s*"[^"]*";?[ \t]*$/gm, (m) => m.replace(/[^\n]/g, " "));
+  const printed = canonical(src);
+  const code = printed.replace(/^\s*(?:import|export)\b[^;"]*?\bfrom\s*"[^"]*";?[ \t]*$/gm, (m) => m.replace(/[^\n]/g, " "));
   const out = [];
+  for (const m of printed.matchAll(/\bimport\s*\{[^}]*\battr\s+as\b/g)) out.push({ line: printed.slice(0, m.index).split("\n").length, problem: "attr must be imported by its own name, not renamed with as" });
   /** @rule 703.2 */
   const lineAt = (i) => code.slice(0, i).split("\n").length;
   // blank out the text of string literals (keeping their quotes and length), so a word inside a string is not read as code
@@ -83,19 +85,53 @@ export function attrCalls(src) {
   return out.sort((a, b) => a.line - b.line);
 }
 
-/** The code with the inside of every string and template literal replaced by spaces. @rule 703.2 */
+/**
+ * The code with the inside of every string, template text and regex literal replaced by spaces; code inside a template's ${} stays, so a
+ * call there is read. A regex is told from a division by the token before the slash. @rule 703.2
+ */
 function blankStrings(code) {
-  let out = "", q = null;
-  for (let i = 0; i < code.length; i++) {
-    const ch = code[i];
-    if (q) {
-      if (ch === "\\") { out += "  "; i++; continue; }
-      if (ch === q) { q = null; out += ch; continue; }
-      out += ch === "\n" ? "\n" : " ";
-    } else {
-      if (ch === '"' || ch === "'" || ch === "`") q = ch;
-      out += ch;
+  let out = "", i = 0, depth = 0;
+  const back = [];   // the brace depth to return to when a template's ${} closes
+  /** @rule 703.2 */
+  const blank = (c) => (c === "\n" ? "\n" : " ");
+  /** @rule 703.2 */
+  const template = () => {   // from just after a backtick or a closing }: blank the text; true when a ${ opens
+    while (i < code.length) {
+      const ch = code[i];
+      if (ch === "\\") { out += "  "; i += 2; continue; }
+      if (ch === "`") { out += ch; i++; return false; }
+      if (ch === "$" && code[i + 1] === "{") { out += "${"; i += 2; return true; }
+      out += blank(ch); i++;
     }
+    return false;
+  };
+  /** @rule 703.2 */
+  const afterTemplate = (opened) => { if (opened) { back.push(depth); depth = 0; } };
+  while (i < code.length) {
+    const ch = code[i];
+    if (ch === '"' || ch === "'") {
+      out += ch; i++;
+      while (i < code.length && code[i] !== ch && code[i] !== "\n") { if (code[i] === "\\") { out += "  "; i += 2; } else { out += " "; i++; } }
+      if (code[i] === ch) { out += ch; i++; }
+    } else if (ch === "`") { out += ch; i++; afterTemplate(template()); }
+    else if (ch === "{") { depth++; out += ch; i++; }
+    else if (ch === "}") {
+      out += ch; i++;
+      if (depth === 0 && back.length) { depth = back.pop(); afterTemplate(template()); } else depth--;
+    } else if (ch === "/") {
+      const prev = out.trimEnd(), last = prev.slice(-1), word = /[\w$]+$/.exec(prev)?.[0] ?? "";
+      const division = /[\w$)\]]/.test(last) && !/^(return|typeof|case|in|of|delete|void|throw|new|else|do|yield|await)$/.test(word);
+      if (division) { out += ch; i++; continue; }
+      out += ch; i++;
+      let cls = false;
+      while (i < code.length && code[i] !== "\n" && (cls || code[i] !== "/")) {
+        const c = code[i];
+        if (c === "\\") { out += "  "; i += 2; continue; }
+        if (c === "[") cls = true; else if (c === "]") cls = false;
+        out += " "; i++;
+      }
+      if (code[i] === "/") { out += "/"; i++; }
+    } else { out += ch; i++; }
   }
   return out;
 }
