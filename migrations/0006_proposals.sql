@@ -31,7 +31,7 @@ CREATE TABLE proposals (
   before_text TEXT NOT NULL DEFAULT '',
   after_text TEXT NOT NULL DEFAULT '',
   conflicts TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(conflicts)),
-  -- settings a reword sets (rule 110.1: a fixed part's settings can still be changed), as {key: value}
+  -- settings a reword sets (a part that is not wired yet can still have its settings changed), as {key: value}
   settings TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(settings)),
   drafted_by TEXT NOT NULL CHECK (drafted_by IN ('code', 'model')),
   base_sha TEXT NOT NULL,

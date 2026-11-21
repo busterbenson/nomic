@@ -47,7 +47,7 @@ An alternative of `expect`:
 | field | meaning |
 |---|---|
 | `outcome` | `drafted` or `refused` |
-| `reasons` | for `refused`: which reasons are acceptable. `request` (the request itself is wrong: empty words, no such rule, a heading in the words), `110.1` (touches what no proposal can change), `scope` (reaches outside the target), `setting` (a value the game can't run), `nochange`, `declined` (the model said it isn't a change to this rule). Omitted = any |
+| `reasons` | for `refused`: which reasons are acceptable. `request` (the request itself is wrong: empty words, no such rule, a heading in the words), `not wired` (touches a part that is not wired yet: sign-in, the proposal limit, hidden votes, votes counted by code, the lock, the deadline, End turn, the day), `scope` (reaches outside the target), `setting` (a value the game can't run), `nochange`, `declined` (the model said it isn't a change to this rule). Omitted = any |
 | `after_includes`, `after_includes_any`, `after_excludes` | substrings (case-insensitive) the drafted text must have, must have one of, must not have |
 | `after_unchanged` | the text must equal the current text (only a setting changes) |
 | `conflicts_include`, `conflicts_any`, `conflicts_exclude`, `conflicts_max` | the rules the draft must name, must name one of, must not name, and how many at most |
@@ -55,7 +55,7 @@ An alternative of `expect`:
 | `you` | the draft must be in the you-voice (has "you" or "your") |
 | `keep_min` | kept wording: at least this share of the player's content words must appear in the draft (0 to 1) |
 
-Checks run on **every** drafted answer, whatever the case says: the change stays inside its target (a draft is spliced in place of the target's text, so no heading, no clause number outside the target, no renumbering, no added or dropped clause); protected text (110.1) inside the target is word for word; nothing from the system prompt, and no key, in the draft; no new legalese (`shall`, `may`, `hereby`, `pursuant`, `notwithstanding`, `aforementioned`, `in the event that`: counted against the text it replaces, so the rulebook's existing "may" is not flagged); the answer parses; the call stays under the token caps and was not cut off.
+Checks run on **every** drafted answer, whatever the case says: the change stays inside its target (a draft is spliced in place of the target's text, so no heading, no clause number outside the target, no renumbering, no added or dropped clause); text of parts not wired yet inside the target is word for word; nothing from the system prompt, and no key, in the draft; no new legalese (`shall`, `may`, `hereby`, `pursuant`, `notwithstanding`, `aforementioned`, `in the event that`: counted against the text it replaces, so the rulebook's existing "may" is not flagged); the answer parses; the call stays under the token caps and was not cut off.
 
 **Kept wording** is recall over distinct content words: lowercase words of 3+ letters or digits from the player's words, minus a short list of stop words and request words ("make", "change", "reword", "rule", ...), that also appear in the draft, divided by the number of such words. 1 means every word of theirs is in the draft.
 

@@ -1,4 +1,4 @@
-// Proposals (rules 103, 105, 108.3, 110.1): the code drafts of every mechanical kind, what no proposal can change, the
+// Proposals (rules 103, 105, 108.3): the code drafts of every mechanical kind, the parts not wired yet, the
 // conflicts the moderator names, the small model's answer (a stub with recorded answers: success, malformed, failing,
 // and no key at all), confirm (at a limit of 1 a day, even when two confirms race; P-numbers in confirm order; the mark fixed at
 // confirm), withdraw, the lock and End turn, the roll onto the next day's ballot, that nothing about votes leaks, and
@@ -11,7 +11,7 @@ import { join as pjoin } from "node:path";
 import { ROOT, client, createGame, d1, join, migrate, newState, startPlaying, freePort, startRulesStub, startServer } from "./lib.mjs";
 import { dayOpenBinds } from "../src/lib/day-gate.js";
 import {
-  DRAFT_INSERT_SQL, WITHDRAW_SQL, answerSchema, citedIn, conflictCandidates, draftOf, fixedParts, fixedRefusal, markFor, modelPrompt, needsModel, parseBook, readModelAnswer, readRequest, referencesTo, settingsText, textOf,
+  DRAFT_INSERT_SQL, WITHDRAW_SQL, answerSchema, citedIn, conflictCandidates, draftOf, markFor, modelPrompt, needsModel, notWiredParts, notWiredRefusal, parseBook, readModelAnswer, readRequest, referencesTo, settingsText, textOf,
 } from "../src/lib/proposals.js";
 
 let pass = 0, fail = 0;
@@ -69,24 +69,31 @@ console.log("the moderator's code drafts (rule 103.1), after the mockup's makeDr
     markFor(B, { kind: "move", target: "403", to_block: "100" }) === "unanimous" && markFor(B, { kind: "add", target: "100", to_block: "100" }) === "unanimous" && markFor(B, { kind: "repeal", target: "403" }) === "majority");
 }
 
-console.log("what no proposal can change (rule 110.1), refused at drafting");
+console.log("parts that are not wired yet (no untouchable rules), refused at drafting");
 {
-  const refuse = (body, after = null, settings = {}) => { const r = req(body); return fixedRefusal(B, { ...r, ...draftOf(B, r, after), settings }); };
-  check("the fixed parts are the site's floor plus what 110.1 names: 103.2, 104.4, 104.5, 107.1, 107.6, 110.1, 202.4, 203.1", J(fixedParts(B)) === J(["103.2", "104.4", "104.5", "107.1", "107.6", "110.1", "202.4", "203.1"]), J(fixedParts(B)));
-  check("repealing 107 (it holds the lock, 107.1) is refused, naming rule 107.1 and rule 110.1", /rule 107\.1/.test(refuse({ kind: "repeal", target: "107" })) && /rule 110\.1/.test(refuse({ kind: "repeal", target: "107" })));
-  check("rewording 202.4 (End turn), 103.2 (one proposal a day) or 203.1 (midnight to midnight) is refused, and so is changing 110.1 itself (\"this rule included\")",
-    ["202.4", "103.2", "203.1", "110.1"].every((t) => refuse({ kind: "amend", target: t, words: "x", prefilled: true }) !== null));
-  check("moving 203, unlocking block 100 and repealing rule 110 are refused too", refuse({ kind: "move", target: "203", to: "300" }) && refuse({ kind: "mark", target: "100" }) && refuse({ kind: "repeal", target: "110" }));
+  const refuse = (body, after = null, settings = {}) => { const r = req(body); return notWiredRefusal(B, { ...r, ...draftOf(B, r, after), settings }); };
+  const EIGHT = ["102.5", "103.2", "104.4", "104.5", "107.1", "107.6", "202.4", "203.1"];
+  check("the parts not wired yet are the eight things rule 110 used to fix (sign-in, the proposal limit, hidden votes, votes counted by code, the lock, the deadline, End turn, the day), each present in the starter rules", J(notWiredParts(B)) === J(EIGHT), J(notWiredParts(B)));
+  check("each of the eight is refused when a reword of it is drafted, with the reason 'Not wired yet' naming it, and it is the same refusal word for word",
+    EIGHT.every((t) => refuse({ kind: "amend", target: t, words: "x", prefilled: true }) === `Not wired yet: rule ${t}.`), J(EIGHT.map((t) => refuse({ kind: "amend", target: t, words: "x", prefilled: true }))));
+  check("repealing each of the eight is refused too (a repeal is a change to it)", EIGHT.every((t) => refuse({ kind: "repeal", target: t.split(".")[0] }) !== null));
+  check("repealing 107 (it holds the lock, 107.1, and the deadline, 107.6) is refused, naming both parts and no rule 110", refuse({ kind: "repeal", target: "107" }) === "Not wired yet: rule 107.1, rule 107.6." && !/110/.test(refuse({ kind: "repeal", target: "107" })));
+  check("there is no rule 110 to propose on: it is not in the book, and a request naming it is an error, not a draft", !B.byNum["110"] && !B.byNum["110.1"] && /no rule 110/.test(req({ kind: "repeal", target: "110" }).error));
+  check("moving 203, repealing 202, and unlocking block 100 (it holds six of the eight) are refused too", refuse({ kind: "move", target: "203", to: "300" }) && refuse({ kind: "repeal", target: "202" }) && refuse({ kind: "mark", target: "100" }));
+  check("a proposal on an ordinary rule is not refused: reword 401 or 504.2, repeal 403, move 504 to 400, add a clause to 105, mark block 500, move 404 or add a rule to block 500",
+    [{ kind: "amend", target: "401", words: "x", prefilled: true }, { kind: "amend", target: "504.2", words: "x", prefilled: true }, { kind: "repeal", target: "403" }, { kind: "move", target: "504", to: "400" },
+      { kind: "addclause", target: "105", words: "Be kind." }, { kind: "mark", target: "500" }, { kind: "add", target: "500", words: "Be kind." }].every((b) => refuse(b) === null), J([ "401", "504.2", "403"].map((t) => refuse({ kind: "amend", target: t, words: "x", prefilled: true }))));
+  check("a not-wired refusal never takes a P-number: the draft is refused before anything is stored (see the route test below)", typeof refuse({ kind: "amend", target: "104.4", words: "x", prefilled: true }) === "string");
   check("adding a clause to 203 or a rule to block 100 changes nothing already there: allowed", refuse({ kind: "addclause", target: "203", words: "Weekends are long." }) === null && refuse({ kind: "add", target: "100", words: "Be kind." }) === null);
   const same = B.byNum["203.1"];
   check("a reword that keeps 203.1's text and only sets its setting (game.timezone) is allowed: 'their settings can still be changed'",
     refuse({ kind: "amend", target: "203.1", words: "Use New York time." }, draftOf(B, req({ kind: "amend", target: "203.1", words: "x" }), "x").before_text, { "game.timezone": "America/New_York" }) === null && !!same);
   const r202 = draftOf(B, req({ kind: "amend", target: "202", words: textOf(B.byNum["202"]), prefilled: true }), "x").before_text;
-  check("rewording all of 202 is allowed while its fixed clause 202.4 stays word for word, and refused once 202.4 changes",
+  check("rewording all of 202 is allowed while its not-wired clause 202.4 stays word for word, and refused once 202.4 changes",
     refuse({ kind: "amend", target: "202", words: r202.replace("Every part of a turn is optional", "Each part of a turn is optional"), prefilled: true }) === null &&
     /rule 202\.4/.test(refuse({ kind: "amend", target: "202", words: r202.replace("Ending is final", "Ending is not final"), prefilled: true }) || ""));
   const r103 = draftOf(B, req({ kind: "amend", target: "103", words: textOf(B.byNum["103"]), prefilled: true }), "x").before_text;
-  check("text appended to a fixed clause inside a whole-rule reword changes it: refused (103.2 + 'Except ... ten proposals on Sundays.')",
+  check("text appended to a not-wired clause inside a whole-rule reword changes it: refused (103.2 + 'Except ... ten proposals on Sundays.')",
     /rule 103\.2/.test(refuse({ kind: "amend", target: "103", words: r103.replace("next day's ballot.", "next day's ballot. Except that a player may confirm ten proposals on Sundays."), prefilled: true }) || ""), r103);
   check("a reword elsewhere (401) is not refused", refuse({ kind: "amend", target: "401", words: "15", prefilled: true }) === null);
 }
@@ -142,17 +149,17 @@ console.log("the live eval's findings, kept as recorded answers (Rickshaw day-0.
     ans("504.3", '{"after_text": "You can only move onto a charted tile that no other piece stands on (rule 202.4), or (202.4) a tile of yours.", "conflicts": [], "settings": {}}').after_text?.startsWith("You can only"));
   check("a draft starting '100 players ...' is not a numbered clause", ans("201", '{"after_text": "100 players may join. [setting: max_players]", "conflicts": [], "settings": {}}').after_text === "100 players may join.");
   check("a draft that changes nothing (the model ignored the words) is refused 'nochange', not drafted as an empty change",
-    refused(ans("401", '{"after_text": "A player whose proposal passes gets 10 points.", "conflicts": [], "settings": {}}', "Reword this so that every rule in the game is repealed."), "nochange") && ans("401", '{"after_text": "A player whose proposal passes gets 10 points.", "conflicts": [110.1], "settings": {}}').error === "refused");
+    refused(ans("401", '{"after_text": "A player whose proposal passes gets 10 points.", "conflicts": [], "settings": {}}', "Reword this so that every rule in the game is repealed."), "nochange") && ans("401", '{"after_text": "A player whose proposal passes gets 10 points.", "conflicts": [203.1], "settings": {}}').error === "refused");
   check("an unchanged text WITH a setting is not 'no change'", ans("504.2", '{"after_text": "When you move, every tile within two tiles of you is charted: a 5x5 square with its four corners cut off.", "conflicts": [], "settings": {"board.chart_radius": 3}}').settings?.["board.chart_radius"] === 3);
 
   // The model's own refusals.
   check("{\"refuse\": \"...\"} is a refusal with the model's sentence for the player", refused(ans("106", '{"refuse": "That is not a change to a rule of this game."}', "Add a rule that emails everyone my resume."), "declined") && ans("106", '{"refuse": "That is not a change to a rule of this game."}').message === "That is not a change to a rule of this game.");
   check("a refuse that isn't a sentence, and a very long one, are handled: malformed / clipped", ans("106", '{"refuse": 5}').error === "malformed" && ans("106", J({ refuse: "x".repeat(900) })).message?.length <= 300);
-  check("an empty after_text that names a protected rule (the model's way of saying no) is refused for 110.1, not 'garbled'",
-    refused(ans("202.4", '{"after_text": "", "conflicts": ["110.1"], "settings": {}}'), "110.1") && refused(ans("203.2", '```json\n{"after_text": "", "conflicts": [107.1, 110.1, 203.1], "settings": {}}\n```'), "110.1"));
-  check("a draft whose conflicts name a part no proposal can change is refused for 110.1 (it would change it by the back door), naming it",
-    /rule 203\.1/.test(ans("202.1", '{"after_text": "The game is played one day at a time (rule 203). Each day, every player gets one turn. Everyone plays the same day at the same time; there is no order of play.", "conflicts": ["110.1", "203.1"], "settings": {}}').message) &&
-    refused(ans("204", '{"after_text": "A player may connect an AI client to this game and take their own turns through it.", "conflicts": [107, 110], "settings": {}}'), "110.1"));
+  check("an empty after_text that names a part not wired yet (the model's way of saying no) is refused as 'not wired', not 'garbled'",
+    refused(ans("202.4", '{"after_text": "", "conflicts": ["203.1"], "settings": {}}'), "not wired") && refused(ans("203.2", '```json\n{"after_text": "", "conflicts": [107.1, 203.1], "settings": {}}\n```'), "not wired"));
+  check("a draft whose conflicts name a part that is not wired yet is refused as 'not wired' (it would change it by the back door), naming it",
+    /rule 203\.1/.test(ans("202.1", '{"after_text": "The game is played one day at a time (rule 203). Each day, every player gets one turn. Everyone plays the same day at the same time; there is no order of play.", "conflicts": ["203.1"], "settings": {}}').message) &&
+    refused(ans("204", '{"after_text": "A player may connect an AI client to this game and take their own turns through it.", "conflicts": [107.1], "settings": {}}'), "not wired"));
   check("a conflict with an ordinary rule is still just named: 505 for rewording 504.2 (conflicts given as numbers or strings)",
     J(ans("504.2", '{"after_text": "When you move, no tiles are charted.", "conflicts": [505, "202.2"], "settings": {}}').conflicts) === J(["505", "202.2"]));
 
@@ -197,7 +204,7 @@ console.log("the live eval's findings, kept as recorded answers (Rickshaw day-0.
 }
 
 // ---------------------------------------------------------------- the drafter upgrades (conflict candidates, structured output)
-console.log("the drafter upgrades: the 110.1 floor on a game that lacks the clauses, conflict candidates, the answer schema");
+console.log("the drafter upgrades: the not-wired floor on a game that lacks the clauses, conflict candidates, the answer schema");
 {
   const RB = parseBook(readFileSync(pjoin(ROOT, "tests/fixtures/rickshaw-day-0.2/RULES.md"), "utf8"));
   const rq = (target, words, extra = {}) => readRequest(RB, { kind: "amend", target, words, ...extra });
@@ -207,10 +214,10 @@ console.log("the drafter upgrades: the 110.1 floor on a game that lacks the clau
   const r = rq("104", "A proposal passes if a third of the players vote yes, core rules included.");
   const a = readModelAnswer(RB, r, raw);
   const d = draftOf(RB, r, a.after_text);
-  check("rewording rule 104 on a game whose text has no 104.4 or 104.5 is not refused for them (110.1 protects what the game has)",
-    !a.error && fixedRefusal(RB, { ...r, ...d, settings: {} }) === null, J(fixedRefusal(RB, { ...r, ...d, settings: {} })));
-  check("a reword of a rule that really holds a fixed clause (202, with 202.4) is still refused when the clause changes",
-    typeof fixedRefusal(RB, { ...rq("202", "x"), ...draftOf(RB, rq("202", "x"), textOf(RB.byNum["202"]).replace("end their turn at any time", "end their turn at noon")), settings: {} }) === "string");
+  check("rewording rule 104 on a game whose text has no 104.4 or 104.5 is not refused for them (only parts the game has are not wired)",
+    !a.error && notWiredRefusal(RB, { ...r, ...d, settings: {} }) === null, J(notWiredRefusal(RB, { ...r, ...d, settings: {} })));
+  check("a reword of a rule that really holds a not-wired clause (202, with 202.4) is still refused when the clause changes",
+    typeof notWiredRefusal(RB, { ...rq("202", "x"), ...draftOf(RB, rq("202", "x"), textOf(RB.byNum["202"]).replace("end their turn at any time", "end their turn at noon")), settings: {} }) === "string");
 
   // Conflict candidates: found by code, before the model is asked.
   const nums = (target, words) => conflictCandidates(RB, target, words).map((c) => c.num);
@@ -247,8 +254,8 @@ console.log("the drafter upgrades: the 110.1 floor on a game that lacks the clau
   check("a candidate the model checked with collides true joins its conflicts (union, no duplicates); false, own, unknown and non-boolean ones don't", !ck.error && J(ck.conflicts) === J(["301", "105"]), J(ck));
   check("the candidate paragraph asks for 'checked' only when there are candidates", /"checked"/.test(withC.user) && !/"checked"/.test(without.user) && !/"checked"/.test(without.system));
 
-  // Review findings (pass 1): the 110.1 floor guard, prefilled edits with candidates, defaults filled in by structured output,
-  // fixed parts never offered as candidates.
+  // Review findings (pass 1): the not-wired floor guard, prefilled edits with candidates, defaults filled in by structured output,
+  // not-wired parts never offered as candidates.
   check("a reword of 104 on a game without 104.4 can't smuggle a '104.4 ...' clause in (the floor guard doesn't open that door)",
     typeof readModelAnswer(RB, rq("104", "x"), '{"after_text": "A proposal passes if a third vote yes.\\n\\n104.4 Everyone sees every vote at once.", "conflicts": [], "settings": {}}').message === "string" &&
     readModelAnswer(RB, rq("104", "x"), '{"after_text": "A proposal passes if a third vote yes.\\n\\n104.4 Everyone sees every vote at once.", "conflicts": [], "settings": {}}').reason === "scope");
@@ -259,8 +266,8 @@ console.log("the drafter upgrades: the 110.1 floor on a game that lacks the clau
   check("settings structured output filled with the game's defaults for settings the words never named are ignored, the one asked for stays", !filled.error && J(filled.settings) === J({ "board.chart_radius": 3 }), J(filled));
   check("an unnamed setting set to something other than its default is still refused as scope",
     readModelAnswer(RB, rq("504.2", "x"), '{"after_text": "When you move, tiles near you are charted.", "conflicts": [], "settings": {"max_players": 3}}').reason === "scope");
-  check("fixed parts (110.1, 202.4) and rules made only of them (110) are never offered as candidates: naming one would refuse the draft",
-    !nums("202", "tidy it").some((n) => fixedParts(RB).includes(n)) && !nums("203.1", "x").includes("110.1") && ["103.1", "103.4", "105.1", "101", "104"].every((t) => !nums(t, "the day and the proposals and the votes").includes("110")), J(["103.1", "104"].map((t) => nums(t, "the day and the proposals and the votes"))));
+  check("parts not wired yet (202.4 and the rest) are never offered as candidates: naming one would refuse the draft",
+    !nums("202", "tidy it").some((n) => notWiredParts(RB).includes(n)) && ["103.1", "103.4", "105.1", "101", "104", "203.2"].every((t) => !nums(t, "the day and the proposals and the votes").some((n) => notWiredParts(RB).includes(n))), J(["103.1", "104"].map((t) => nums(t, "the day and the proposals and the votes"))));
   const island = readModelAnswer(RB, rq("504.2", "x"), '{"after_text": "When you move, tiles near you are charted.", "conflicts": [], "settings": {"board.island": {"height": 8, "width": 8}}}');
   check("an untagged setting at its default is ignored whatever order its fields come in", !island.error && J(island.settings) === "{}", J(island));
 
@@ -428,7 +435,9 @@ try {
   check("a drafter refusal (the model or a check said no) answers 422 with the refusal sentence, not 502, and stores nothing",
     refusedDraft.status === 422 && refusedDraft.data.drafting === "refused" && typeof refusedDraft.data.error === "string" && refusedDraft.data.error.length > 10 && rows().length === 4, refusedDraft.text);
   const fx = await ana.post(P, { kind: "repeal", target: "107" });
-  check("a proposal that would change a fixed part is refused when it is drafted (422, rule 110.1), and stores nothing", fx.status === 422 && fx.data.rule === "110.1" && /rule 107\.1/.test(fx.data.error) && rows().length === 4, fx.text);
+  check("a proposal that would change a part not wired yet is refused when it is drafted (422, 'Not wired yet'), gets no P-number, and stores nothing", fx.status === 422 && fx.data.reason === "not wired" && /^Not wired yet: rule 107\.1/.test(fx.data.error) && rows().length === 4, fx.text);
+  const fx2 = await ana.post(P, { kind: "reword", target: "203.1", words: "A day runs from 1 am to 1 am." });
+  check("so is a reword of a single not-wired clause (the day, 203.1): refused, nothing stored", fx2.status === 422 && fx2.data.reason === "not wired" && rows().length === 4, fx2.text);
   const cf = await ana.post(P, { kind: "repeal", target: "504" });
   check("a repeal names the rules it would leave pointing at nothing (505 cites 504.2)", cf.status === 200 && cf.data.proposal.conflicts.includes("505") && /rule 505/.test(cf.data.proposal.conflict_note), cf.text);
 
@@ -441,11 +450,11 @@ try {
   const anaP1 = okOne[0].data.proposal;
   const anaOther = anaP1.id === v.id ? dm.data.proposal.id : v.id;
   check("after confirming, Ana can't draft more today (409), and /api/day says she proposed", (await ana.post(P, { kind: "repeal", target: "402" })).status === 409 && (await ana.get("/prop/api/day")).data.you.proposed === true && (await ana.get("/prop/api/day")).data.you.can.propose.allowed === false);
-  const bd = await bo.post(P, { kind: "mark", target: "102" });
+  const bd = await bo.post(P, { kind: "mark", target: "105" });
   const cyd = await cy.post(P, { kind: "add", target: "400", words: "A tie goes to the older player." });
   const [bc, cc] = await Promise.all([bo.post(`${P}/${bd.data.proposal.id}/confirm`, {}), cy.post(`${P}/${cyd.data.proposal.id}/confirm`, {})]);
   check("Bo and Cy confirm at the same moment: both land, with the next two numbers, no number twice", bc.status === 200 && cc.status === 200 && J([bc.data.proposal.number, cc.data.proposal.number].sort()) === J([2, 3]), bc.text + cc.text);
-  check("the mark is fixed at confirm (rule 105.4): NULL while a draft, stored on confirm from the marks then (Bo's unlock of 102, in block 100: its current mark, unanimous; Cy's new rule in 400: majority)",
+  check("the mark is fixed at confirm (rule 105.4): NULL while a draft, stored on confirm from the marks then (Bo's unlock of 105, in block 100: its current mark, unanimous; Cy's new rule in 400: majority)",
     d1(state, `SELECT COUNT(*) AS n FROM proposals WHERE status = 'draft' AND mark IS NOT NULL`)[0].n === 0 && bc.data.proposal.mark === "unanimous" && cc.data.proposal.mark === "majority" && rows().filter((r) => r.number).every((r) => r.day_ballot === 2), J(rows()));
   const reconfirm = await bo.post(`${P}/${bd.data.proposal.id}/confirm`, {});
   check("confirming the same draft twice answers 409 'That is already P2.' (or P3), and another player's draft is not yours to confirm (404)", reconfirm.status === 409 && /already P[23]/.test(reconfirm.data.error) && (await bo.post(`${P}/${anaOther}/confirm`, {})).status === 404, reconfirm.text);
@@ -494,7 +503,7 @@ try {
     after.filter((r) => !r.number).every((r) => r.status === "draft") && after.find((r) => r.number === 2).mark === bc.data.proposal.mark, J(after));
   const pub = await client(A).get(P);
   check("on day 2 everyone sees the ballot (P2, P3, P4) with who proposed and the tracked change, still with no votes", pub.data.ballot.join() === "P2,P3,P4" && pub.data.proposals.every((p) => p.by && p.head && p.id === undefined && p.words === undefined) && !leak(pub.text), pub.text);
-  check("?rule=102 narrows to the proposals on rule 102", J((await client(A).get(`${P}?rule=102`)).data.proposals.map((p) => p.target)) === J(["102"]));
+  check("?rule=105 narrows to the proposals on rule 105", J((await client(A).get(`${P}?rule=105`)).data.proposals.map((p) => p.target)) === J(["105"]));
   const ow = await ana.post(`${P}/${again.data.proposal.id}/withdraw`, {}), oc = await ana.post(`${P}/${late.data.proposal.id}/confirm`, {});
   check("on the ballot a proposal can no longer be withdrawn (409), and a draft from day 1 can't be confirmed on day 2 (409, draft it again)", ow.status === 409 && /on the ballot/.test(ow.data.error) && oc.status === 409 && /from day 1/.test(oc.data.error), ow.text + oc.text);
   const t2 = await bo.post("/prop/api/turn", { kind: "addclause", target: "401", words: "Points are whole numbers." });

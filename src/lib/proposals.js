@@ -1,7 +1,7 @@
 // Proposals, the pure parts (plain JavaScript, so the Worker and the plain-node tests share ONE implementation):
 // the moderator's code draft of the mechanical kinds (rule 103.1), the votes a proposal needs (rule 105), the next free
 // number (rule 109.1 is not text yet; the numbering follows public/js/rulebook.js), the parts no proposal can change
-// (rule 110.1), the other rules a change would conflict with (rule 108.3), and the check of the small model's answer for
+// (not wired yet), the other rules a change would conflict with (rule 108.3), and the check of the small model's answer for
 // rewording. The rulebook is parsed by the same parser the page uses (public/js/rulebook.js), so the server and the page
 // agree on what each number is.
 import { parseRules } from "../../public/js/rulebook.js";
@@ -17,7 +17,7 @@ export const has = (book, num) => typeof num === "string" && Object.hasOwn(book.
 const PAREN_CITE = /\((\d{3}(?:\.\d+)?)\)/g;
 // Every rule or clause number a text cites: "rule 504.2", "Rule 504", "rules 202.4 and 203.1", "rules 101, 102 or 103".
 const CITE = /\b[Rr]ules? (\d{3}(?:\.\d+)?(?![\d.]\d)(?:(?:, | and | or |, and |, or )\d{3}(?:\.\d+)?(?![\d.]\d))*)(?!\d)/g;
-/** @rule 108.3, 110.1 */
+/** @rule 108.3 */
 export const citedIn = (text) => [...[...String(text).matchAll(CITE)].flatMap((m) => m[1].match(/\d{3}(?:\.\d+)?/g)), ...[...String(text).matchAll(PAREN_CITE)].map((m) => m[1])];
 
 /** How one setting's value reads: 10x10 for an object of numbers, on / off for a boolean, else as written. @rule 103.1 */
@@ -96,44 +96,48 @@ export function nextClauseNum(rule) {
   return `${rule.num}.${n}`;
 }
 
-// ---- what no proposal can change (rule 110.1) ---------------------------------------------------------------------
-// The site runs these parts the same in every game, whatever a game's text says: the floor. A game's own 110.1 can only
-// add to it (each "rule N" it names, and 110.1 itself: "this rule included").
-const SITE_FIXED = ["103.2", "104.4", "104.5", "107.1", "107.6", "110.1", "202.4", "203.1"];
-/** @rule 110.1 */
-export function fixedParts(book) {
-  const out = new Set(SITE_FIXED);
-  const c = book.byNum["110.1"];
-  if (c) for (const n of citedIn(clauseText(c))) out.add(n);
-  return [...out].sort();
+// ---- parts that are not wired yet ---------------------------------------------------------------------------------
+// No rule is untouchable. These parts are still run by the site itself
+// (an engine hook a game rule controls does not exist for them yet), so a proposal that changes one would pass and do
+// nothing. It is refused when it is drafted instead, with the reason "not wired yet": it never gets a P-number. A part leaves
+// this list in the same change that ships its hook. They are the eight parts the site used to fix, each now an ordinary rule with a
+// unanimous mark: sign-in 102.5, the proposal limit 103.2, hidden votes 104.4, votes counted by code 104.5, the lock 107.1,
+// the deadline 107.6, End turn 202.4, the day 203.1.
+const NOT_WIRED = ["102.5", "103.2", "104.4", "104.5", "107.1", "107.6", "202.4", "203.1"];
+/** The reason a refusal carries (drafting reason "not wired"; the sentence starts the same way). @rule 103.1 */
+export const NOT_WIRED_REASON = "not wired";
+/** The parts of a game's rulebook that are not wired yet: the list, minus parts the game's text lacks. @rule 103.1 */
+export function notWiredParts(book) {
+  return NOT_WIRED.filter((p) => has(book, p)).sort();
 }
-// The fixed parts a change to `num` would touch: the number itself, a fixed clause inside a rule, or a fixed rule or
-// clause inside a block.
-/** @rule 110.1 */
-export function fixedTouched(book, num) {
+// The not-wired parts a change to `num` would touch: the number itself, a clause inside a rule, or a rule or clause inside a
+// block.
+/** @rule 103.1 */
+export function notWiredTouched(book, num) {
   const n = book.byNum[num];
-  return fixedParts(book).filter((p) => {
-    if (!has(book, p)) return false;   // the site's floor names parts a game's own text may lack (104.4, 104.5 in day-0.2): a change can't touch text that isn't there
+  return notWiredParts(book).filter((p) => {
     if (p === num || p.startsWith(num + ".") || num.startsWith(p + ".")) return true;
     return n?.kind === "block" && String(Math.floor(parseInt(p, 10) / 100) * 100) === num;
   });
 }
-// Refuse at drafting (rule 110.1). Adding a clause or a rule changes nothing already there, and a reword that keeps the
-// text and only sets a setting the part names is allowed ("their settings can still be changed"); anything else that
-// touches a fixed part is refused, with the reason naming the rule. Returns the refusal sentence, or null.
-/** @rule 110.1 */
-export function fixedRefusal(book, d) {
+// The refusal sentence: state, not helper text.
+/** @rule 103.1 */
+export const notWiredSentence = (parts) => `Not wired yet: ${parts.map((p) => `rule ${p}`).join(", ")}.`;
+// Refuse at drafting. Adding a clause or a rule changes nothing already there, and a reword that keeps the text and only
+// sets a setting the part names is allowed (a setting is data the site already reads, so that change does take effect);
+// anything else that touches a not-wired part is refused. Returns the refusal sentence, or null.
+/** @rule 103.1 */
+export function notWiredRefusal(book, d) {
   if (d.kind === "add") return null;
-  const hit = fixedTouched(book, d.target);
+  const hit = notWiredTouched(book, d.target);
   if (!hit.length) return null;
   if (d.kind === "addclause") return null;
   if (d.kind === "amend" && plainTxt(d.after_text) === plainTxt(d.before_text) && Object.keys(d.settings || {}).length) return null;
-  // Rewording a whole rule that holds a fixed clause is allowed when that clause is still there, word for word, as a
+  // Rewording a whole rule that holds a not-wired clause is allowed when that clause is still there, word for word, as a
   // whole paragraph of its own (text appended to it in the same paragraph changes it).
   const paras = String(d.after_text || "").split(/\n\s*\n/).map(plainTxt);
   if (d.kind === "amend" && hit.every((p) => p.startsWith(d.target + ".") && book.byNum[p]?.kind === "clause" && paras.includes(plainTxt(`${p} ${clauseText(book.byNum[p])}`)))) return null;
-  const what = hit.map((p) => `rule ${p}`).join(", ");
-  return `No proposal can change ${what}: the site runs ${hit.length > 1 ? "them" : "it"} the same in every game (rule 110.1). Its settings can still be changed.`;
+  return notWiredSentence(hit);
 }
 
 // ---- conflicts the moderator names (rule 108.3) -------------------------------------------------------------------
@@ -178,8 +182,8 @@ export function conflictCandidates(book, target, words = "") {
   const own = (k) => k === target || k.startsWith(target + ".") || target.startsWith(k + ".");
   const targetRaw = node.kind === "clause" ? node.paras.map(paraTxt).join(" ") : [...node.paras.map(paraTxt), ...node.clauses.flatMap((c) => c.paras.map(paraTxt))].join(" ");
   const out = new Map();   // num -> why (the first reason wins)
-  // A fixed part (rule 110.1) is never offered: naming one as a conflict refuses the whole draft, and a change that touches one directly is refused by fixedRefusal already.
-  const add = (num, why) => { if (!out.has(num) && has(book, num) && !own(num) && !fixedWhole(book, num)) out.set(num, why); };
+  // A part that is not wired yet is never offered: naming one as a conflict refuses the whole draft, and a change that touches one directly is refused by notWiredRefusal already.
+  const add = (num, why) => { if (!out.has(num) && has(book, num) && !own(num) && !notWiredWhole(book, num)) out.set(num, why); };
   for (const n of referencesTo(book, target)) add(n, `cites ${target}`);
   for (const n of citedIn(`${targetRaw} ${words}`)) add(n, `the text cites it`);
   const keys = new Set(settingKeysIn(targetRaw));
@@ -251,12 +255,12 @@ export function scopeProblem(book, target, text) {
 // [setting] tags.
 /** @rule 103.1 */
 const tidy = (t) => String(t).replace(/\n(?=\s*(?:\*\*)?\d{3}\.\d+(?:\*\*)?\s)/g, "\n\n").split(/\n\s*\n/).map(plainTxt).filter(Boolean).join("\n\n");
-// Is this the part that no proposal can change, or a rule made only of such clauses?
-/** @rule 110.1 */
-const fixedWhole = (book, n) => {
-  if (fixedParts(book).includes(n)) return true;
+// Is this a part that is not wired yet, or a rule made only of such clauses?
+/** @rule 103.1 */
+const notWiredWhole = (book, n) => {
+  if (notWiredParts(book).includes(n)) return true;
   const r = book.byNum[n];
-  return r?.kind === "rule" && !r.paras.length && r.clauses.length > 0 && r.clauses.every((c) => fixedParts(book).includes(c.num));
+  return r?.kind === "rule" && !r.paras.length && r.clauses.length > 0 && r.clauses.every((c) => notWiredParts(book).includes(c.num));
 };
 // A value with its object keys in order, so two spellings of one value compare equal.
 /** @rule 103.1 */
@@ -368,11 +372,11 @@ export function draftOf(book, req, after = null) {
 // a change to this rule. Anything else is "malformed": a draft is never made from a guess. The answer is then held to the
 // rules a draft keeps (each refusal is {error: "refused", reason, message}, the message written for the player):
 //   - conflicts are kept only when they name a rule or clause the book has, other than what the change touches (108.3); one
-//     that names a part no proposal can change refuses the draft (110.1), since the change would reach it by the back door;
+//     that names a part that is not wired yet refuses the draft, since the change would reach it by the back door;
 //   - settings only when they name a setting tag in the target's own text, with a value the game can run;
 //   - the text stays inside the target (scopeProblem) and really changes something (or sets a setting).
 // The text is returned in the rulebook's plain style, like the "before" text it is shown against.
-/** @rule 103.1, 108.3, 110.1 */
+/** @rule 103.1, 108.3 */
 export function readModelAnswer(book, req, raw) {
   let a = raw;
   if (typeof a === "string") {
@@ -395,8 +399,8 @@ export function readModelAnswer(book, req, raw) {
     return why ? refuse("declined", why) : { error: "malformed" };
   }
   if (a.settings !== undefined && (typeof a.settings !== "object" || a.settings === null || Array.isArray(a.settings))) return { error: "malformed" };
-  const fixed = conflicts.filter((n) => fixedWhole(book, n));
-  if (fixed.length) return refuse("110.1", `This would conflict with ${fixed.map((n) => `rule ${n}`).join(", ")}, which no proposal can change: the site runs ${fixed.length > 1 ? "them" : "it"} the same in every game (rule 110.1). Change the words so they leave ${fixed.length > 1 ? "them" : "it"} alone.`);
+  const unwired = conflicts.filter((n) => notWiredWhole(book, n));
+  if (unwired.length) return refuse(NOT_WIRED_REASON, notWiredSentence(unwired));
   const text = typeof a.after_text === "string" ? a.after_text.trim() : "";
   if (!text || [...text].length > 4000) return { error: "malformed" };
   const node = book.byNum[req.target];
@@ -424,7 +428,7 @@ export function readModelAnswer(book, req, raw) {
 export function modelPrompt(book, rulesMd, req, opts = {}) {
   const node = book.byNum[req.target];
   const what = node.kind === "clause" ? `clause ${node.num} of rule ${node.rule.num} (${node.rule.title})` : `rule ${node.num} (${node.title})`;
-  const protectedText = fixedParts(book).filter((p) => book.byNum[p]?.kind === "clause").map((p) => `${p}: ${clauseText(book.byNum[p])}`).join("\n");
+  const protectedText = notWiredParts(book).filter((p) => book.byNum[p]?.kind === "clause").map((p) => `${p}: ${clauseText(book.byNum[p])}`).join("\n");
   const shapes = Object.entries(DEFAULT_SETTINGS).map(([k, v]) => `${k} (e.g. ${JSON.stringify(v)})`).join(", ");
   let words = String(req.words), prev;
   do { prev = words; words = words.replace(/<\s*\/?\s*words[^>]*>/gi, ""); } while (words !== prev);
@@ -444,7 +448,7 @@ export function modelPrompt(book, rulesMd, req, opts = {}) {
       "Change only what the player asked for, and only in the target; keep everything else word for word. If the words are about another rule or clause, or also need changes there, draft only the part that belongs in the target, and name the other rules in conflicts. Never write another rule's content into the target.",
       "If nothing in the words belongs in the target, or it is not a change to a rule of this game (for example something the game has no way to do), answer {\"refuse\": \"one short sentence for the player saying why\"} instead.",
       "conflicts lists, as strings, the numbers of OTHER rules or clauses that could no longer be followed together with the new text, or that cite the text you changed. Look through the whole rulebook for them, including rules about the same subject that say it in other words and would now say something different. Never list the target itself. Draft the change even when it conflicts: conflicts are for naming.",
-      `These parts of the game are run by the site and no proposal can change them. Copy each one word for word if the target contains it, even where the voice rules below would change it (\"may\" and all):\n${protectedText}\nName one in conflicts only if the new text would contradict it. If the words ask to change one of them, directly or by changing what it relies on, answer {"refuse": ...} saying that no proposal can change it (rule 110.1).`,
+      `These parts of the game are not wired yet: the site still runs them itself, so a change to one would do nothing. Copy each one word for word if the target contains it, even where the voice rules below would change it (\"may\" and all):\n${protectedText}\nName one in conflicts only if the new text would contradict it. If the words ask to change one of them, directly or by changing what it relies on, answer {"refuse": ...} saying that it is not wired yet.`,
       `settings: if the player only asks for a different value of a [setting: key] the target's text names, put the new value in settings, in the setting's own shape: ${shapes}. Keep after_text the current text, except that a number the text states for that setting is changed to match (a day or a protected part that names no number stays exactly as it is). Otherwise settings is {}. Never set a setting the target doesn't name.`,
       "Write the sentences you change or add in the rules voice; sentences you keep stay as they are. 1. Talk to the player: \"you\", present tense (\"You can move one tile a day.\"; a sentence that tells players what they can do or get is written to \"you\"). 2. One idea per sentence: what you can do first, then the limit. 3. Everyday words: \"can\", not \"may\" or \"shall\"; no hereby, pursuant to, in the event that, aforementioned, notwithstanding. 4. Keep the game's own terms, the same every time: moderator, proposal, draft, ballot, block, mark, clause, turn, day, tile, piece. 5. Digits for numbers (3, not three); cite rules by number in parentheses (202.4) or as \"rule 202.4\", never as a bare number in a sentence. 6. The player's own words stay when they are clear, fit the game's terms and say exactly what they mean: reword only to make it exact, to match a game term or to fix the grammar. 7. Nothing in a rule that isn't a rule: no flavor text, no asides, no \"note that\".",
       "Example. Before: \"The proposer may withdraw a confirmed proposal until it goes on the ballot, unless they have ended their turn (rule 202.4). A withdrawn proposal doesn't use up the day's proposal.\" After: \"You can withdraw your proposal until midnight, unless you've ended your turn (202.4). Withdrawing frees up your proposal for the day.\"",
