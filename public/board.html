@@ -422,7 +422,7 @@ import { createWorkshop } from "/js/workshop.js";
     return { cls: "crit", label: p.name, backLabel: p.name,
       html: `<div class="mtop"><div class="cart">${mini(p, "cartico")}</div><h2>${esc(p.name)}${me ? ' <span class="you">(you)</span>' : ""}</h2><span class="mmeta">${esc(p.color.name)} · player</span><span class="mpill">Living</span></div><dl class="cstats">${rows.join("")}</dl>` };
   }
-  function describe(spec) { return spec.kind === "player" ? playerCard(spec) : spec.kind === "ticket" ? WS.card(spec) : BOOK ? BOOK.describe(spec) : null; }
+  function describe(spec) { return spec.kind === "player" ? playerCard(spec) : spec.kind === "ticket" || spec.kind === "entry" ? WS.card(spec) : BOOK ? BOOK.describe(spec) : null; }
   const openPlayer = (key, push) => CARDS.open({ kind: "player", key }, { push: !!push });
 
   // 504's card carries its own action: move your piece (it takes you to the board).
@@ -586,6 +586,8 @@ import { createWorkshop } from "/js/workshop.js";
     if (use) { CARDS.close(); jumpTo("board"); return; }
     const tk = t.closest("[data-ticket]");
     if (tk && WS) { CARDS.hidePreview(); WS.open(tk.dataset.ticket, inCard); return; }
+    const en = t.closest("[data-entry]");
+    if (en && WS && !en.dataset.w) { CARDS.hidePreview(); WS.openEntry(en.dataset.entry, inCard); return; }
     const wb = t.closest("[data-w]");
     if (wb && WS) { if (!wb.disabled) WS.click(wb); return; }
     const vb = t.closest("[data-vote]");

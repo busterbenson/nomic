@@ -104,6 +104,37 @@ try {
   const ed2 = await Ana.post(`${T}/W1/edit`, { title: "A dragon", tasks: ["Only one"] });
   check("an edit changes only the fields it names; tasks are replaced as a list", ed2.data.ticket.title === "A dragon" && ed2.data.ticket.brief.startsWith("A dragon that") && ed2.data.ticket.tasks.length === 1);
 
+  console.log("catalog entries on a ticket and the catalog's routes (rules 701.1, 701.2, 704.1)");
+  {
+    const before = J(JSON.parse(tk(1).makes)), pageOf = async () => (await Ana.get(`${T}/W1`)).data.ticket;
+    const ce = await Ana.post(`${T}/W1/edit`, { makes: [
+      { kind: "entry", name: "Garden wall", catalogKind: "structure", attrs: { size: "2x1" }, flavor: { material: "stone" } },
+      { kind: "entry", name: "Wyrm", catalogKind: "creature", attrs: { hearts: "4" } },
+      { kind: "entry", name: "Old lantern" },
+      { kind: "rule", draft: "A creature that flies can cross walls." }] });
+    const t = ce.data?.ticket;
+    check("an entry with a kind, attributes and flavor is saved as sent, coerced: size 2x1 is 2 by 1, hearts \"4\" is 4; an old {kind, name} item is saved as it was; a rule may be a draft with no number",
+      ce.status === 200 && J(t.makes) === J([{ kind: "entry", name: "Garden wall", catalogKind: "structure", attrs: { size: { w: 2, h: 1 } }, flavor: { material: "stone" } }, { kind: "entry", name: "Wyrm", catalogKind: "creature", attrs: { hearts: 4 } }, { kind: "entry", name: "Old lantern" }, { kind: "rule", draft: "A creature that flies can cross walls." }]) && J(JSON.parse(tk(1).makes)) === J(t.makes), ce.text.slice(0, 300));
+    const v = t?.entry_views ?? [];
+    check("the ticket page comes with a view for each entry: the structure's size row shows 2×1 tiles with No rule yet (the registry is empty), the creature's hearts the same, the old item is kind not set",
+      v.length === 3 && v[0].kindLabel === "Structure" && v[0].rows[0].state === "no-rule" && v[0].rows[0].shown === "2×1 tiles" && J(v[0].rows[0].size) === J({ w: 2, h: 1 }) && v[0].flavorTop[0].shown === "stone" && v[1].rows[0].shown === "4" && v[1].rows[0].state === "no-rule" && v[2].kind === null && v[2].kindLabel === null, J(v));
+    const bads = await Promise.all([
+      Ana.post(`${T}/W1/edit`, { makes: [{ kind: "entry", name: "Wall", catalogKind: "structure", attrs: { size: "long" } }] }),
+      Ana.post(`${T}/W1/edit`, { makes: [{ kind: "entry", name: "Wall", catalogKind: "dragon" }] }),
+      Ana.post(`${T}/W1/edit`, { makes: [{ kind: "entry", name: "Wyrm", catalogKind: "creature", attrs: { hearts: "many" } }] }),
+      Ana.post(`${T}/W1/edit`, { makes: [{ kind: "rule", num: "", draft: "" }] }),
+    ]);
+    check("a value that does not read as its type, an unknown kind and an empty rule are 400s with the reason the drafter sees, and nothing is written",
+      bads.map((r) => r.status).join() === "400,400,400,400" && /^size must be W×H, like 2×1/.test(bads[0].data.error) && /is not a kind of entry/.test(bads[1].data.error) && /^hearts must be a number/.test(bads[2].data.error) && J((await pageOf()).makes) === J(t.makes));
+    const cat = (await visitor.get("/wk/api/catalog")).data;
+    check("GET /api/catalog is public and answers from the game's bundle: five kinds in order, the required lists (creature hearts, item acquired, structure size), no registry and no entries yet",
+      J(cat.kinds.map((k) => k.id)) === J(["item", "creature", "tile", "structure", "feature"]) && J(cat.required) === J({ creature: [{ key: "hearts", type: "number" }], item: [{ key: "acquired", type: "rule" }], structure: [{ key: "size", type: "size" }] }) && J(cat.registry) === "{}" && cat.entries.length === 0, J(cat));
+    const miss = [(await visitor.get("/wk/api/catalog/I1")).status, (await visitor.get("/wk/api/catalog/banana")).status, (await visitor.post("/wk/api/catalog", {})).status];
+    check("an entry that does not exist is a 404 (whether it is shaped like an id or not), and so is a method the route does not answer (the site's router answers a missing handler with 404, as for every route)", miss.join() === "404,404,404", miss.join());
+    const back = await Ana.post(`${T}/W1/edit`, { makes: JSON.parse(before) });
+    check("(the draft is put back as it was for the sections below)", back.status === 200 && J(back.data.ticket.makes) === before, back.text?.slice(0, 300) + " before=" + before);
+  }
+
   // The edit's own write re-checks the whole day gate: an End turn that lands after the route's read still stops the edit.
   {
     const lit = (v) => (typeof v === "number" ? String(v) : `'${String(v).replace(/'/g, "''")}'`);

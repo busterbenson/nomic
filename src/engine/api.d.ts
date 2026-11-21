@@ -86,3 +86,4 @@ export function validCoord(x: number, y: number, z?: number): boolean;
 export const DIAGONAL_MOVES: boolean;
 export const SHARED_TILES: boolean;
 export const ENGINE_VERSION: number;
+export function attr(entry: { attrs?: Record<string, unknown> } | null | undefined, key: string): unknown;

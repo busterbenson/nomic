@@ -24,7 +24,7 @@ test("the modules assemble: exactly one spawn rule and one order rule", () => {
 });
 test("the text still has the rules the modules belong to", () => {
   const nums = parseRulesMd(rulesMd).rules.map((r) => r.number);
-  for (const n of [107, 202, 401, 402, 504, 505, 901]) assert.ok(nums.includes(n));
+  for (const n of [107, 202, 401, 402, 504, 505, 704, 901]) assert.ok(nums.includes(n));
 });
 test("402 is Eras: 100 points wins an Era, ties by night order, points reset, the Champion names the next Era and has one change (the site enforces it)", () => {
   const flat = rulesMd.replace(/\s+/g, " ");

@@ -252,7 +252,7 @@ with sync_playwright() as pw:
     page.click('#sday [data-jump="board"]'); page.wait_for_timeout(700)
     check("S1-SUM-04: Move jumps to the board's move bar", page.evaluate("(() => { const r = document.getElementById('movebar').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; })()"))
     page.click('.sw.cat [data-tab="workshop"]'); page.wait_for_timeout(200)
-    check("S1-RUL-10: 'Open the Workshop →' switches tabs; the Workshop tab shows the tickets (none yet) and the catalog's empty state under them", page.locator("#tab-workshop").get_attribute("aria-selected") == "true" and "No tickets yet." in text(page, "#p-workshop") and "No entries yet." in text(page, "#p-workshop"))
+    check("S1-RUL-10: 'Open the Workshop →' switches tabs; the Workshop tab shows the tickets (none yet) and, with no catalog entries, no catalog section and no placeholder", page.locator("#tab-workshop").get_attribute("aria-selected") == "true" and "No tickets yet." in text(page, "#p-workshop") and "Catalog" not in text(page, "#p-workshop") and "No entries yet." not in text(page, "#p-workshop"))
     page.click("#tab-history"); page.wait_for_timeout(100)
     check("History tab: the day count, and the event log until the recap lands (history-days is a slot)", "Chrome Game" not in text(page, "#p-history") and page.locator("#p-history .log li").count() >= 1 and page.locator('[data-slot="history-days"]').count() == 1)
     page.click("#tab-summary")
@@ -269,7 +269,7 @@ with sync_playwright() as pw:
     # ---- Rulebook: blocks, rows, legend
     page.click("#tab-rules"); page.wait_for_timeout(200)
     secs = page.locator("#rules .bsec").count()
-    check("S1-RUL-01: blocks of hundreds, each with its title, an 'All N' count and a lock when unanimous", secs == 6 and re.search(r"^100\s*Core rules", text(page, "#rules .bsec >> nth=0")) and "All " in text(page, "#rules .bsec >> nth=0") and page.locator("#rules .bsec >> nth=0 >> svg.lk").count() >= 1)
+    check("S1-RUL-01: blocks of hundreds, each with its title, an 'All N' count and a lock when unanimous", secs == 7 and re.search(r"^100\s*Core rules", text(page, "#rules .bsec >> nth=0")) and "All " in text(page, "#rules .bsec >> nth=0") and page.locator("#rules .bsec >> nth=0 >> svg.lk").count() >= 1)
     card = text(page, '.bcard[data-card="201"]')
     check("S1-RUL-01: a row shows the number, title, text excerpt and an age line", card.startswith("201") and "Game size" in card and "A game has at most" in card and "unchanged since Day 0" in card, card)
     check("S1-RUL-02: the legend names changed this week, settled, everyone must agree; unanimous rules show a lock; on-ballot rules a ring and 'On the ballot'", all(w in text(page, "#rb-legend") for w in ["changed this week", "settled", "everyone must agree"]) and page.locator('.bcard[data-card="101"] svg.lk').count() == 1 and page.locator('.bcard.bal[data-card="401"]').count() == 1 and "On the ballot · P1" in text(page, '.bcard[data-card="401"]'))
@@ -342,7 +342,7 @@ with sync_playwright() as pw:
     check("a ghost (new rule) card: 'new', its text, the proposer, 'On today's ballot'", "A tie goes to the older player." in text(page, "#mroot .mcard") and "On today's ballot" in text(page, "#mroot .mcard") and "Cy" in text(page, "#mroot .chg"))
     page.keyboard.press("Escape")
     page.click('[data-p="pickblock"]'); page.wait_for_selector("#mroot .pmenu")
-    check("the banner's 'Propose a new rule' opens a 'Which block?' card", "Which block?" in text(page, "#mroot .mcard") and page.locator("#mroot .pmi").count() == 6)
+    check("the banner's 'Propose a new rule' opens a 'Which block?' card", "Which block?" in text(page, "#mroot .mcard") and page.locator("#mroot .pmi").count() == 7)
     page.keyboard.press("Escape")
     # a card keeps what you were writing when it closes (Esc, backdrop); focus stays inside the card after a menu click
     page.locator('.bcard[data-card="401"]').click(); page.wait_for_selector("#mroot .mcard")

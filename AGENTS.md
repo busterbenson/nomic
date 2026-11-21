@@ -21,7 +21,7 @@ Owner: Buster Benson. He decides game design; agents build what he approved.
 - **The game's repo is the game.** Per rule: text in `RULES.md`, code in `rules/<n>.ts` (handlers for engine hooks), tests in `rules/<n>.test.ts`. Settings (`[setting: key]`) are data in `settings.json`, no code.
 - **Bundled at deploy.** A Worker can't load code at runtime, so the build fetches each game repo at its latest `day-N` tag, validates it (manifest, allowed paths, lint: no network calls, no imports beyond the engine API), runs its tests, and bundles text + settings + modules. The rulebook served is the bundled text, so it always matches the running code.
 - **Shared, dumb engine.** It runs the day loop and calls hooks. Rules never edit each other's code; each registers handlers. Combine modes: `veto` for can-I hooks (any rule may refuse, with a reason naming its rule), `sequence` for effects (rule-number order), `decide` for single values (precedence rule picks; lower number wins). A capability the engine lacks gets a new hook for all games, separately from the rule that needs it. A function claimed by more than 3 rules is a smell: split it into hooks.
-- **The moderator** may only touch a game repo's `RULES.md`, `settings.json`, `rules/`, `rulings/`. It runs on Buster's Mac mini (headless Claude Code via launchd), not in the Worker.
+- **The moderator** may only touch a game repo's `RULES.md`, `settings.json`, `catalog.json`, `rules/`, `rulings/`. It runs on Buster's Mac mini (headless Claude Code via launchd), not in the Worker.
 
 ## The day (decided 2026-11-19)
 
