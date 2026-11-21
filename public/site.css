@@ -619,6 +619,7 @@ button.pill[aria-pressed="true"]{background:color-mix(in srgb,var(--accent) 16%,
 .chat .msg .bub .q{display:block;margin:6px 0 2px;padding:4px 0 4px 10px;border-left:2px solid var(--accent);font-size:.84rem;line-height:1.4;white-space:normal}
 .chat .msg .bub .q .rpill,.chat .msg .bub .q .pill{margin-right:6px}
 .chat .msg .bub .ctx{display:inline-flex;gap:4px;margin-right:6px;vertical-align:baseline}
+.chat .slip .hd .hdt{min-width:0;overflow-wrap:anywhere}
 .chat .slip .yw{color:var(--ink-muted);font-size:.84rem;overflow-wrap:anywhere}
 .chat .slip .tx{padding-left:10px;border-left:1.5px solid var(--ink);font-size:.88rem;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--ink)}
 .chat .slip .tx.del{text-decoration:line-through;color:var(--ink-muted)}

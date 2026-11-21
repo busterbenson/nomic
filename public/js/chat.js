@@ -109,7 +109,7 @@ ${refused ? `<div class="tx">${esc(last.refusal)}</div>` : ""}
     const sl = S.slips[id];
     if (!sl) return "";
     const stamp = id === liveId() ? "" : sl.status === "draft" ? "REPLACED" : STAMPS[sl.status] || String(sl.status).toUpperCase();
-    return `<section class="slip past" aria-label="${esc(sl.n || "Draft")}"><span class="cstamp">${esc(stamp)}</span><div class="hd">${sl.n ? ppill(sl.n) : ""}${textHTML(sl.head || "")}</div>${sl.words ? `<div class="yw">${esc(`“${sl.words}”`)}</div>` : ""}</section>`;
+    return `<section class="slip past" aria-label="${esc(sl.n || "Draft")}"><span class="cstamp">${esc(stamp)}</span><div class="hd">${sl.n ? ppill(sl.n) : ""}<span class="hdt">${textHTML(sl.head || "")}</span></div>${sl.words ? `<div class="yw">${esc(`“${sl.words}”`)}</div>` : ""}</section>`;
   }
   /** The live draft: the change, scope, votes needed, conflicts, and Lock it in or Unlock with the reason beside a disabled one. @rule 103.1, 103.2, 103.3 */
   function proposalSlipHTML() {
@@ -124,7 +124,7 @@ ${refused ? `<div class="tx">${esc(last.refusal)}</div>` : ""}
       : `<button type="button" class="btn small" data-c="lock" data-id="${esc(id)}"${c.lock && c.lock.allowed ? "" : " disabled"}>Lock it in</button>${why(c.lock)}`;
     const err = S.lockErr[id] ? `<p class="err" role="alert">${esc(S.lockErr[id])}</p>` : "";
     return `<section class="slip${locked ? " locked" : ""}" aria-label="${esc(sl.n || "Draft")}"><span class="cstamp">${locked ? "LOCKED" : "DRAFT"}</span>
-<div class="hd">${sl.n ? ppill(sl.n) : ""}${textHTML(sl.head || "")}</div>
+<div class="hd">${sl.n ? ppill(sl.n) : ""}<span class="hdt">${textHTML(sl.head || "")}</span></div>
 ${sl.words ? `<div class="yw">${esc(`Your words: “${sl.words}”`)}</div>` : ""}
 ${sl.after_text ? `<div class="tx">${esc(sl.after_text)}</div>` : sl.before_text ? `<div class="tx del">${esc(sl.before_text)}</div>` : ""}
 <dl><dt>Change</dt><dd>${esc(KIND[sl.kind] || sl.kind)}${sl.target ? ` ${rpill(sl.target)}` : ""}</dd><dt>Needs</dt><dd>${needs}</dd><dt>Conflicts</dt><dd>${sl.conflicts && sl.conflicts.length ? sl.conflicts.map((n) => rpill(n)).join(" ") : "none"}</dd></dl>
