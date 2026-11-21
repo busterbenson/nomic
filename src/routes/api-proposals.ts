@@ -17,7 +17,7 @@ import { DrafterError, draftRewording, drafterReady } from "../lib/drafter";
 import { notify } from "../lib/notify";
 import { commissionsFor } from "../lib/ticket-view";
 import { COMMISSION_SNAPSHOT_SQL } from "../lib/tickets.js";
-import { CONFIRMED_TODAY_SQL, CONFIRM_SQL, DRAFT_INSERT_SQL, WITHDRAW_SQL, conflictSentence, draftOf, fixedRefusal, markFor, needsModel, neededOf, parseBook, proposalLimitMessage, readRequest } from "../lib/proposals.js";
+import { CONFIRMED_TODAY_SQL, CONFIRM_SQL, DRAFT_INSERT_SQL, NOT_WIRED_REASON, WITHDRAW_SQL, conflictSentence, draftOf, markFor, needsModel, neededOf, notWiredConflictRefusal, notWiredRefusal, parseBook, proposalLimitMessage, readRequest } from "../lib/proposals.js";
 import { refusalBody, turnBlock } from "../lib/turn";
 import { Ctx, colorOf, json, nowIso, readJson, sha256Hex, siteUrl, who } from "../lib/util";
 
@@ -85,7 +85,7 @@ export function view(r: any, viewerId?: string | null, electorate?: number) {
 }
 
 // Draft (rule 103.1). Returns the draft, or the refusal.
-/** @rule 103.1, 108.3, 110.1 */
+/** @rule 103.1, 103.6, 108.3 */
 export async function draft(ctx: Ctx, player: any, body: any, nowMs: number): Promise<Out> {
   const { env } = ctx;
   const { game, day, turn } = await loadToday(env, ctx.data.game!, nowMs, player.id);
@@ -118,7 +118,7 @@ export async function draft(ctx: Ctx, player: any, body: any, nowMs: number): Pr
       after = a.after_text; settings = a.settings; modelConflicts = a.conflicts;
     } catch (e: any) {
       if (!(e instanceof DrafterError)) throw e;
-      return out({ error: e.message, drafting: e.code }, e.code === "unavailable" ? 503 : e.code === "refused" ? 422 : 502);
+      return out({ error: e.message, drafting: e.code, ...(e.reason ? { reason: e.reason } : {}) }, e.code === "unavailable" ? 503 : e.code === "refused" ? 422 : 502);
     }
   }
   // The model may take a while: the write is timed when its answer is in, so a draft that finishes after midnight
@@ -130,9 +130,11 @@ export async function draft(ctx: Ctx, player: any, body: any, nowMs: number): Pr
   }
   const d = draftOf(book, req, after);
   if ("error" in d) return out({ error: d.error }, 400);
-  const refused = fixedRefusal(book, { ...req, ...d, settings });
-  if (refused) return out({ error: refused, rule: "110.1" }, 422);
+  const refused = notWiredRefusal(book, { ...req, ...d, settings });
+  if (refused) return out({ error: refused, drafting: "refused", reason: NOT_WIRED_REASON }, 422);
   const conflicts = [...new Set([...d.conflicts, ...modelConflicts])];
+  const unwired = notWiredConflictRefusal(book, conflicts);
+  if (unwired) return out({ error: unwired, drafting: "refused", reason: NOT_WIRED_REASON }, 422);
 
   const id = crypto.randomUUID(), now = nowIso(nowMs);
   const res = await env.DB.prepare(

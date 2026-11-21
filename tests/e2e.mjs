@@ -1,11 +1,11 @@
 // End-to-end checks against a real `wrangler dev` (Worker + static assets) with a LOCAL D1.
 // Run: npm test
-import { rmSync, existsSync, readFileSync } from "node:fs";
+import { rmSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
-import { ROOT, client, createGame, d1, finish, join as joinGame, migrate, newState, startPlaying, freePort, startRulesStub, startServer, COLORS } from "./lib.mjs";
+import { ROOT, client, createGame, d1, finish, join as joinGame, migrate, newState, startPlaying, freePort, startRulesStub, startServer, COLORS, PYTHON } from "./lib.mjs";
 
 let pass = 0, fail = 0;
 const J = JSON.stringify;
@@ -416,8 +416,11 @@ try {
   check("a bad repo, path or ref in the database is refused (502) before any fetch", shapeResults.every((x) => x === 502) && JSON.stringify(stub.calls) === callsBefore, shapeResults.join());
 
   console.log("browser");
-  const PY = "/usr/local/bin/python3";
-  if (existsSync(PY)) {
+  const PY = PYTHON;
+  // Without playwright this check is skipped on a dev machine; on GitHub Actions a skip would hide a broken install, so it fails.
+  const hasPlaywright = (() => { try { execFileSync(PY, ["-c", "import playwright"], { stdio: "ignore", timeout: 20000 }); return true; } catch { return false; } })();
+  if (process.env.GITHUB_ACTIONS) check("playwright python is installed on CI", hasPlaywright, PY);
+  if (hasPlaywright) {
     const board = async (slug, title, rules) => {
       try { return (await execFileAsync(PY, ["tests/browser-board.py", A, slug, title, rules], { cwd: ROOT, encoding: "utf8", timeout: 60000 })).stdout.trim(); }
       catch (e) { return String(e.stdout || "") + String(e.stderr || ""); }
@@ -441,7 +444,7 @@ try {
   check("the Referrer-Policy keeps browsers sending a real Origin", (await client(A).get("/")).headers.get("referrer-policy") === "same-origin");
   check("a real browser pressing Continue is let in (Origin as browsers send it)", /^OK Br/.test(out.trim()), out.trim().slice(0, 300));
   } else {
-    console.log("  SKIPPED  real-browser Continue check (no playwright python at " + PY + ")");
+    console.log("  SKIPPED  real-browser Continue check (no python with playwright: " + PY + ")");
   }
 
   console.log("email not configured");
