@@ -130,6 +130,14 @@ export const notWiredSentence = (parts) => `Not wired yet: ${parts.map((p) => `r
 // The same refusal when the change itself is elsewhere and only collides with the part: the player is told which part.
 /** @rule 103.6 */
 export const notWiredConflict = (parts) => `This would conflict with ${parts.map((p) => `rule ${p}`).join(", ")}, which ${parts.length > 1 ? "are" : "is"} not wired yet.`;
+// The refusal for a draft that would conflict with a part not wired yet, whichever way the conflict was found: the code's own
+// (a repeal or a move leaves a rule that cites the target pointing at nothing) or the model's. 103.6: "conflicts with one".
+// Returns the sentence, or null.
+/** @rule 103.6 */
+export function notWiredConflictRefusal(book, conflicts) {
+  const hit = [...new Set((conflicts || []).map(String))].filter((n) => notWiredWhole(book, n));
+  return hit.length ? notWiredConflict(hit) : null;
+}
 // Refuse at drafting. Adding a clause or a rule changes nothing already there, and a reword that keeps the text and only
 // sets a setting the part names is allowed (a setting is data the site already reads, so that change does take effect);
 // anything else that touches a not-wired part is refused. Returns the refusal sentence, or null.
@@ -182,7 +190,7 @@ const settingKeysIn = (text) => [...String(text).matchAll(/\[setting:\s*([\w.]+)
 /** @rule 108.3 */
 export const CANDIDATE_LIMIT = 8;
 // Returns [{num, why}], at most CANDIDATE_LIMIT, never the target, its clauses or its rule. `words` is the player's words.
-/** @rule 108.3 */
+/** @rule 103.6, 108.3 */
 export function conflictCandidates(book, target, words = "") {
   const node = book.byNum[target];
   if (!node || node.kind === "block") return [];
@@ -432,7 +440,7 @@ export function readModelAnswer(book, req, raw) {
 }
 
 // What the model is asked (rewording only). The rulebook goes in so it can name conflicts by number.
-/** @rule 103.1, 108.3 */
+/** @rule 103.1, 103.6, 108.3 */
 export function modelPrompt(book, rulesMd, req, opts = {}) {
   const node = book.byNum[req.target];
   const what = node.kind === "clause" ? `clause ${node.num} of rule ${node.rule.num} (${node.rule.title})` : `rule ${node.num} (${node.title})`;

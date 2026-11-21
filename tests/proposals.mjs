@@ -11,7 +11,7 @@ import { join as pjoin } from "node:path";
 import { ROOT, client, createGame, d1, join, migrate, newState, startPlaying, freePort, startRulesStub, startServer } from "./lib.mjs";
 import { dayOpenBinds } from "../src/lib/day-gate.js";
 import {
-  DRAFT_INSERT_SQL, WITHDRAW_SQL, answerSchema, citedIn, clauseText, conflictCandidates, draftOf, markFor, modelPrompt, needsModel, nextRuleNum, notWiredParts, notWiredRefusal, parseBook, readModelAnswer, readRequest, referencesTo, settingsText, textOf,
+  DRAFT_INSERT_SQL, WITHDRAW_SQL, answerSchema, citedIn, clauseText, conflictCandidates, draftOf, markFor, modelPrompt, needsModel, nextRuleNum, notWiredConflictRefusal, notWiredParts, notWiredRefusal, parseBook, readModelAnswer, readRequest, referencesTo, settingsText, textOf,
 } from "../src/lib/proposals.js";
 
 let pass = 0, fail = 0;
@@ -74,11 +74,13 @@ console.log("parts that are not wired yet (no untouchable rules), refused at dra
   const refuse = (body, after = null, settings = {}) => { const r = req(body); return notWiredRefusal(B, { ...r, ...draftOf(B, r, after), settings }); };
   const EIGHT = ["102.5", "103.2", "104.4", "104.5", "107.1", "107.6", "202.4", "203.1"], NINE = [...EIGHT, "103.6"].sort();
   check("the parts not wired yet are the eight things rule 110 used to fix (sign-in, the proposal limit, hidden votes, votes counted by code, the lock, the deadline, End turn, the day) and rule 103.6 that says so, each present in the starter rules", J(notWiredParts(B)) === J(NINE), J(notWiredParts(B)));
-  check("rule 103.6 states the restriction and lists exactly those parts, so the text and the code agree (a part leaves both together)", J([...new Set(citedIn(clauseText(B.byNum["103.6"])))].filter((n) => n !== "103.6").sort()) === J(EIGHT) && /refused when it is drafted, with the reason "not wired yet"/.test(clauseText(B.byNum["103.6"])) && /and this rule\./.test(clauseText(B.byNum["103.6"])), J(citedIn(clauseText(B.byNum["103.6"]))));
+  check("rule 103.6 states the restriction and lists exactly those parts, so the text and the code agree (a part leaves both together)", J([...new Set(citedIn(clauseText(B.byNum["103.6"])))].filter((n) => n !== "103.6").sort()) === J(EIGHT) && /refused when it is drafted, with the reason "not wired yet"/.test(clauseText(B.byNum["103.6"])) && /and this rule\./.test(clauseText(B.byNum["103.6"])) && clauseText(B.byNum["103.6"]).includes("Adding a clause or a rule, or changing only a setting, is not refused."), J(citedIn(clauseText(B.byNum["103.6"]))));
   check("each of them (103.6 too: it is not wired either) is refused when a reword of it is drafted, with the reason 'Not wired yet' naming it, and it is the same refusal word for word",
     NINE.every((t) => refuse({ kind: "amend", target: t, words: "x", prefilled: true }) === `Not wired yet: rule ${t}.`), J(NINE.map((t) => refuse({ kind: "amend", target: t, words: "x", prefilled: true }))));
   check("repealing each is refused too (a repeal is a change to it)", NINE.every((t) => refuse({ kind: "repeal", target: t.split(".")[0] }) !== null));
   check("repealing 107 (it holds the lock, 107.1, and the deadline, 107.6) is refused, naming both parts and no rule 110", refuse({ kind: "repeal", target: "107" }) === "Not wired yet: rule 107.1, rule 107.6." && !/110/.test(refuse({ kind: "repeal", target: "107" })));
+  check("a repeal or a move that would leave a not-wired part pointing at nothing is refused too (103.6, 'or conflicts with one'): 204 is cited by 107.1; 504 is cited by no listed part",
+    notWiredConflictRefusal(B, drafted({ kind: "repeal", target: "204" }).d.conflicts) === "This would conflict with rule 107.1, which is not wired yet." && notWiredConflictRefusal(B, drafted({ kind: "move", target: "204", to: "300" }).d.conflicts) !== null && notWiredConflictRefusal(B, drafted({ kind: "repeal", target: "504" }).d.conflicts) === null && notWiredConflictRefusal(B, []) === null);
   check("there is no rule 110 to propose on: it is not in the book, and a request naming it is an error, not a draft", !B.byNum["110"] && !B.byNum["110.1"] && /no rule 110/.test(req({ kind: "repeal", target: "110" }).error));
   check("and the number 110 is never handed to a new rule: block 100's next free number is 109, and after a 109 it is 111",
     nextRuleNum(B, "100") === "109" && nextRuleNum(parseBook(MD.replace("## 200. Players and turns [majority]", "### 109 Numbers and settings\nText.\n\n## 200. Players and turns [majority]")), "100") === "111");
@@ -448,6 +450,12 @@ try {
   model.next = null;
   check("a model answer that names a not-wired part as a conflict is refused the same way over the route: 422 with the reason, nothing stored",
     fx3.status === 422 && fx3.data.drafting === "refused" && fx3.data.reason === "not wired" && /rule 203\.1/.test(fx3.data.error) && rows().length === 4, fx3.text);
+  const fx4 = await ana.post(P, { kind: "repeal", target: "204" });
+  check("103.6 'or conflicts with one': a repeal of 204 (107.1, the lock, cites it) is refused over the route, naming 107.1, nothing stored", fx4.status === 422 && fx4.data.reason === "not wired" && fx4.data.error === "This would conflict with rule 107.1, which is not wired yet." && rows().length === 4, fx4.text);
+  model.next = { status: 200, text: '{"after_text": "x", "conflicts": ["203.1"], "settings": {}}' };
+  const fx5 = await ana.post(P, { kind: "reword", target: "401", words: "A player whose proposal passes gets 12 points.", prefilled: true });
+  model.next = null;
+  check("and so is an edit in place (the player's exact text) whose model-named conflicts include a not-wired part", fx5.status === 422 && fx5.data.reason === "not wired" && /rule 203\.1/.test(fx5.data.error) && rows().length === 4, fx5.text);
   const cf = await ana.post(P, { kind: "repeal", target: "504" });
   check("a repeal names the rules it would leave pointing at nothing (505 cites 504.2)", cf.status === 200 && cf.data.proposal.conflicts.includes("505") && /rule 505/.test(cf.data.proposal.conflict_note), cf.text);
 

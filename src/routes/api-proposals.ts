@@ -17,7 +17,7 @@ import { DrafterError, draftRewording, drafterReady } from "../lib/drafter";
 import { notify } from "../lib/notify";
 import { commissionsFor } from "../lib/ticket-view";
 import { COMMISSION_SNAPSHOT_SQL } from "../lib/tickets.js";
-import { CONFIRMED_TODAY_SQL, CONFIRM_SQL, DRAFT_INSERT_SQL, NOT_WIRED_REASON, WITHDRAW_SQL, conflictSentence, draftOf, markFor, needsModel, neededOf, notWiredRefusal, parseBook, proposalLimitMessage, readRequest } from "../lib/proposals.js";
+import { CONFIRMED_TODAY_SQL, CONFIRM_SQL, DRAFT_INSERT_SQL, NOT_WIRED_REASON, WITHDRAW_SQL, conflictSentence, draftOf, markFor, needsModel, neededOf, notWiredConflictRefusal, notWiredRefusal, parseBook, proposalLimitMessage, readRequest } from "../lib/proposals.js";
 import { refusalBody, turnBlock } from "../lib/turn";
 import { Ctx, colorOf, json, nowIso, readJson, sha256Hex, siteUrl, who } from "../lib/util";
 
@@ -133,6 +133,8 @@ export async function draft(ctx: Ctx, player: any, body: any, nowMs: number): Pr
   const refused = notWiredRefusal(book, { ...req, ...d, settings });
   if (refused) return out({ error: refused, drafting: "refused", reason: NOT_WIRED_REASON }, 422);
   const conflicts = [...new Set([...d.conflicts, ...modelConflicts])];
+  const unwired = notWiredConflictRefusal(book, conflicts);
+  if (unwired) return out({ error: unwired, drafting: "refused", reason: NOT_WIRED_REASON }, 422);
 
   const id = crypto.randomUUID(), now = nowIso(nowMs);
   const res = await env.DB.prepare(
