@@ -89,6 +89,21 @@ The site sets how long Chalant can build each night, the most nights one ticket 
 
 701 (catalog entries) then says a new entry comes in by commission (801).
 
+## The three moderators (rule text, draft; Buster asked 2026-11-20 for the rules to make clear that Starling moderates the rules and Gremlin the workshop)
+
+Each clause ships with the PR that builds what it describes (AGENTS.md rule 2): the Gremlin lines with step 2, the Starling lines with step 2b. Renumbering is free while the game is in setup.
+
+**106 The moderators**
+**106.1** The game has three moderators. Chalant runs the game: each night it applies the proposals that passed (107) and builds the workshop's commissions, and it rules on what the rules mean. In these rules, "the moderator" on its own means Chalant.
+**106.2** Starling moderates the rules by day. She drafts your proposals with you (103.1), names any rule they'd conflict with (108.3), and answers questions about the rules by quoting them.
+**106.3** Gremlin moderates the workshop by day. He drafts your commissions with you, sets their price, and answers each ticket's discussion (801).
+**106.4** Starling and Gremlin can't change a rule, rule on what one means, or change an approved commission. They pass anything they can't settle to Chalant.
+**106.5** (was 106.2, rulings) and **106.6** (was 106.3, the nightly re-read of the proposer's words), unchanged except "Chalant" where they say "the moderator", if clearer.
+
+**103.1** To propose, you talk the change through with Starling. When she has it worded as an exact change to this file, she asks you to lock it in. Locking it in confirms it; you can unlock it until it goes on the ballot (103.3). Drafting costs nothing: only a locked-in proposal counts toward the day's limit.
+
+**108.3** "When drafting, the moderator names..." becomes "When drafting, Starling names...". Block 800's commission clauses name Gremlin as the one who drafts and prices. Update every citation of 106.2 / 106.3 (e.g. the moderator's drafter audit cites 106.3).
+
 ## What's cut from the bigger design
 
 Two benches, giving points, the points-ordered queue, plaques and ribbon-cuttings, scaffolding art, the cross-game workshop page.
