@@ -13,6 +13,7 @@
 import { bundleFor } from "../engine/host";
 import { getPlayer } from "../lib/auth";
 import { clockNow, dayOpenBinds, loadToday, settingsOf } from "../lib/day";
+import { championId, changeUsed } from "../lib/eras";
 import { DrafterError, draftRewording, drafterReady } from "../lib/drafter";
 import { notify } from "../lib/notify";
 import { commissionsFor } from "../lib/ticket-view";
@@ -54,7 +55,7 @@ export const COUNTED = ["passed", "failed", "enacted", "not_applied", "approved"
 // What a proposal shows. A whitelist: the count's columns (yes, no, absent, why) are in it only once it is counted
 // (rule 104.4); before that, nothing about its votes. The votes it needs come from its ballot day's electorate once it
 // is on a ballot (stored when the day opened), else from `electorate` (today's players, for a draft's slip).
-/** @rule 103.1, 103.2, 104.4, 105.4 */
+/** @rule 103.1, 103.2, 104.4, 105.4, 402.4 */
 export function view(r: any, viewerId?: string | null, electorate?: number) {
   const mark = r.mark ?? r.draft_mark;
   const stored = Number.isInteger(r.needed) && Number.isInteger(r.electorate);
@@ -71,7 +72,10 @@ export function view(r: any, viewerId?: string | null, electorate?: number) {
     settings: JSON.parse(r.settings || "{}"),
     drafted_by: r.drafted_by,
     mark: mark ?? null,
-    needs: mark && stored ? { mark, needed: r.needed, of: r.electorate }
+    champion: !!r.champion,
+    // The Champion's change needs no votes to pass: `needed` is how many other players must ALL vote no to stop it (rule 402.4).
+    needs: r.champion ? (stored ? { mark, champion: true, needed: r.needed, of: r.electorate } : electorate ? { mark, champion: true, needed: Math.max(0, electorate - 1), of: electorate } : undefined)
+      : mark && stored ? { mark, needed: r.needed, of: r.electorate }
       : mark && electorate ? { mark, needed: neededOf(mark, electorate), of: electorate } : undefined,
     result: COUNTED.includes(r.status) ? {
       yes: r.yes, no: r.no, didnt_vote: r.absent, needed: r.needed, electorate: r.electorate,
@@ -85,14 +89,20 @@ export function view(r: any, viewerId?: string | null, electorate?: number) {
 }
 
 // Draft (rule 103.1). Returns the draft, or the refusal.
-/** @rule 103.1, 108.3, 110.1 */
+/** @rule 103.1, 108.3, 110.1, 402.4 */
 export async function draft(ctx: Ctx, player: any, body: any, nowMs: number): Promise<Out> {
   const { env } = ctx;
   const { game, day, turn } = await loadToday(env, ctx.data.game!, nowMs, player.id);
   const blocked = turnBlock(game, day, turn, player, "propose", nowMs);
   if (blocked) return out(refusalBody(blocked), blocked.status);
   const limit = limitOf(game), made = await confirmedToday(env, game.id, player.id, game.day);
-  if (made >= limit) return out({ error: proposalLimitMessage(made) }, 409);
+  // The Champion's change (rule 402.4) is on top of the day's proposals, so the day's limit does not stop its draft; being
+  // the Champion and not having made it this Era does. Drafted through the same checks as any proposal below.
+  const asChampion = body?.champion === true;
+  if (asChampion) {
+    if ((await championId(env, game.id)) !== player.id) return out({ error: "Only the Champion can make a Champion's change (rule 402.4)." }, 403);
+    if (await changeUsed(env, game.id, player.id)) return out({ error: "You've made your change this Era (rule 402.4)." }, 409);
+  } else if (made >= limit) return out({ error: proposalLimitMessage(made) }, 409);
 
   const { md, book, sha } = await bookFor(game);
   const req = readRequest(book, body);
@@ -135,13 +145,15 @@ export async function draft(ctx: Ctx, player: any, body: any, nowMs: number): Pr
   const conflicts = [...new Set([...d.conflicts, ...modelConflicts])];
 
   const id = crypto.randomUUID(), now = nowIso(nowMs);
-  const res = await env.DB.prepare(
-    DRAFT_INSERT_SQL,
-  ).bind(
-    id, player.id, req.kind, req.scope, req.target, d.new_num, req.to_block, req.words, req.title, d.head,
-    d.before_text, d.after_text, JSON.stringify(conflicts), JSON.stringify(settings), after === null ? "code" : "model", sha, now,
-    game.id, ...dayOpenBinds(game.day, nowMs, player.id),
-  ).run();
+  const [res] = await env.DB.batch([
+    env.DB.prepare(DRAFT_INSERT_SQL).bind(
+      id, player.id, req.kind, req.scope, req.target, d.new_num, req.to_block, req.words, req.title, d.head,
+      d.before_text, d.after_text, JSON.stringify(conflicts), JSON.stringify(settings), after === null ? "code" : "model", sha, now,
+      game.id, ...dayOpenBinds(game.day, nowMs, player.id),
+    ),
+    // The draft is flagged in the same batch, so it is never a plain proposal the player meant as the Champion's change.
+    env.DB.prepare("UPDATE proposals SET champion = 1 WHERE id = ? AND status = 'draft' AND ? = 1").bind(id, asChampion ? 1 : 0),
+  ]);
   if (!(res?.meta?.changes > 0)) return out({ error: "The day changed under you. Reload and try again." }, 409);
   const row = await env.DB.prepare("SELECT * FROM proposals WHERE id = ?").bind(id).first();
   return out({ ok: true, proposal: view({ ...row, draft_mark: markFor(book, row) }, player.id, await playerCount(env, game.id)) });
@@ -150,7 +162,7 @@ export async function draft(ctx: Ctx, player: any, body: any, nowMs: number): Pr
 // Confirm (rule 103.2): one of the day's proposals, up to proposals.per_day. The P-number is the game's next, taken in
 // the same statement that confirms; the same statement counts the player's confirmed proposals and refuses past the
 // limit, so two confirms arriving together cannot both pass it. The mark is fixed now (rule 105.4).
-/** @rule 103.2, 105.4 */
+/** @rule 103.2, 105.4, 402.4 */
 export async function confirm(ctx: Ctx, player: any, id: string, nowMs: number): Promise<Out> {
   const { env } = ctx;
   const { game, day, turn } = await loadToday(env, ctx.data.game!, nowMs, player.id);
@@ -177,7 +189,8 @@ export async function confirm(ctx: Ctx, player: any, id: string, nowMs: number):
   if (!(res[0]?.meta?.changes > 0)) {
     // Nothing was confirmed: the limit (another confirm of yours landed first) or the day itself moved.
     const made = await confirmedToday(env, game.id, player.id, game.day);
-    return out(made >= limit ? { error: proposalLimitMessage(made) } : { error: "The day changed under you. Reload and try again." }, 409);
+    if (row.champion && (await changeUsed(env, game.id, player.id))) return out({ error: "You've made your change this Era (rule 402.4)." }, 409);
+    return out(!row.champion && made >= limit ? { error: proposalLimitMessage(made) } : { error: "The day changed under you. Reload and try again." }, 409);
   }
   const done = await env.DB.prepare("SELECT * FROM proposals WHERE id = ?").bind(id).first();
   try {

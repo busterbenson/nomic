@@ -69,8 +69,9 @@ const settingsHTML = (p) => {
   const e = Object.entries(p.settings || {});
   return e.length ? `<p class="setline mono">${e.map(([k, v]) => `Sets <b>${esc(k)}</b> to <b>${esc(typeof v === "object" ? JSON.stringify(v) : String(v))}</b>`).join("<br>")}</p>` : "";
 };
-/** @rule 105.1 */
-const needText = (p) => (p.needs ? `${p.needs.mark} · needs ${p.needs.needed} of ${p.needs.of}` : p.mark || "");
+/** @rule 105.1, 402.4 */
+const needText = (p) => (p.needs && p.needs.champion ? (p.needs.needed ? `Champion's change · stopped only if all ${p.needs.needed} others vote no` : "Champion's change · no one else to vote no")
+  : p.needs ? `${p.needs.mark} · needs ${p.needs.needed} of ${p.needs.of}` : p.mark || "");
 
 export function createProposer({ api, me, day, refresh, pill, vote }) {
   const S = { list: [], today: null, ui: null, RB: null, redraw: () => {}, openAdd: () => {}, openPick: () => {}, closeAdd: () => {} };
@@ -89,7 +90,11 @@ export function createProposer({ api, me, day, refresh, pill, vote }) {
   /** @rule 103.1 */
   const active = () => !!(me() && me().player && day() && day().status === "playing" && day().you);
   /** @rule 103.2 */
-  const can = () => (active() && day().you.can && day().you.can.propose) || { allowed: false, reason: "" };
+  const base = () => (active() && day().you.can && day().you.can.propose) || { allowed: false, reason: "" };
+  /** Your Champion's change is still yours to make this Era (rule 402.4); the day's gates (the lock, End turn) still apply. @rule 402.4 */
+  const champAvail = () => !!(active() && day().you.champion && day().you.champion.change.allowed && day().you.can && day().you.can.end_turn && day().you.can.end_turn.allowed);
+  /** @rule 103.2, 402.4 */
+  const can = () => (base().allowed || !champAvail() ? base() : { allowed: true });
   /** @rule 103.3 */
   const canWithdraw = () => active() && !day().locked && !day().you.ended;
   /** @rule 103.2 */
@@ -119,7 +124,7 @@ export function createProposer({ api, me, day, refresh, pill, vote }) {
     const waiting = p.status === "confirmed";
     const w = waiting && p.mine && canWithdraw() ? `<button class="linkbtn" type="button" data-p="withdraw" data-id="${esc(p.id)}">Withdraw</button>` : "";
     const err = S.ui && S.ui.wErr && S.ui.wId === p.id ? `<p class="notice err" role="alert">${esc(S.ui.wErr)}</p>` : "";
-    return `<div class="chg${waiting ? " mine" : ""}" data-pn="${esc(p.n || "")}"><div class="ch">${pPill(p)}${playerPill(p)}<span class="pill ${waiting ? "drafting" : "bal"}">${waiting ? "On tomorrow's ballot" : "On today's ballot"}</span>${w}</div>
+    return `<div class="chg${waiting ? " mine" : ""}" data-pn="${esc(p.n || "")}"><div class="ch">${pPill(p)}${playerPill(p)}<span class="pill ${waiting ? "drafting" : "bal"}">${waiting ? "On tomorrow's ballot" : "On today's ballot"}</span>${p.champion ? `<span class="pill core">Champion's change</span>` : ""}${w}</div>
 ${p.kind === "commission" && p.ticket ? `<div class="sdiff">${wPill(p.ticket.n)}${commissionHTML(p.ticket)}</div>` : `<p class="mono head">${esc(p.head || "")}</p><p class="cdiff">${diffOf(p)}</p>`}${settingsHTML(p)}${p.conflict_note ? `<p class="cnote">${withPills(p.conflict_note)}</p>` : ""}<p class="needline mono">${esc(needText(p))}</p>${waiting ? "" : `<div class="slot" data-slot="ballot-vote" data-pn="${esc(p.n || "")}">${vote ? vote(p.n) : ""}</div>`}${err}</div>`;
   }
 
@@ -148,6 +153,7 @@ ${p.kind === "commission" && p.ticket ? `<div class="sdiff">${wPill(p.ticket.n)}
       const lead = (c) => { const w = clauseText(c).split(/\s+/); return w.slice(0, 5).join(" ") + (w.length > 5 ? "…" : ""); };
       return `<div class="pmenu" role="menu"><p class="pmhead">What do you want to change?</p><button type="button" role="menuitem" class="pmi" data-p="scope" data-s="whole"><span class="l"><b>The whole rule ${esc(rule.num)}</b><small>reword it, lock it, move it or repeal it</small></span><span aria-hidden="true" class="mnote">→</span></button>${rule.clauses.map((c) => `<button type="button" role="menuitem" class="pmi" data-p="scope" data-s="${esc(c.num)}"><span class="l"><b>${esc(c.num)}</b><small>${esc(lead(c))}</small></span><span aria-hidden="true" class="mnote">→</span></button>`).join("")}</div>`;
     }
+    const champ = champAvail() ? `<label class="pmchamp"><input type="checkbox" data-p="champion"${u.champion ? " checked" : ""}${base().allowed ? "" : " disabled"}> Champion's change</label>` : "";
     const back = rule.clauses.length ? `<button type="button" class="pmback" data-p="scope" data-s="">← Choose what to change</button>` : "";
     const cl = u.scope !== "whole" ? S.RB.byNum[u.scope] : null;
     const items = cl
@@ -155,7 +161,7 @@ ${p.kind === "commission" && p.ticket ? `<div class="sdiff">${wPill(p.ticket.n)}
       : [item("amend", "Reword it", "edit the text of " + rule.num), item("addclause", "Add a clause", nextClause(rule)),
         markOf(rule) === "unanimous" ? item("mark", "Remove the lock", "let a majority change it") : item("mark", "Lock it", "make it need everyone"),
         item("move", "Move it", "to another block"), item("repeal", "Repeal it", "struck, kept in history", "rep")];
-    return `<div class="pmenu" role="menu">${back}${items.join("")}</div>`;
+    return `<div class="pmenu" role="menu">${champ}${back}${items.join("")}</div>`;
   }
 
   /** @rule 103.1 */
@@ -248,7 +254,7 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
 
   // ---- the clicks -----------------------------------------------------------------------------------------------
   /** @rule 103.1 */
-  const mkUi = (o) => ({ day: day() && day().day, ...o });
+  const mkUi = (o) => ({ day: day() && day().day, champion: champAvail() && !base().allowed, ...o });
   function startAdd(block) {
     const u = S.ui;
     if (u && u.kind === "add" && u.rule === block && !u.busy) return;   // opened again: the words you were writing are still there
@@ -268,6 +274,7 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
     if (["amend", "addclause", "add"].includes(u.kind)) body.words = u.words;
     if (u.kind === "amend" && u.prefilled) body.prefilled = true;
     if (u.kind === "move") body.to = u.to;
+    if (u.champion) body.champion = true;
     const r = await api("/api/proposals", body);
     u.busy = false;
     if (r.ok && r.data && r.data.proposal) { u.draft = r.data.proposal; u.step = "slip"; }
@@ -305,6 +312,8 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
       const n = el.dataset.n, rule = S.RB.byNum[n];
       if (u && u.rule === n && (u.step === "scope" || u.step === "menu")) S.ui = null;
       else S.ui = mkUi({ rule: n, step: rule.clauses.length ? "scope" : "menu", scope: "whole" });
+    } else if (a === "champion") {
+      u.champion = !!el.checked;
     } else if (a === "scope") {
       u.scope = el.dataset.s || null; u.step = el.dataset.s ? "menu" : "scope";
     } else if (a === "kind") {

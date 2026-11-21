@@ -408,6 +408,11 @@ button.me[aria-expanded="true"]{border-color:var(--ink)}
 .log{list-style:none;margin:0;padding:0}
 .log li{padding:8px 0;border-top:1px solid var(--line);font-size:.88rem;color:var(--ink-muted)}
 .log li b{color:var(--ink);font-weight:700;font-family:var(--font-mono);font-size:.7rem}
+.sw.era{grid-column:1/-1;padding:8px 16px;gap:8px}
+.sw.era .swh h2{font-size:1.4rem;margin:0}
+.eraform{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.eraform input{flex:1 1 14rem;min-width:0;min-height:36px;padding:4px 10px;border:1.5px solid var(--ink);border-radius:10px;background:var(--surface);color:var(--ink);font:inherit}
+.pmchamp{display:flex;align-items:center;gap:8px;min-height:44px;padding:6px 16px;border-bottom:1px solid var(--line);font-weight:700}
 .sw.day{grid-column:1/-1;display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"h s e";align-items:center;gap:8px 18px;padding:8px 16px}
 .sw.day[hidden]{display:none}
 .dhead{grid-area:h;display:flex;align-items:baseline;gap:10px;min-width:0;flex-wrap:wrap}

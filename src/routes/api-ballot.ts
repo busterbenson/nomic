@@ -9,9 +9,10 @@ import { clockNow, electorsOf, isLocked, loadToday } from "../lib/day";
 import { refusalBody, turnBlock } from "../lib/turn";
 import { commissionsFor } from "../lib/ticket-view";
 import { Ctx, colorOf, json } from "../lib/util";
+import { CHAMPION_NO_VOTE } from "../lib/votes.js";
 import { COUNTED, view } from "./api-proposals";
 
-/** @rule 104.1, 104.2, 104.3, 104.4 */
+/** @rule 104.1, 104.2, 104.3, 104.4, 402.4 */
 export const get = async (ctx: Ctx) => {
   const { env, request } = ctx;
   const nowMs = await clockNow(env);
@@ -46,17 +47,22 @@ export const get = async (ctx: Ctx) => {
     const voters = ordered.filter((id) => mine.some((v) => v.player_id === id));
     const counted = COUNTED.includes(r.status);
     const open = r.status === "on_ballot" && isToday;
+    // The Champion's change (rule 402.4): the Champion does not vote on it, and "of" counts the other players.
+    const own = !!r.champion && !!player && r.player_id === player.id;
+    const rollIds = r.champion ? ordered.filter((id) => id !== r.player_id) : ordered;
     return {
       ...view(r, player?.id, electors.length || dayRow?.electorate || undefined),
       ticket: tickets.get(r.id),
-      threshold_rule: "104.1",
-      turnout: { voted: voters.length, of: electors.length, players: voters.map(pill) },
+      threshold_rule: r.champion ? "402.4" : "104.1",
+      own_champion: own,
+      turnout: { voted: voters.length, of: rollIds.length, players: voters.map(pill) },
       your_vote: player ? (mine.find((v) => v.player_id === player.id)?.vote ?? null) : null,
-      can_vote: open ? canVote : { allowed: false, reason: counted ? "The votes are counted." : canVote.reason },
-      roll_call: counted ? ordered.map((id) => ({ ...pill(id), vote: mine.find((v) => v.player_id === id)?.vote ?? null })) : undefined,
+      can_vote: open ? (own ? { allowed: false, reason: CHAMPION_NO_VOTE } : canVote) : { allowed: false, reason: counted ? "The votes are counted." : canVote.reason },
+      roll_call: counted ? rollIds.map((id) => ({ ...pill(id), vote: mine.find((v) => v.player_id === id)?.vote ?? null })) : undefined,
     };
   });
   const yours = player ? items.filter((i) => i.your_vote).length : 0;
+  const mineToVote = player ? items.filter((i) => !i.own_champion).length : 0;
   return json({
     day: n,
     today: game.day,
@@ -65,6 +71,6 @@ export const get = async (ctx: Ctx) => {
     locked: isToday && !!day && game.status === "playing" && isLocked(game, day, nowMs),
     electorate: electors.length || dayRow?.electorate || 0,
     items,
-    you: player ? { elector, voted: yours, of: items.length, can_vote: canVote } : null,
+    you: player ? { elector, voted: yours, of: mineToVote, can_vote: canVote } : null,
   });
 };

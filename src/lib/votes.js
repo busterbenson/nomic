@@ -11,10 +11,20 @@ export const VOTES = ["yes", "no"];
 // electorate who did not vote counts as no (rule 104.1). It passes when the yes votes reach what it needs: its mark,
 // fixed at confirm (rule 105.4), of the electorate fixed at the start of the day (rule 104.2). A vote from outside the
 // electorate is not counted (the database refuses one anyway).
-/** @rule 104.1, 104.2, 104.5 */
-export function tally({ mark, electorate, electors, votes, needed }) {
+//
+// The Champion's change (rule 402.4) is counted the other way round: it passes unless EVERY other player votes no. Not voting
+// is not against it, and the Champion's own vote (the database holds none) is not counted. With no other player it passes.
+// `needed` is then the number of no votes that stop it: the other players.
+/** @rule 104.1, 104.2, 104.5, 402.4 */
+export function tally({ mark, electorate, electors, votes, needed, champion = false, proposer = null }) {
   const inside = new Set(electors ?? []);
-  const counted = (votes ?? []).filter((v) => !electors || inside.has(v.player_id));
+  const counted = (votes ?? []).filter((v) => (!electors || inside.has(v.player_id)) && !(champion && v.player_id === proposer));
+  if (champion) {
+    const others = electors ? electors.filter((id) => id !== proposer).length : Math.max(0, Number.isInteger(needed) ? needed : electorate - 1);
+    const yes = counted.filter((v) => v.vote === "yes").length;
+    const no = counted.filter((v) => v.vote === "no").length;
+    return { yes, no, absent: Math.max(0, others - yes - no), needed: others, electorate, passed: no < others || others === 0, champion: true };
+  }
   const yes = counted.filter((v) => v.vote === "yes").length;
   const no = counted.filter((v) => v.vote === "no").length;
   const need = Number.isInteger(needed) ? needed : neededOf(mark, electorate);
@@ -24,7 +34,14 @@ export function tally({ mark, electorate, electors, votes, needed }) {
 
 // "3 of 5 voted yes; it needed 3." Written on every counted proposal.
 /** @rule 104.1 */
-export const resultSentence = (t) => `${t.yes} of ${t.electorate} voted yes; it needed ${t.needed}.`;
+// The Champion's change (rule 402.4) says how many of the other players voted no.
+/** @rule 104.1, 402.4 */
+export const resultSentence = (t) => (t.champion
+  ? t.needed ? `${t.no} of ${t.needed} other players voted no; it fails only if all ${t.needed} do.` : "There are no other players, so it takes effect."
+  : `${t.yes} of ${t.electorate} voted yes; it needed ${t.needed}.`);
+
+/** The sentence a Champion's own vote on it is refused with. @rule 402.4 */
+export const CHAMPION_NO_VOTE = "The Champion doesn't vote on their own change (rule 402.4).";
 
 // Rule 107.6: what a passed proposal still unapplied at the deadline is told, and the suggestion that goes with it
 // (rule 107.7).

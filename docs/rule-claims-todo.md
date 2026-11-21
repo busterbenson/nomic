@@ -7,15 +7,15 @@ Every function that carries out the game should say which rule it implements, wi
 `src/` is only reported for now: these functions have no claim yet. Site plumbing such as sign-in and email goes
 under rule 101 or 102; a follow-up change claims them and moves `src/` into the strict set.
 
-138 of 289 functions outside `src/engine/` are unclaimed.
+138 of 294 functions outside `src/engine/` are unclaimed.
 
 ## src/index.ts (5)
 
-- line 58: `secure`
-- line 68: `notFound`
-- line 74: `run`
-- line 79: `route`
-- line 176: `fetch`
+- line 59: `secure`
+- line 69: `notFound`
+- line 75: `run`
+- line 80: `route`
+- line 177: `fetch`
 
 ## src/lib/auth.ts (6)
 
@@ -66,9 +66,9 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/lib/mcp-tools.ts (3)
 
-- line 46: `reply`
-- line 47: `asJson`
-- line 49: `registerTools`
+- line 47: `reply`
+- line 48: `asJson`
+- line 50: `registerTools`
 
 ## src/lib/notify.ts (1)
 
@@ -157,11 +157,11 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/routes/api-ballot.ts (1)
 
-- line 32: `pill`
+- line 33: `pill`
 
 ## src/routes/api-day.ts (1)
 
-- line 39: `can`
+- line 41: `can`
 
 ## src/routes/api-login.ts (1)
 
@@ -189,7 +189,7 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/routes/api-proposals.ts (1)
 
-- line 25: `out`
+- line 26: `out`
 
 ## src/routes/api-rules.ts (2)
 

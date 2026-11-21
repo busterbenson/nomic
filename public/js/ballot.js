@@ -28,9 +28,9 @@ export function createBallot({ api, pill, refreshed, player = () => true }) {
   /** @rule 104.3 */
   const voted = () => (BAL && BAL.you ? Number(BAL.you.voted) || 0 : 0);
   /** @rule 104.3 */
-  const total = () => items().length;
+  const total = () => items().filter((i) => !i.own_champion).length;   // the Champion does not vote on their own change (rule 402.4)
   /** @rule 104.3 */
-  const firstOpen = () => { const l = items(); const f = l.find((i) => !i.your_vote) || l[0]; return f ? f.n : null; };
+  const firstOpen = () => { const l = items(); const f = l.find((i) => !i.your_vote && !i.own_champion) || l[0]; return f ? f.n : null; };
 
   /** @rule 104.3, 104.4 */
   function box(n) {

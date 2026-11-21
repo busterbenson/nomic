@@ -99,7 +99,7 @@ export async function loadToday(env: Env, gameIn: any, nowMs: number, playerId?:
 }
 
 // Game start: a playing game with no day gets day 1, from now to the next midnight. Guarded, so it happens once.
-/** @rule 203.1 */
+/** @rule 203.1, 402.1 */
 export async function startDayOne(env: Env, game: any, nowMs: number) {
   const tz = timeZoneOf(game);
   const starts = nowIso(nowMs), ends = nowIso(nextMidnight(tz, nowMs));
@@ -111,6 +111,8 @@ export async function startDayOne(env: Env, game: any, nowMs: number) {
     ).bind(starts, ends, game.id),
     electorsSql(env, game.id, 1),
     env.DB.prepare("UPDATE games SET day = 1, phase = 'open' WHERE id = ? AND status = 'playing' AND day = 0 AND EXISTS (SELECT 1 FROM days WHERE game_id = ? AND n = 1)").bind(game.id, game.id),
+    // The first Era starts on day 1 (rule 402.1).
+    env.DB.prepare("INSERT OR IGNORE INTO eras (game_id, n, started_day) SELECT ?, 1, 1 WHERE EXISTS (SELECT 1 FROM games WHERE id = ? AND day = 1)").bind(game.id, game.id),
     env.DB.prepare(
       `INSERT INTO events (game_id, kind, text, created_at, day, phase, template, args)
        SELECT ?, 'day_started', 'Day 1 has begun.', ?, 1, 'day', 'dayStarted', '{"day":1}'
@@ -159,15 +161,15 @@ export type NightStep = { name: string; run(env: Env, game: any, day: DayRow, no
 // lock was set (in its own batch) before this runs, and every vote's write checks it. Each item's write is guarded by
 // status = 'on_ballot', so a second run counts nothing twice. If any passed, the day goes to processing with the
 // 2 am deadline (rule 107.6); otherwise the night goes straight on to finalize.
-/** @rule 104.1, 104.2, 104.5, 107.6, 801.4, 803.1 */
+/** @rule 104.1, 104.2, 104.5, 107.6, 402.4, 801.4, 803.1 */
 export async function countBallot(env: Env, game: any, day: DayRow, nowMs: number): Promise<StepResult> {
   if (day.status !== "locked") return "done"; // counted on an earlier run
-  const items = (await env.DB.prepare("SELECT id, number, mark, needed, kind FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'on_ballot' ORDER BY number").bind(game.id, day.n).all()).results as any[];
+  const items = (await env.DB.prepare("SELECT id, number, mark, needed, kind, champion, player_id FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'on_ballot' ORDER BY number").bind(game.id, day.n).all()).results as any[];
   const electors = await electorsOf(env, game.id, day.n);
   const votes = items.length ? ((await env.DB.prepare("SELECT proposal_id, player_id, vote FROM votes WHERE game_id = ? AND day = ?").bind(game.id, day.n).all()).results as any[]) : [];
   const now = nowIso(nowMs);
   const writes = items.map((q) => {
-    const t = tally({ mark: q.mark, electorate: electors.length, electors, votes: votes.filter((v) => v.proposal_id === q.id), needed: q.needed });
+    const t = tally({ mark: q.mark, electorate: electors.length, electors, votes: votes.filter((v) => v.proposal_id === q.id), needed: q.needed, champion: !!q.champion, proposer: q.player_id });
     return { q, t };
   });
   const deadline = nowIso(deadlineAfter(timeZoneOf(game), Date.parse(day.ends_at)));
@@ -329,7 +331,7 @@ export async function processDay(env: Env, game: any, day: DayRow, nowMs: number
 // midnight after that, or after now when the night ran past a whole day, so a day never ends before it starts. Its
 // electorate is the players now (rule 104.2), and the proposals confirmed on day N are its ballot (rule 103.2), each with
 // the votes it needs of that electorate, from the mark fixed when it was confirmed (rule 105.4).
-/** @rule 103.2, 104.2, 105.4, 107.1, 203.1 */
+/** @rule 103.2, 104.2, 105.4, 107.1, 203.1, 402.4 */
 export async function finalizeDay(env: Env, game: any, day: DayRow, nowMs: number, end: "done" | "timed_out" = "done") {
   const tz = timeZoneOf(game);
   const ended = Date.parse(day.ends_at);
@@ -348,11 +350,13 @@ export async function finalizeDay(env: Env, game: any, day: DayRow, nowMs: numbe
     ).bind(game.id, next, day.ends_at, ends, game.id, game.id, day.n),
     electorsSql(env, game.id, next),
     // The day's confirmed proposals go on the next day's ballot (rule 103.2); withdrawing ends with the day (rule 103.3).
-    // needed: the same numbers as neededOf in src/lib/proposals.js (unanimous: all; majority: more than half).
+    // needed: the same numbers as neededOf in src/lib/proposals.js (unanimous: all; majority: more than half); for the
+    // Champion's change (rule 402.4) the other players, all of whom must vote no to stop it.
     env.DB.prepare(
       `UPDATE proposals SET status = 'on_ballot',
          electorate = (SELECT d.electorate FROM days d WHERE d.game_id = proposals.game_id AND d.n = ?),
-         needed = (SELECT CASE WHEN proposals.mark = 'unanimous' THEN d.electorate ELSE d.electorate / 2 + 1 END FROM days d WHERE d.game_id = proposals.game_id AND d.n = ?)
+         needed = (SELECT CASE WHEN proposals.champion = 1 THEN d.electorate - (SELECT COUNT(*) FROM electors e WHERE e.game_id = proposals.game_id AND e.day = d.n AND e.player_id = proposals.player_id)
+                                WHEN proposals.mark = 'unanimous' THEN d.electorate ELSE d.electorate / 2 + 1 END FROM days d WHERE d.game_id = proposals.game_id AND d.n = ?)
        WHERE game_id = ? AND day_proposed = ? AND status = 'confirmed'
          AND EXISTS (SELECT 1 FROM days WHERE game_id = ? AND n = ? AND ${DONE})
          AND EXISTS (SELECT 1 FROM days WHERE game_id = ? AND n = ?)`,

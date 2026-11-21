@@ -11,6 +11,8 @@
 //
 // ENGINE CHANGES ARE ADDITIVE ONLY: a new hook or a new optional ctx field reaches every game in a separate
 // platform change. Nothing here may change what an existing module sees.
+// (The one exception, rule 402: the `win` effect became `champion` when Eras replaced the game-over win. Only the starter
+// pack and Rickshaw Game 1, then in setup, used it; the later only-one-alive win brings its own effect back.)
 import { validCoord } from "../lib/geometry.js";
 
 // HOW SEVERAL RULES SHARE A HOOK. A rule never edits another rule's code. Each rule module registers its own handler
@@ -143,19 +145,19 @@ export function makeContext(o) {
 //   chart  {type:"chart", tiles:[{x,y,z}]}            chart blank tiles (a no-op for charted ones)
 //   points {type:"points", player, delta, reason}      (applied once points arrive)
 //   log    {type:"log", template, args}                (applied once the day log arrives)
-//   win    {type:"win", player, reason}                (applied once winning arrives)
+//   champion {type:"champion", player, reason}         (dayEnd only: this player wins the Era, rule 402)
 /** @rule 101 */
 const isInt = (n) => Number.isSafeInteger(n);
 /** @rule 101 */
 const isStr = (s, max = 400) => typeof s === "string" && s.length > 0 && s.length <= max;
-export const EFFECT_TYPES = Object.freeze(["chart", "points", "log", "win"]);
+export const EFFECT_TYPES = Object.freeze(["chart", "points", "log", "champion"]);
 export const APPLIED_EFFECTS = Object.freeze(["chart"]);
 // What the night's hooks may return, and the engine applies at the unlock (src/lib/day.ts): points when a change takes
-// effect (rule 401) and a win at the end of the night (rule 402).
-export const NIGHT_EFFECTS = Object.freeze(["points", "win"]);
-// What each night hook's enactment applies (src/engine/host.ts): points from onEnacted, a win from dayEnd. Any other
+// effect (rule 401) and the Era won at the end of the night (rule 402).
+export const NIGHT_EFFECTS = Object.freeze(["points", "champion"]);
+// What each night hook's enactment applies (src/engine/host.ts): points from onEnacted, the Era's winner from dayEnd. Any other
 // effect is refused, never dropped, so a rule can't pass its tests with an effect that would silently do nothing.
-export const NIGHT_HOOK_EFFECTS = Object.freeze({ onEnacted: Object.freeze(["points"]), dayEnd: Object.freeze(["win"]) });
+export const NIGHT_HOOK_EFFECTS = Object.freeze({ onEnacted: Object.freeze(["points"]), dayEnd: Object.freeze(["champion"]) });
 
 /** @rule 101 */
 export function validateEffect(e) {
@@ -169,8 +171,8 @@ export function validateEffect(e) {
       return isStr(e.player, 100) && isInt(e.delta) && isStr(e.reason) ? null : "points needs player, whole delta and reason";
     case "log":
       return isStr(e.template, 100) && e.args && typeof e.args === "object" && !Array.isArray(e.args) ? null : "log needs template and args";
-    case "win":
-      return isStr(e.player, 100) && isStr(e.reason) ? null : "win needs player and reason";
+    case "champion":
+      return isStr(e.player, 100) && isStr(e.reason) ? null : "champion needs player and reason";
     default:
       return `unknown effect type ${JSON.stringify(e.type)}`;
   }
@@ -190,7 +192,7 @@ export const effects = Object.freeze({
   /** @rule 101 */
   log: (template, args = {}) => ({ type: "log", template, args }),
   /** @rule 402 */
-  win: (player, reason) => ({ type: "win", player, reason }),
+  champion: (player, reason) => ({ type: "champion", player, reason }),
 });
 /** @rule 101 */
 export const refuse = (error, status = 400) => ({ error, status });
@@ -300,12 +302,13 @@ export function assembleRules(modules, { label = "rules" } = {}) {
       }
       return r.map((p) => passed.find((q) => q.number === p.number));
     },
-    // Effects when a passed proposal takes effect (rule 401), every rule's, joined in rule order. Only points and win.
+    // Effects when a passed proposal takes effect (rule 401), every rule's, joined in rule order. Only points.
     /** @rule 401 */
     onEnacted(ctx, proposal) {
       return nightEffects("onEnacted", [ctx, deepFreeze({ ...proposal })]);
     },
-    // Effects at the end of the night, after every onEnacted (rule 402): `results` is {enacted: [...], scores: {ref: n}}.
+    // Effects at the end of the night, after every onEnacted (rule 402): `results` is {before: {ref: n}, given: [{player, delta}], enacted: [...]}.
+    // Only champion: the player who wins the Era.
     /** @rule 402 */
     dayEnd(ctx, results) {
       return nightEffects("dayEnd", [ctx, deepFreeze(JSON.parse(JSON.stringify(results)))]);

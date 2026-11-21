@@ -32,7 +32,7 @@ export type Effect =
   | { type: "chart"; tiles: Tile[] }
   | { type: "points"; player: string; delta: number; reason: string }
   | { type: "log"; template: string; args: Record<string, unknown> }
-  | { type: "win"; player: string; reason: string };
+  | { type: "champion"; player: string; reason: string };
 
 export type Hooks = {
   /** Called before a turn action, after the engine's own gates. Rule order; the first refusal wins. An action
@@ -58,7 +58,8 @@ export const effects: {
   chart(tiles: Array<{ x: number; y: number; z?: number }>): Effect;
   points(player: string, delta: number, reason: string): Effect;
   log(template: string, args?: Record<string, unknown>): Effect;
-  win(player: string, reason: string): Effect;
+  /** dayEnd only: this player wins the Era (rule 402): the Era ends, points reset, they are the Champion. */
+  champion(player: string, reason: string): Effect;
 };
 export const HOOKS: Readonly<Record<string, { mode: "veto" | "sequence" | "decide"; wired: boolean }>>;
 export const ACTION_KINDS: readonly string[];

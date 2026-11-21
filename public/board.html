@@ -275,8 +275,8 @@ import { createWorkshop } from "/js/workshop.js";
     const r = n => PROP.rpill(String(n));
     const k = p.kind, t = String(p.target);
     const what = k === "commission" ? `a commission ${p.ticket ? wPill(p.ticket.n) : ""}` : k === "amend" ? `a change to ${t.includes(".") ? "clause" : "rule"} ${r(t)}` : k === "addclause" ? `a new clause for rule ${r(t.split(".")[0])}` : k === "add" ? `a new rule${p.new_num ? " " + r(p.new_num) : ""}` : k === "repeal" ? `to repeal ${t.includes(".") ? "clause" : "rule"} ${r(t)}` : k === "move" ? `to move rule ${r(t)}` : k === "mark" ? `a change to how ${BOOK && BOOK.rulebook.byNum[t] && BOOK.rulebook.byNum[t].kind === "block" ? "block" : "rule"} ${r(t)} is changed` : "a change";
-    const need = p.needs ? (p.needs.mark === "unanimous" ? `It needs all ${p.needs.of} votes to pass.` : `It needs ${p.needs.needed} of ${p.needs.of} votes to pass.`) : "";
-    return `proposed ${what}. ${need}`;
+    const need = p.needs && p.needs.champion ? (p.needs.needed ? `Stopped only if all ${p.needs.needed} others vote no.` : "") : p.needs ? (p.needs.mark === "unanimous" ? `It needs all ${p.needs.of} votes to pass.` : `It needs ${p.needs.needed} of ${p.needs.of} votes to pass.`) : "";
+    return `${p.champion ? "made the Champion's change: " : "proposed "}${what}. ${need}`;
   }
   const ballotList = () => (PROP ? PROP.onBallot() : []);
   const votedCount = () => (DAY && DAY.you ? Number(DAY.you.voted) || 0 : 0);   // how many of today's ballot items you have voted on (/api/day); the Yes / No boxes go in the ballot-vote slots
@@ -296,13 +296,20 @@ import { createWorkshop } from "/js/workshop.js";
       <div class="ptiles"><button type="button" class="ptile" data-tab="rules"${off}><span class="pt2">Rulebook</span><span class="pm2">${BOOK && BOOK.count() ? plural(BOOK.count(), "rule") : ""}</span><span class="pa2">+ Change or add a rule</span></button>
       <button type="button" class="ptile" data-tab="workshop"${off}><span class="pt2">Workshop</span><span class="pm2">${WS && WS.count() ? plural(WS.count(), "ticket") : ""}</span><span class="pa2">+ Commission something</span></button></div>${active && !c.allowed ? `<p class="mnote">${esc(c.reason)}</p>` : ""}</section>`;
   }
+  // The Era (rule 402): its number and name, the Champion, and the Champion's one write besides a proposal: naming the Era (402.3).
+  function eraHTML() {
+    const e = DATA && DATA.era;
+    if (!e) return "";
+    const form = e.you && e.you.can_name ? `<form class="eraform" data-eraform><input type="text" id="era-name" maxlength="60" autocomplete="off" aria-label="Name for Era ${esc(e.n)}"><button type="submit" class="btn small">Name the Era</button><span id="era-msg" class="notice err" role="alert" hidden></span></form>` : "";
+    return `<section class="sw era" id="sera" aria-label="Era"><div class="swh"><h2>Era ${esc(e.n)}${e.name ? ` · ${esc(e.name)}` : ""}</h2>${e.champion ? `<span class="m">Champion</span>${pill(e.champion, false)}` : ""}</div>${form}</section>`;
+  }
   function summaryHTML() {
     const bl = ballotList();
     const ballot = `<section class="sw" id="sballot" aria-label="Today's ballot"><div class="swh"><h2>Today's ballot</h2><span class="m" data-slot="ballot-count">${!bl.length ? "" : BAL && BAL.hasYou() ? `${BAL.voted()} of ${BAL.total()} voted` : plural(bl.length, "proposal")}</span></div>
       ${bl.length ? `<ul class="sl">${bl.map(p => `<li id="sb-${esc(p.n)}"><p class="sbs">${PROP.pPill(p)} ${pill(p.by, p.mine)} ${sentence(p)}</p>
         <div class="sdiff">${p.kind === "commission" && p.ticket ? commissionHTML(p.ticket) : `${p.title ? `<p class="sdh">${esc(p.title)}</p>` : ""}<p class="mono head">${esc(p.head || "")}</p><p>${diffOf(p)}</p>`}</div><div class="vrow slot" data-slot="ballot-vote" data-pn="${esc(p.n)}">${BAL ? BAL.box(p.n) : ""}</div></li>`).join("")}</ul>` : `<p class="mnote">Nothing is on today's ballot.</p>`}</section>`;
     const cat = WS ? WS.summaryHTML() : "";
-    return `<div class="sgrid"><section class="sw day" id="sday" aria-label="Today"></section>
+    return `<div class="sgrid">${eraHTML()}<section class="sw day" id="sday" aria-label="Today"></section>
       <div class="slot recapw" data-slot="recap"></div>
       <div class="scol">${ballot}${cat}</div>
       <div class="scol">${proposeCard()}<div class="slot" data-slot="recent-days"></div><button type="button" class="linkbtn" data-tab="history">Full history →</button></div></div>`;
@@ -601,6 +608,18 @@ import { createWorkshop } from "/js/workshop.js";
     const m = $("day-msg"); if (m) { m.className = "notice err"; m.textContent = text; }
   });
 
+  document.addEventListener("submit", async e => {
+    const f = e.target.closest && e.target.closest("[data-eraform]");
+    if (!f) return;
+    e.preventDefault();
+    const btn = f.querySelector("button"), inp = $("era-name"), msg = $("era-msg");
+    if (btn.disabled) return;
+    btn.disabled = true;
+    const r = await api("/api/era", { name: inp.value });
+    if (r.ok) { await refresh(); return; }
+    btn.disabled = false;
+    msg.hidden = false; msg.textContent = (r.data && r.data.error) || "Something went wrong.";
+  });
   document.addEventListener("input", e => { if (WS) WS.input(e.target); });
   initBoard();
   load();

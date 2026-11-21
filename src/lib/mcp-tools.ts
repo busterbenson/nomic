@@ -22,6 +22,7 @@ import * as apiTurn from "../routes/api-turn";
 import * as apiVotes from "../routes/api-votes";
 import * as apiBallot from "../routes/api-ballot";
 import * as apiTickets from "../routes/api-tickets";
+import * as apiEra from "./eras";
 
 type Handler = (ctx: Ctx) => Promise<Response>;
 type Result = { status: number; text: string; data: any };
@@ -95,6 +96,7 @@ export function registerTools(server: McpServer, ctx: Ctx, player: Player) {
     words: z.string().optional().describe("The change in plain words (reword, addclause, add), up to 2000 characters. With prefilled: true, the exact new text instead"),
     to: z.string().optional().describe("For move: the block the rule goes to, like \"300\""),
     title: z.string().optional().describe("For add: a short title for the new rule"),
+    champion: z.boolean().optional().describe("true to make this your Champion's change (rule 402.4): only the Champion, once an Era, on top of the day's proposals, no vote of yours; it takes effect unless every other player votes against it"),
     prefilled: z.boolean().optional().describe("For reword: true when `words` is the exact new wording (the rule's current text, edited), so the moderator uses it as written instead of interpreting it"),
   };
   const write = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
@@ -114,10 +116,20 @@ export function registerTools(server: McpServer, ctx: Ctx, player: Player) {
       p.after_text ? `After: ${p.after_text}` : null,
       settingsText(p.settings) ? `Sets: ${settingsText(p.settings)}` : null,
       p.conflict_note ? `Conflicts: ${p.conflict_note}` : null,
-      p.needs ? `Needs: ${p.needs.mark}, ${p.needs.needed} of ${p.needs.of} votes` : null,
+      p.needs ? (p.needs.champion ? `Champion's change: stopped only if all ${p.needs.needed} other players vote no` : `Needs: ${p.needs.mark}, ${p.needs.needed} of ${p.needs.of} votes`) : null,
       "This is only a draft. Confirm it with confirm_proposal to make it one of your proposals today (it goes on tomorrow's ballot). my_state shows how many you have made of the day's limit.",
     ].filter(Boolean).join("\n");
     return reply(r, text);
+  });
+
+  // The Champion names the Era they won the right to name (rule 402.3), once.
+  server.registerTool("name_era", {
+    description: "Name the current Era (rule 402.3). Only the Champion can, once per Era, up to 60 characters. Not during the midnight lock or after you end your turn.",
+    inputSchema: { name: z.string().describe("The Era's name") },
+    annotations: write,
+  }, async ({ name }) => {
+    const r = await viaRoute(ctx, player, apiEra.post, "POST", "era", { name });
+    return reply(r, r.data?.ok ? `Era ${r.data.era.n} is named ${r.data.era.name}.` : r.text);
   });
 
   server.registerTool("confirm_proposal", {

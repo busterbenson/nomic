@@ -492,14 +492,19 @@ export const DRAFT_INSERT_SQL = `INSERT INTO proposals (id, game_id, player_id, 
 // The same statement counts the player's confirmed proposals of the day (drafts and withdrawn ones don't count) and
 // confirms only while that count is under the limit, so two confirms arriving together cannot both pass it: D1 runs one
 // statement at a time. Binds: mark, confirmed_at, id, day, then dayOpenBinds, then the limit (proposals.per_day).
+// The Champion's change (rule 402.4) is on top of the day's proposals: it is not counted toward the limit and is not held to
+// it, but only one is confirmed an Era (the same statement checks that, from the Era's first day).
 export const CONFIRM_SQL = `UPDATE proposals SET status = 'confirmed', mark = ?, day_ballot = day_proposed + 1, confirmed_at = ?,
     number = (SELECT COALESCE(MAX(q.number), 0) + 1 FROM proposals q WHERE q.game_id = proposals.game_id)
   WHERE id = ? AND status = 'draft' AND day_proposed = ?
     AND EXISTS (SELECT 1 FROM games g WHERE g.id = proposals.game_id AND ${dayOpenSql})
-    AND (SELECT COUNT(*) FROM proposals c WHERE c.game_id = proposals.game_id AND c.player_id = proposals.player_id
-           AND c.day_proposed = proposals.day_proposed AND c.status NOT IN ('draft', 'withdrawn')) < ?`;
+    AND (proposals.champion = 1 OR (SELECT COUNT(*) FROM proposals c WHERE c.game_id = proposals.game_id AND c.player_id = proposals.player_id
+           AND c.day_proposed = proposals.day_proposed AND c.champion = 0 AND c.status NOT IN ('draft', 'withdrawn')) < ?)
+    AND (proposals.champion = 0 OR NOT EXISTS (SELECT 1 FROM proposals c WHERE c.game_id = proposals.game_id AND c.player_id = proposals.player_id
+           AND c.champion = 1 AND c.status NOT IN ('draft', 'withdrawn', 'not_applied')
+           AND c.day_proposed >= COALESCE((SELECT e.started_day FROM eras e WHERE e.game_id = proposals.game_id AND e.ended_day IS NULL), 1)))`;
 // How many proposals a player has confirmed on a day (not drafts, not withdrawn ones). Binds: game id, player id, day.
-export const CONFIRMED_TODAY_SQL = `SELECT COUNT(*) AS n FROM proposals WHERE game_id = ? AND player_id = ? AND day_proposed = ? AND status NOT IN ('draft', 'withdrawn')`;
+export const CONFIRMED_TODAY_SQL = `SELECT COUNT(*) AS n FROM proposals WHERE game_id = ? AND player_id = ? AND day_proposed = ? AND champion = 0 AND status NOT IN ('draft', 'withdrawn')`;
 // What the site says when a player is at the limit.
 /** @rule 103.2 */
 export const proposalLimitMessage = (n) => `You've proposed ${n} today, the most a day (103.2).`;

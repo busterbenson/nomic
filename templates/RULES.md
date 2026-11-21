@@ -40,6 +40,7 @@ confirmed proposal counts toward the day's limit.
 
 **103.2** You can confirm up to 3 proposals a day. [setting: proposals.per_day] Each confirmed proposal gets the next
 number (P1, P2, ...) and goes on the next day's ballot.
+The Champion's change (402.4) doesn't count toward the limit.
 
 **103.3** The proposer may withdraw a confirmed proposal until it goes on the ballot, unless they have ended their turn
 (rule 202.4). A withdrawn proposal doesn't count toward the limit (103.2).
@@ -49,13 +50,14 @@ required by its strictest part, and it passes or fails as a whole, never in part
 
 ### 104 Voting
 **104.1** A proposal passes if it gets the votes its mark asks for (rule 105). Majority: more than half of all players
-vote yes. Unanimous: every player votes yes. Not voting counts as no.
+vote yes. Unanimous: every player votes yes. Not voting counts as no, except on the Champion's change (402.4).
 
 **104.2** The players who may vote on a day, and who count for what a vote needs, are the players when the day starts.
 A player who joins during the day votes from the next day.
 
 **104.3** Each day's ballot holds the proposals confirmed the day before. Every player, the proposer included, may vote
 yes or no on each one until midnight or until they end their turn (rule 202.4), and may change their vote until then.
+The player who makes the Champion's change doesn't vote on it (402.4).
 
 **104.4** Until midnight nobody sees how anyone else voted, or any total. During the day everyone can see who has voted
 on a proposal, and how many have. After midnight every vote is shown.
@@ -64,7 +66,7 @@ on a proposal, and how many have. After midnight every vote is shown.
 
 ### 105 Votes needed
 **105.1** Every block is marked [unanimous] or [majority]; [u] and [m] are short for them. The mark sets the votes
-needed to change, add or repeal any rule in the block.
+needed to change, add or repeal any rule in the block. The Champion's change is counted by 402.4 instead.
 
 **105.2** A rule can carry its own mark, which overrides its block's.
 
@@ -183,15 +185,21 @@ ruling is reversed and the moderator records the reversal.
 ### 401 Points
 A player whose proposal passes and is applied gets 10 points when it is applied (rule 107).
 
-### 402 Winning
-**402.1** The first player to reach 100 points wins. (This rule is deliberately dull, after Peter Suber's original.
-Change it.)
+### 402 Eras
+**402.1** The game is played in Eras. The first Era starts on day 1. The first player to reach 100 points wins the Era,
+and the Era ends that night.
 
-**402.2** Points are given in the order proposals are applied (rule 107.2). If several players pass 100 on the same
-night, the first one to be given them wins.
+**402.2** Points are given in the order proposals are applied (107.2). If several players pass 100 on the same night,
+the first one to be given them wins.
 
-**402.3** When a player wins, the game is over. Nothing more can be played; the board, the rules and the history stay
-readable.
+**402.3** When an Era ends, everyone's points go back to 0, and the next Era starts the next day. The Era's final scores
+stay in the history. The winner is the Champion until someone else wins an Era. The Champion names the next Era.
+
+**402.4** Once in each Era, the Champion can make one change of their own, on top of their proposals for the day (103.2).
+It can change any rule a proposal can change, one with a unanimous mark included. It goes on the next day's ballot, and
+the player who makes it doesn't vote on it. It takes effect unless every other player votes against it. Not voting
+doesn't count as against. If there are no other players, it takes effect. A change that is not applied (107.7) doesn't
+count.
 
 ### 403 Paradox
 If the rules are changed so that further play is impossible,

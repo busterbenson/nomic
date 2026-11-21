@@ -98,19 +98,19 @@ check("applyOrder: the order rule's answer, as the caller's own rows; an answer 
   const dup = throws(() => assembleRules([one, m(107, { applyOrder: (c, p) => [p[0], p[0]] })]).applyOrder(ctx, rows));
   return J(got.map((r) => r.id)) === '["x2","x5"]' && got[0] === rows[1] && drop instanceof RuleError && dup instanceof RuleError;
 })());
-check("onEnacted (401) and dayEnd (402): effects joined in rule order, each tagged with its rule; only points and win at night", (() => {
-  const rs = assembleRules([one, order, m(401, { onEnacted: (c, p) => [effects.points(p.player, 10, "x")] }), m(402, { dayEnd: (c, r) => r.given.map((g) => effects.win(g.player, "y")) }), m(403, { onEnacted: () => [effects.points("b", 1, "z")] })]);
+check("onEnacted (401) and dayEnd (402): effects joined in rule order, each tagged with its rule; only points and champion at night", (() => {
+  const rs = assembleRules([one, order, m(401, { onEnacted: (c, p) => [effects.points(p.player, 10, "x")] }), m(402, { dayEnd: (c, r) => r.given.map((g) => effects.champion(g.player, "y")) }), m(403, { onEnacted: () => [effects.points("b", 1, "z")] })]);
   const e = rs.onEnacted(ctx, { number: 1, player: "a" });
   const w = rs.dayEnd(ctx, { before: {}, given: [{ player: "a", delta: 10 }] });
   const chart = throws(() => assembleRules([one, order, m(401, { onEnacted: () => [effects.chart([{ x: 0, y: 0 }])] })]).onEnacted(ctx, { number: 1, player: "a" }));
   const frozen = throws(() => assembleRules([one, order, m(401, { onEnacted: (c, p) => { p.player = "me"; return []; } })]).onEnacted(ctx, { number: 1, player: "a" }));
-  return J(e.map((x) => [x.rule, x.player, x.delta])) === '[[401,"a",10],[403,"b",1]]' && w.length === 1 && w[0].type === "win" && w[0].rule === 402 && chart instanceof RuleError && frozen instanceof RuleError;
+  return J(e.map((x) => [x.rule, x.player, x.delta])) === '[[401,"a",10],[403,"b",1]]' && w.length === 1 && w[0].type === "champion" && w[0].rule === 402 && chart instanceof RuleError && frozen instanceof RuleError;
 })());
-check("each night hook takes only the effect its enactment applies: a win from onEnacted, or points from dayEnd, is refused with a RuleError naming the hook (never dropped)", (() => {
-  const winEnacted = throws(() => assembleRules([one, order, m(401, { onEnacted: (c, p) => [effects.win(p.player, "x")] })]).onEnacted(ctx, { number: 1, player: "a" }));
+check("each night hook takes only the effect its enactment applies: a champion from onEnacted, or points from dayEnd, is refused with a RuleError naming the hook (never dropped)", (() => {
+  const winEnacted = throws(() => assembleRules([one, order, m(401, { onEnacted: (c, p) => [effects.champion(p.player, "x")] })]).onEnacted(ctx, { number: 1, player: "a" }));
   const pointsEnd = throws(() => assembleRules([one, order, m(402, { dayEnd: () => [effects.points("a", 5, "y")] })]).dayEnd(ctx, { before: {}, given: [] }));
-  return winEnacted instanceof RuleError && winEnacted.rule === 401 && /win effect can't be returned by onEnacted \(it takes: points\)/.test(winEnacted.message) &&
-    pointsEnd instanceof RuleError && pointsEnd.rule === 402 && /points effect can't be returned by dayEnd \(it takes: win\)/.test(pointsEnd.message);
+  return winEnacted instanceof RuleError && winEnacted.rule === 401 && /champion effect can't be returned by onEnacted \(it takes: points\)/.test(winEnacted.message) &&
+    pointsEnd instanceof RuleError && pointsEnd.rule === 402 && /points effect can't be returned by dayEnd \(it takes: champion\)/.test(pointsEnd.message);
 })(), "");
 check("a bad module is refused: unknown hook, non-function hook, rule number missing or out of range, the same rule twice", (() => {
   const p = (mods) => throws(() => assembleRules(mods))?.problems ?? [];
@@ -141,7 +141,7 @@ check("the action kinds are move, propose, vote, end_turn; and deepFreeze is ide
 
 console.log("effects");
 check("a chart effect needs integer tiles inside the world, at most 500", validateEffect({ type: "chart", tiles: [{ x: 1, y: 2, z: 0 }] }) === null && validateEffect({ type: "chart", tiles: [{ x: 1.5, y: 0 }] }) !== null && validateEffect({ type: "chart", tiles: [{ x: 2e6, y: 0 }] }) !== null && validateEffect({ type: "chart", tiles: Array.from({ length: 501 }, () => ({ x: 0, y: 0 })) }) !== null && validateEffect({ type: "chart" }) !== null);
-check("points, log and win effects have their own shapes; an unknown type fails", validateEffect({ type: "points", player: "a", delta: 10, reason: "r" }) === null && validateEffect({ type: "points", player: "a", delta: 1.5, reason: "r" }) !== null && validateEffect({ type: "log", template: "t", args: {} }) === null && validateEffect({ type: "log", template: "t", args: [] }) !== null && validateEffect({ type: "win", player: "a", reason: "r" }) === null && validateEffect({ type: "spawn" }) !== null && validateEffect(null) !== null);
+check("points, log and champion effects have their own shapes; an unknown type fails", validateEffect({ type: "points", player: "a", delta: 10, reason: "r" }) === null && validateEffect({ type: "points", player: "a", delta: 1.5, reason: "r" }) !== null && validateEffect({ type: "log", template: "t", args: {} }) === null && validateEffect({ type: "log", template: "t", args: [] }) !== null && validateEffect({ type: "champion", player: "a", reason: "r" }) === null && validateEffect({ type: "champion", player: "a" }) !== null && validateEffect({ type: "win", player: "a", reason: "r" }) !== null && validateEffect({ type: "spawn" }) !== null && validateEffect(null) !== null);
 
 console.log("the engine API a game imports");
 check("promptocracy/engine exports exactly the promised names", J(Object.keys(api).sort()) === J(["ACTION_KINDS", "DIAGONAL_MOVES", "ENGINE_VERSION", "HOOKS", "SHARED_TILES", "chartOffsets", "chartedAround", "defineRule", "effects", "refuse", "tileLabel", "validCoord", "withinSteps"]), J(Object.keys(api).sort()));

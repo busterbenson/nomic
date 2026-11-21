@@ -55,6 +55,8 @@ try {
   const d1r = days("start");
   check("day 1 is the existing day code's: from now to the game's next midnight (2026-03-08 noon PDT to 2026-03-09 00:00 PDT = 07:00Z), its electorate the 2 players, logged once",
     d1r.length === 1 && d1r[0].n === 1 && d1r[0].starts_at === "2026-03-08T19:00:00.000Z" && d1r[0].ends_at === "2026-03-09T07:00:00.000Z" && d1r[0].electorate === 2 && J(electors("start", 1)) === J(["Ana", "Bo"]) && started("start") === 1, J(d1r));
+  const eraRows = d1(state, `SELECT n, name, started_day, ended_day, champion_id FROM eras WHERE game_id = '${gid("start")}'`);
+  check("Start opens Era 1 on day 1 (rule 402.1), unnamed, with no Champion, once", J(eraRows) === J([{ n: 1, name: null, started_day: 1, ended_day: null, champion_id: null }]), J(eraRows));
   const again = await ana.post("/start/api/start", {});
   const dayNow = (await ana.get("/start/api/day")).data;
   check("a game already in play refuses Start with a plain reason (409); /api/day sees day 1 open; a request does not make a second day", again.status === 409 && again.data.error === "The game has already started." && dayNow.day === 1 && dayNow.locked === false && days("start").length === 1 && started("start") === 1, again.text);

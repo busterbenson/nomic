@@ -12,6 +12,7 @@
 //               {allowed, reason?}, the same answers the write routes give (turnBlock)
 import { getPlayer } from "../lib/auth";
 import { clockNow, electorsOf, isLocked, loadToday, lockMessage, settingsOf, timeZoneOf } from "../lib/day";
+import { eraView } from "../lib/eras";
 import { proposalLimitMessage } from "../lib/proposals.js";
 import { turnBlock } from "../lib/turn";
 import { Ctx, colorOf, json } from "../lib/util";
@@ -26,7 +27,7 @@ export const get = async (ctx: Ctx) => {
   if (day) await electorsOf(env, game.id, day.n); // a day opened without its electorate rows gets them (rule 104.2)
   const rows = (await env.DB.prepare(
     `SELECT p.display_name AS name, p.color, p.turn_order, t.moved_at, t.ended_at,
-            (SELECT COUNT(*) FROM proposals u WHERE u.game_id = p.game_id AND u.player_id = p.id AND u.day_proposed = ? AND u.status NOT IN ('draft', 'withdrawn')) AS proposed,
+            (SELECT COUNT(*) FROM proposals u WHERE u.game_id = p.game_id AND u.player_id = p.id AND u.day_proposed = ? AND u.champion = 0 AND u.status NOT IN ('draft', 'withdrawn')) AS proposed,
             (SELECT COUNT(*) FROM votes v JOIN proposals q ON q.id = v.proposal_id
               WHERE v.game_id = p.game_id AND v.player_id = p.id AND v.day = ? AND q.day_ballot = ?) AS voted,
             EXISTS (SELECT 1 FROM electors e WHERE e.game_id = p.game_id AND e.day = ? AND e.player_id = p.id) AS elector
@@ -35,6 +36,7 @@ export const get = async (ctx: Ctx) => {
   ).bind(game.day, game.day, game.day, game.day, game.day, game.id).all()).results as any[];
   const ballot: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'on_ballot'").bind(game.id, game.day).first();
   const mine = player ? rows.find((r) => r.turn_order === player.turn_order) : null;
+  const era = await eraView(env, game.id, player?.id); // the Era and the Champion (rule 402), and whether your change is still unused
   const perDay: number = settingsOf(game)["proposals.per_day"];
   const can = (kind: "move" | "propose" | "end_turn" | "vote") => {
     const b = player && turnBlock(game, day, turn, player, kind, nowMs);
@@ -57,10 +59,12 @@ export const get = async (ctx: Ctx) => {
     failed: locked && !!day!.last_error,
     deadline_at: locked && (day!.status === "processing" || day!.status === "deploying") ? day!.deadline_at ?? null : null,
     ballot: ballot?.n ?? 0,
+    era: era && { n: era.n, name: era.name, champion: era.champion },
     players: rows.map((r) => ({ name: r.name, color: colorOf(r.color), moved: !!r.moved_at, proposed: r.proposed > 0, ended: !!r.ended_at, voted: r.voted ?? 0 })),
     you: player ? {
       moved: !!turn?.moved_at, proposed: !!mine?.proposed, proposals: { made: mine?.proposed ?? 0, limit: perDay }, ended: !!turn?.ended_at, voted: mine?.voted ?? 0,
       can: { move: can("move"), propose: can("propose"), end_turn: can("end_turn"), vote: can("vote") },
+      champion: era?.you.champion ? { change: { allowed: !era.you.change_used, reason: era.you.change_used ? "You've made your change this Era (402.4)." : undefined } } : null,
     } : null,
   });
 };
