@@ -140,6 +140,10 @@ export const EDIT_GUARD = `id = ? AND state = 'Draft' AND player_id = ? AND prop
 /** @rule 801.5, 107.1, 202.4 */
 export const REOPEN_SQL = `UPDATE tickets SET state = 'Draft', proposal_id = NULL, queue_pos = NULL, proposed_at = NULL, approved_at = NULL, decided_at = NULL, updated_at = ?
   WHERE id = ? AND player_id = ? AND state IN ('Refused', 'Failed') AND EXISTS (SELECT 1 FROM games g WHERE g.id = tickets.game_id AND ${dayOpenSql})`;
+// Settling a confirm that died (rule 801.1): clear the ticket's link to its stray draft proposal, only while that proposal is still a
+// draft IN THIS WRITE (the original confirm may land after the route read it). Binds: updated_at, ticket id, proposal id, proposal id.
+/** @rule 801.1 */
+export const UNLINK_STRAY_SQL = `UPDATE tickets SET proposal_id = NULL, updated_at = ? WHERE id = ? AND state = 'Draft' AND proposal_id = ? AND EXISTS (SELECT 1 FROM proposals WHERE id = ? AND status = 'draft')`;
 // The commission's draft proposal, for the confirm to make the day's proposal (rule 801.1). Binds: id, player_id, title, brief,
 // head, base_sha, created_at, game_id, then dayOpenBinds.
 /** @rule 801.1 */

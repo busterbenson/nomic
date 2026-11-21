@@ -6,7 +6,7 @@
 import { createHash } from "node:crypto";
 import { dayOpenBinds, lockOpenBinds, lockOpenSql } from "../src/lib/day-gate.js";
 import { client, connect, createGame, d1, join, migrate, newState, freePort, startRulesStub, startServer, tool } from "./lib.mjs";
-import { EDIT_GUARD, LIMITS, REOPEN_SQL, canPost, confirmProblem, readFields, readMakes, readPost, ticketNumber } from "../src/lib/tickets.js";
+import { EDIT_GUARD, LIMITS, REOPEN_SQL, UNLINK_STRAY_SQL, canPost, confirmProblem, readFields, readMakes, readPost, ticketNumber } from "../src/lib/tickets.js";
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = "") => { if (ok) { pass++; console.log(`  ok    ${name}`); } else { fail++; console.log(`  FAIL  ${name}${detail ? "  -> " + detail : ""}`); } };
@@ -162,6 +162,21 @@ try {
   const healed = await Ana.post(`${T}/W4/edit`, { title: "A second thing" });
   check("one an hour old is a confirm that died: the edit settles it first (the link is cleared, the stray draft proposal deleted) and goes through",
     healed.status === 200 && tk(4).proposal_id === null && d1(state, "SELECT COUNT(*) AS n FROM proposals WHERE id = 'stray'")[0].n === 0, healed.text);
+  // The cleanup of a dead confirm repeats "the proposal is still a draft" in its own write: if the original confirm lands between
+  // the route's read and the cleanup, the ticket is not unlinked from a now-confirmed proposal.
+  {
+    const lit = (v) => (typeof v === "number" ? String(v) : `'${String(v).replace(/'/g, "''")}'`);
+    const runCleanup = () => { const b = ["2026-11-10T20:00:00.000Z", tk(4).id, "stray", "stray"]; let i = 0; d1(state, UNLINK_STRAY_SQL.replace(/\?/g, () => lit(b[i++]))); };
+    stray("2026-11-10T18:00:00.000Z");
+    d1(state, `UPDATE proposals SET status = 'confirmed', number = 900, mark = 'majority', day_ballot = 2, confirmed_at = '2026-11-10T19:30:00.000Z' WHERE id = 'stray'`);
+    runCleanup();
+    const kept = tk(4).proposal_id === "stray";
+    d1(state, `UPDATE proposals SET status = 'draft', number = NULL, mark = NULL, day_ballot = NULL, confirmed_at = NULL WHERE id = 'stray'`);
+    runCleanup();
+    const cleared = tk(4).proposal_id === null;
+    d1(state, `DELETE FROM proposals WHERE id = 'stray'`);
+    check("the cleanup of a dead confirm leaves the link alone when the proposal was confirmed in the meantime, and clears it while it is still a draft", kept && cleared, J([kept, cleared]));
+  }
   console.log("day 1: Bo's commission with a price, Cy's ordinary proposal");
   const b = await commission(Bo, good({ title: "A lantern", brief: "A lantern that never goes out.", makes: [{ kind: "entry", name: "Lantern" }], estimate: 1, tasks: [] }));
   check("Bo's W2 is P3", b.n === "W2" && b.k.data.ticket.proposal === "P3");

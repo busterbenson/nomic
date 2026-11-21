@@ -18,7 +18,7 @@
 import { getPlayer } from "../lib/auth";
 import { clockNow, dayOpenBinds, dayOpenSql, isLocked, loadToday, lockMessage } from "../lib/day";
 import { lockOpenBinds, lockOpenSql } from "../lib/day-gate.js";
-import { CLOSED_STATES, COMMISSION_DRAFT_SQL, EDIT_GUARD, LIVE_STATES, OPEN_DRAFT_SQL, PAGE, RECENT_CLOSED, REOPEN_SQL, STATES, WORKSHOP_RULE, canPost, confirmProblem, readCursor, readFields, readPost, ticketNumber } from "../lib/tickets.js";
+import { CLOSED_STATES, COMMISSION_DRAFT_SQL, EDIT_GUARD, LIVE_STATES, OPEN_DRAFT_SQL, PAGE, RECENT_CLOSED, REOPEN_SQL, STATES, UNLINK_STRAY_SQL, WORKSHOP_RULE, canPost, confirmProblem, readCursor, readFields, readPost, ticketNumber } from "../lib/tickets.js";
 import { refusalBody, turnBlock } from "../lib/turn";
 import { COLS, FROM, ticketView } from "../lib/ticket-view";
 import { Ctx, colorOf, json, nowIso, readJson } from "../lib/util";
@@ -180,7 +180,7 @@ async function mine(ctx: Ctx, player: any, raw: unknown, nowMs: number): Promise
       return out({ error: `W${t.number} is being put on the ballot. Reload and look again.` }, 409);
     }
     await env.DB.batch([
-      env.DB.prepare("UPDATE tickets SET proposal_id = NULL, updated_at = ? WHERE id = ? AND state = 'Draft' AND proposal_id = ?").bind(now, t.id, t.proposal_id),
+      env.DB.prepare(UNLINK_STRAY_SQL).bind(now, t.id, t.proposal_id, t.proposal_id),
       env.DB.prepare("DELETE FROM proposals WHERE id = ? AND status = 'draft' AND kind = 'commission'").bind(t.proposal_id),
     ]);
   }
