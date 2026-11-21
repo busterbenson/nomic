@@ -102,10 +102,10 @@ export function createWorkshop({ api, me, pill, rpill, when, canCommission, refr
     if (a.shown) return `<img class="artimg${big ? " big" : ""}" src="${artUrl(a.shown)}" alt="${esc(v.name || "")}" loading="lazy">`;
     return `<span class="arttile${big ? " big" : ""}${a.state === "drawing" ? " drawing" : ""}" aria-hidden="true">${esc(v.letter || "?")}</span>`;
   }
-  /** The strip of drawings: each one's thumbnail, and for the requester Save on one not kept and Default on one kept; the default is marked. @rule 801.2 */
+  /** The strip of drawings: each one's thumbnail, and for the requester Save on one not kept and Make default on one kept; the default is marked. @rule 801.2 */
   function stripHTML(a, can, who, min) {
     if (a.list.length <= min) return "";
-    return `<ul class="artstrip" aria-label="Drawings">${a.list.map((d) => `<li${d.default ? ' class="is-default"' : ""}><img class="artthumb" src="${artUrl(d.hash)}" alt="" loading="lazy">${d.default ? '<span class="pill kchip">Default</span>' : d.saved ? `<span class="estate">Saved</span>${can ? `<button type="button" class="linkbtn" ${who} data-act="default" data-hash="${d.hash}">Default</button>` : ""}` : can ? `<button type="button" class="linkbtn" ${who} data-act="save" data-hash="${d.hash}">Save</button>` : ""}</li>`).join("")}</ul>`;
+    return `<ul class="artstrip" aria-label="Drawings">${a.list.map((d) => `<li${d.default ? ' class="is-default"' : ""}><img class="artthumb" src="${artUrl(d.hash)}" alt="" loading="lazy">${d.default ? '<span class="pill kchip">Default</span>' : d.saved ? `<span class="estate">Saved</span>${can ? `<button type="button" class="btn ghost small" ${who} data-act="default" data-hash="${d.hash}">Make default</button>` : ""}` : can ? `<button type="button" class="btn ghost small" ${who} data-act="save" data-hash="${d.hash}">Save</button>` : ""}</li>`).join("")}</ul>`;
   }
   /**
    * The drawing block of one entry: the picture or its state (Drawing, Drawing failed), Redraw for the requester, and the strip of drawings

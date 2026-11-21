@@ -7,6 +7,7 @@
 // during the lock with the reasons the slip shows, while drafting at 3 of 3 stays free; her cap lives in SQL beside Gremlin's, resets at the game's
 // midnight and gives one improvised excuse a day; the lock closes the chat before the model is called; escalation is a row of category and reason;
 // the history and the slips are private. Run: node tests/starling-chat.mjs
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { createStarlingStub } from "./starling-stub.mjs";
 import { client, createGame, d1, freePort, join, migrate, newState, startRulesStub, startServer } from "./lib.mjs";
@@ -227,6 +228,19 @@ try {
   const again = await say(Ana, "SYNTH-ESCALATE-LOOP and another thing");
   check("a second escalation while one is open is dropped (one open a chat), and her line is not marked", d1(state, `SELECT COUNT(*) AS n FROM escalations WHERE player_id = '${id.Ana}'`)[0].n === 1 && !again.data.messages[1].escalated);
   check("the model-call log never carries the escalation's text", !J(acalls()).includes("withdrawal at 5pm"));
+  // Chalant's side of her escalation goes through the same moderator routes as Gremlin's (the threads PR): listed with her chat turn, notified by category alone, answered into HER chat.
+  const TOKEN = "starling-mod-token-0123456789abcdef";
+  d1(state, `UPDATE games SET moderator_token_hash = '${createHash("sha256").update(TOKEN).digest("hex")}' WHERE id = '${gid}'`);
+  const mod = async (method, path, body) => { const r = await fetch(`${A}/wk/api/moderator/${path}`, { method, headers: { authorization: `Bearer ${TOKEN}`, ...(body ? { "content-type": "application/json" } : {}) }, body: body ? J(body) : undefined, signal: AbortSignal.timeout(20000) }); const text = await r.text(); let data = null; try { data = JSON.parse(text); } catch {} return { status: r.status, text, data }; };
+  const listed = await mod("GET", "escalations");
+  const mine1 = listed.data?.escalations?.find((e) => e.id === er[0].id);
+  check("the moderator lists her escalation with the player's message and her reply to it, and its notification names the agent and category and nothing the player wrote",
+    listed.status === 200 && mine1?.agent === "starling" && mine1.where === "chat" && /SYNTH-ESCALATE/.test(mine1.turn?.message ?? "") && mine1.turn?.reply === esc.data.messages[1].body && /a chat: Starling escalated \(ruling\)/.test(listed.data.notification?.text ?? "") && !listed.data.notification.text.includes("withdrawal"));
+  const answered = await mod("POST", `escalations/${er[0].id}/answer`, { body: "Chalant here. Ending your turn does not block a withdrawal before the day ends." });
+  const chalantRows = d1(state, `SELECT agent, role, ticket_id FROM chat_messages WHERE game_id = '${gid}' AND player_id = '${id.Ana}' AND role = 'chalant'`);
+  const hist = await Ana.get(CH);
+  check("his answer is posted in her chat (agent starling, role chalant), shows in her history, and a second answer is refused",
+    answered.status === 200 && chalantRows.length === 1 && chalantRows[0].agent === "starling" && chalantRows[0].ticket_id === null && hist.data.messages.some((m) => m.role === "chalant" && /Chalant here/.test(m.body)) && (await mod("POST", `escalations/${er[0].id}/answer`, { body: "again" })).status === 409);
 
   console.log("failures: the message is kept, the line is canned, nothing is made (section 4.4)");
   const pBefore = d1(state, "SELECT COUNT(*) AS n FROM proposals")[0].n;
