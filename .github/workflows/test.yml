@@ -1,13 +1,15 @@
 name: test
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
 
 concurrency:
   group: test-${{ github.ref }}
-  cancel-in-progress: true
+  # a newer push to a branch or PR supersedes the older run; main runs are never cancelled
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
@@ -34,13 +36,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      - run: pip install playwright
+      - run: pip install playwright==1.65.2
 
       - name: Cache Playwright browsers
-        id: pw-cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
+          # the key carries the pinned playwright version (it names the Chromium build), so bumping the pin refreshes the cache
           key: playwright-${{ runner.os }}-${{ hashFiles('.github/workflows/test.yml') }}
 
       - name: Install Chromium (browsers and system libraries)

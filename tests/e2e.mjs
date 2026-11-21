@@ -1,6 +1,6 @@
 // End-to-end checks against a real `wrangler dev` (Worker + static assets) with a LOCAL D1.
 // Run: npm test
-import { rmSync, existsSync, readFileSync } from "node:fs";
+import { rmSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
