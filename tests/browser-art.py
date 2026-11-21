@@ -68,6 +68,7 @@ with sync_playwright() as p:
             check("saving the first drawing kept makes it the default (marked), and its Save button is gone", page.locator("#mroot .wkart .is-default").inner_text().strip().upper().startswith("DEFAULT") and page.locator('#mroot [data-act="save"]').count() == 1)
             page.click('#mroot [data-act="save"]')
             page.wait_for_function("document.querySelectorAll('#mroot .wkart [data-act=\"save\"]').length === 0")
+            check("the offer on a kept, non-default drawing is a real button named 'Make default'", page.get_by_role("button", name="Make default").count() == 1 and page.get_by_role("button", name="Make default").evaluate("e => e.classList.contains('btn')"))
             check("saving the other keeps it as well, and offers Default on it; the default stays where it was", page.locator('#mroot [data-act="default"]').count() == 1 and page.locator("#mroot .wkart .is-default").count() == 1)
             before = page.locator("#mroot .wkart .is-default img").get_attribute("src")
             page.click('#mroot [data-act="default"]')

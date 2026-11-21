@@ -42,6 +42,16 @@ export const send = (o: Out) => json(o.body, o.status);
 export function zoneAbbr(tz: string, ms: number): string {
   try { return new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "short" }).formatToParts(new Date(ms)).find((x) => x.type === "timeZoneName")?.value ?? tz; } catch { return tz; }
 }
+/**
+ * Who may use the chat, and when. Players only: no session in THIS game (a visitor, or an account signed in to another game) is a 401. Nothing is
+ * played before the game starts, so before the host presses Start (day 1, rule 203.1) the chat is shut for everyone, host included: a 409 with its
+ * reason and no read, no write, no model call, nothing counted. A refusal is returned before any query, so it spends nothing.
+ * @rule 106.2, 106.3, 203.1
+ */
+export const chatGate = (game: any, player: Player | null, agent: string = AGENT): Out | null =>
+  !player ? out({ error: `Log in to talk to ${agent === "starling" ? "Starling" : "Gremlin"}.` }, 401)
+  : game.status === "setup" ? out({ error: "The game has not started yet.", reason: "not_started" }, 409)
+  : null;
 /** Is the game locked right now (rule 107.1)? The lock alone: End turn and "before day 1" leave the chat open. @rule 107.1 */
 export const lockedNow = (game: any, day: any, nowMs: number) => game.status === "playing" && !!day && isLocked(game, day, nowMs);
 
@@ -68,7 +78,8 @@ export async function stateOf(ctx: Ctx, game: any, day: any, player: Player, now
 export const get = async (ctx: Ctx) => {
   const { env, request } = ctx;
   const player = await getPlayer(env, request, ctx.data.game!);
-  if (!player) return json({ error: "Log in to talk to Gremlin." }, 401);
+  const shut = chatGate(ctx.data.game!, player);
+  if (shut) return send(shut);
   const nowMs = await clockNow(env);
   const { game, day } = await loadToday(env, ctx.data.game!, nowMs, player.id);
   const raw = new URL(request.url).searchParams.get("before");
@@ -109,6 +120,8 @@ export async function excuse(ctx: Ctx, game: any, day: any, player: Player, nowM
 /** @rule 106.3, 106.7, 801.2, 801.4 */
 export async function turn(ctx: Ctx, player: Player, body: any, nowMs: number): Promise<Out> {
   const { env } = ctx;
+  const shut = chatGate(ctx.data.game!, player);
+  if (shut) return shut;
   const text = String(body?.body ?? "").replace(/\r\n?/g, "\n").trim();
   if (!text) return out({ error: "Write something to say." }, 400);
   if (text.length > MESSAGE_MAX) return out({ error: `A message is at most ${MESSAGE_MAX} characters.` }, 400);
@@ -237,7 +250,8 @@ export async function turn(ctx: Ctx, player: Player, body: any, nowMs: number): 
 /** @rule 106.7 */
 export const post = async (ctx: Ctx) => {
   const player = await getPlayer(ctx.env, ctx.request, ctx.data.game!);
-  if (!player) return json({ error: "Log in to talk to Gremlin." }, 401);
+  const shut = chatGate(ctx.data.game!, player);
+  if (shut) return send(shut);
   const body = await readJson(ctx.request);
   return send(await turn(ctx, player, body, await clockNow(ctx.env)));
 };

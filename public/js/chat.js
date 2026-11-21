@@ -8,38 +8,25 @@
 //     api(path, body?)    the page's fetch helper -> { ok, status, data }
 //     root                the wrapper that holds the tab and the chat (#bwrap); the component writes data-chat and data-sheet on it
 //     me()                the last /api/me; the window exists only for a signed-in player
+//     started()           the game has started (rule 203.1); before Start there is no window
 //     rpill(num)          a rule pill for a rule number (plain text when the rulebook has none)
 //     wpill(n)            a ticket pill
 //     onTicket(page)      called with the ticket page a turn returned (the Workshop redraws its card and list)
 //   CHAT.sync(tab, reread)  CHAT.attach(n, {open})  CHAT.open()  CHAT.load()
 // Nothing here decides what is allowed: the server's answers (the cap, the lock, a refusal) are shown as they come.
 
+import { diffOf } from "./propose.js";
+
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-// The characters. Gremlin's portrait is the mockup's; Starling's comes with her.
+// The characters. Each portrait is a static file, /portraits/<name>.svg (symbol #p), so it is cached and not part of this script.
+// Chalant has no window of his own: his portrait sits on his escalation answers only.
 export const AGENTS = {
-  gremlin: { key: "gremlin", name: "Gremlin", path: "gremlin", tab: "workshop", cls: "gr", placeholder: "Message Gremlin", symbol: "chat-gremlin" },
-  starling: { key: "starling", name: "Starling", path: "starling", tab: "rules", cls: "st", placeholder: "Message Starling", symbol: "chat-starling", proposals: true },
+  gremlin: { key: "gremlin", name: "Gremlin", path: "gremlin", tab: "workshop", cls: "gr", placeholder: "Message Gremlin", portrait: "gremlin" },
+  starling: { key: "starling", name: "Starling", path: "starling", tab: "rules", cls: "st", placeholder: "Message Starling", portrait: "starling", proposals: true },
 };
+const CHALANT = { cls: "ch", portrait: "chalant" };
 const SYMBOLS = `<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
-<symbol id="chat-gremlin" viewBox="0 0 40 40">
-<path d="M8 14 L1 8 L11 11 Z M32 14 L39 8 L29 11 Z" fill="#7C8A6E" stroke="#18202B" stroke-width="1"/>
-<ellipse cx="20" cy="19" rx="11" ry="10" fill="#8E9B78" stroke="#18202B" stroke-width="1.2"/>
-<circle cx="15.5" cy="17" r="2.4" fill="#F2D35B"/><circle cx="24.5" cy="17" r="2.4" fill="#F2D35B"/>
-<circle cx="16" cy="17.2" r="1" fill="#18202B"/><circle cx="24" cy="17.2" r="1" fill="#18202B"/>
-<path d="M14.5 23 Q20 27 25.5 23" stroke="#18202B" stroke-width="1.3" fill="none"/>
-<path d="M17 24.3 L17.6 26 M22.4 24.3 L23 26" stroke="#fff" stroke-width="1"/>
-<path d="M8 30 L30 30 Q32 38 20 38 Q8 38 8 30Z" fill="#6E7B62" stroke="#18202B" stroke-width="1"/>
-<path d="M29 26 L35 33 M33 25.5 a2.6 2.6 0 1 0 3.2 3.2" stroke="#9AA5B1" stroke-width="2" fill="none" stroke-linecap="round"/>
-</symbol>
-<symbol id="chat-starling" viewBox="0 0 40 40">
-<path d="M4 22 Q10 12 22 13 Q31 13 35 19 L38 17 L36 23 Q33 31 22 32 Q12 32 4 22Z" fill="#2F3B52" stroke="#18202B" stroke-width="1.2"/>
-<path d="M14 28 L10 37 M20 29 L19 37" stroke="#18202B" stroke-width="1.4" stroke-linecap="round"/>
-<path d="M8 21 Q14 17 22 18" stroke="#7F8FB0" stroke-width="1.2" fill="none"/>
-<circle cx="29" cy="17.5" r="2.2" fill="#fff" stroke="#18202B" stroke-width="1"/><circle cx="29.4" cy="17.6" r="1" fill="#18202B"/>
-<path d="M34 18.5 L39.5 20.5 L34 22.5Z" fill="#E3A33B" stroke="#18202B" stroke-width="1"/>
-<circle cx="15" cy="22" r=".8" fill="#fff"/><circle cx="19" cy="25" r=".8" fill="#fff"/><circle cx="23" cy="21" r=".8" fill="#fff"/><circle cx="12" cy="26" r=".8" fill="#fff"/>
-</symbol>
 <symbol id="chat-send" viewBox="0 0 20 20"><path d="M3 10 L17 3 L12 17 L10 11 Z" fill="currentColor"/></symbol>
 </defs></svg>`;
 
@@ -50,7 +37,7 @@ let ACTIVE = null;
 export const settingsLine = (settings) => Object.entries(settings || {}).map(([k, v]) => `${k} = ${v && typeof v === "object" ? Object.values(v).join("x") : typeof v === "boolean" ? (v ? "on" : "off") : String(v)}`).join(", ");
 const LEFT_SHOWN = 10;   // "N left" appears in the last ten messages of the day
 
-export function createChat({ api, root, me, slug, agent = AGENTS.gremlin, rpill, wpill, onTicket, onProposals }) {
+export function createChat({ api, root, me, slug, agent = AGENTS.gremlin, rpill, wpill, onTicket, onProposals, started = () => true }) {
   const S = { msgs: [], next: null, state: null, ticket: null, rule: null, live: null, slips: {}, lockErr: {}, slip: null, busy: false, draft: "", err: "", sheet: false, open: true, loaded: false, loading: false, tab: "", note: "" };
   const col = root.querySelector("#chatcol"), fab = root.querySelector("#chatfab");
   const mine = () => ACTIVE === agent.key;
@@ -58,6 +45,8 @@ export function createChat({ api, root, me, slug, agent = AGENTS.gremlin, rpill,
   const desktop = () => !!(window.matchMedia && matchMedia("(min-width: 900px)").matches);
   const reduced = () => !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
   const player = () => (me() && me().player) || null;
+  /** The window exists for a player of a game that has started, nobody else (rules 106.3, 203.1); the server refuses the rest. */
+  const live = () => !!player() && started();
   const key = () => `promptocracy:chat:${slug}:${player() && player().color ? player().color.key : "x"}:${agent.key}`;   // /api/me names no id: a color is one player in a game
   const remembered = () => { try { return localStorage.getItem(key()) !== "min"; } catch { return true; } };
   const remember = (open) => { try { localStorage.setItem(key(), open ? "open" : "min"); } catch {} };
@@ -67,7 +56,8 @@ export function createChat({ api, root, me, slug, agent = AGENTS.gremlin, rpill,
   function textHTML(s) {
     return esc(s).replace(/\b(rules?\s+)?(\d{3}(?:\.\d{1,3})?)\b/g, (m, w, n) => (w || n.includes(".") ? `${w || ""}${rpill(n)}` : m));
   }
-  const portrait = (small) => `<span class="por ${agent.cls}${small ? " sm" : ""}"><svg aria-hidden="true"><use href="#${agent.symbol}"/></svg></span>`;
+  const portraitOf = (who, small) => `<span class="por ${who.cls}${small ? " sm" : ""}"><svg aria-hidden="true"><use href="/portraits/${who.portrait}.svg#p"/></svg></span>`;
+  const portrait = (small) => portraitOf(agent, small);
   const sizeText = (v) => (v && typeof v === "object" && "w" in v ? `${v.w}×${v.h}` : String(v));
 
   // ---- the day dividers -------------------------------------------------------------------------------------------------
@@ -113,7 +103,7 @@ ${refused ? `<div class="tx">${esc(last.refusal)}</div>` : ""}
     const sl = S.slips[id];
     if (!sl) return "";
     const stamp = id === liveId() ? "" : sl.status === "draft" ? "REPLACED" : STAMPS[sl.status] || String(sl.status).toUpperCase();
-    return `<section class="slip past" aria-label="${esc(sl.n || "Draft")}"><span class="cstamp">${esc(stamp)}</span><div class="hd">${sl.n ? ppill(sl.n) : ""}<span class="hdt">${textHTML(sl.head || "")}</span></div>${sl.words ? `<div class="yw">${esc(`“${sl.words}”`)}</div>` : ""}</section>`;
+    return `<section class="slip past" aria-label="${esc(sl.n || "Draft")}"><span class="cstamp">${esc(stamp)}</span><div class="hd">${sl.n ? ppill(sl.n) : ""}<span class="hdt">${textHTML(sl.head || "")}</span></div>${sl.words ? `<div class="yw">${esc(`“${sl.words}”`)}</div>` : ""}${sl.after_text || sl.before_text ? `<div class="tx cdiff">${diffOf(sl)}</div>` : ""}</section>`;
   }
   /** The live draft: the change, scope, votes needed, conflicts, and Lock it in or Unlock with the reason beside a disabled one. @rule 103.1, 103.2, 103.3 */
   function proposalSlipHTML() {
@@ -130,7 +120,7 @@ ${refused ? `<div class="tx">${esc(last.refusal)}</div>` : ""}
     return `<section class="slip${locked ? " locked" : ""}" aria-label="${esc(sl.n || "Draft")}"><span class="cstamp">${locked ? "LOCKED" : "DRAFT"}</span>
 <div class="hd">${sl.n ? ppill(sl.n) : ""}<span class="hdt">${textHTML(sl.head || "")}</span></div>
 ${sl.words ? `<div class="yw">${esc(`Your words: “${sl.words}”`)}</div>` : ""}
-${sl.after_text ? `<div class="tx">${esc(sl.after_text)}</div>` : sl.before_text ? `<div class="tx del">${esc(sl.before_text)}</div>` : ""}
+${sl.after_text || sl.before_text ? `<div class="tx cdiff">${diffOf(sl)}</div>` : ""}
 <dl><dt>Change</dt><dd>${esc(KIND[sl.kind] || sl.kind)}${sl.target ? ` ${rpill(sl.target)}` : ""}</dd>${sl.settings && Object.keys(sl.settings).length ? `<dt>Sets</dt><dd>${esc(settingsLine(sl.settings))}</dd>` : ""}<dt>Needs</dt><dd>${needs}</dd><dt>Conflicts</dt><dd>${sl.conflicts && sl.conflicts.length ? sl.conflicts.map((n) => rpill(n)).join(" ") : "none"}</dd></dl>
 <div class="act">${act}</div>${err}</section>`;
   }
@@ -148,7 +138,7 @@ ${sl.after_text ? `<div class="tx">${esc(sl.after_text)}</div>` : sl.before_text
     if (m.role === "event") return `<div class="ev">${esc(m.body)}</div>`;
     if (m.role === "player") return `<div class="msg cme"><div class="bub">${m.rule ? `<span class="ctx">${rpill(m.rule)}</span>` : ""}${esc(m.body)}</div></div>`;
     // Chalant's answer to an escalated turn (rule 106.4): his own line, named, not Gremlin's portrait
-    if (m.role === "chalant") return `<div class="msg cher chalant"><div class="bub"><b class="who">Chalant</b>${textHTML(m.body)}</div></div>`;
+    if (m.role === "chalant") return `<div class="msg cher chalant">${portraitOf(CHALANT, true)}<div class="bub"><b class="who">Chalant</b>${textHTML(m.body)}</div></div>`;
     const cont = prev && (prev.role === "agent" || prev.role === "excuse") && prev.date === m.date;
     const quotes = (m.quotes || []).map((q) => `<span class="q">${rpill(q.num)}${esc(q.text)}</span>`).join("");
     const after = (m.refused ? refusedHTML(m) : "") + (m.proposal && m.proposal !== liveId() ? pastSlipHTML(m.proposal) : "");
@@ -215,7 +205,7 @@ ${sl.after_text ? `<div class="tx">${esc(sl.after_text)}</div>` : sl.before_text
   /** The wrapper's state: off (not this tab, or not a player), open (the column), min (the pill); the phone's sheet is separate. @rule 106.3 */
   function place() {
     if (ACTIVE && ACTIVE !== agent.key) return;   // the other window's tab is showing: the column and the pill are theirs
-    const on = !!player() && S.tab === agent.tab;
+    const on = live() && S.tab === agent.tab;
     root.dataset.chat = !on ? "off" : S.open ? "open" : "min";
     root.dataset.sheet = on && S.sheet ? "open" : "closed";
     if (fab) fab.hidden = !on;
@@ -231,7 +221,7 @@ ${sl.after_text ? `<div class="tx">${esc(sl.after_text)}</div>` : sl.before_text
     S.open = remembered();
     if (S.tab !== agent.tab) S.sheet = false;
     place();
-    if (player() && S.tab === agent.tab) {
+    if (live() && S.tab === agent.tab) {
       if (!S.loaded && !S.loading) { draw(); await load(); }   // the empty window first: the other agent's must not stay on screen while this one loads
       else if (entering || reread) await readState();   // the day, the lock or the cap may have changed since this was drawn
       else draw(true);
@@ -259,7 +249,7 @@ ${sl.after_text ? `<div class="tx">${esc(sl.after_text)}</div>` : sl.before_text
   // ---- loading and sending --------------------------------------------------------------------------------------------------------
   /** Your history with him, and the window's state. @rule 106.7 */
   async function load() {
-    if (!player()) return;
+    if (!live()) return;
     S.loading = true;
     const r = await api(`/api/chat/${agent.path}`);
     S.loading = false;

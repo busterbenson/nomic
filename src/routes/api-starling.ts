@@ -23,7 +23,7 @@ import {
 } from "../lib/starling.js";
 import { refusalBody, turnBlock } from "../lib/turn";
 import { Ctx, json, nowIso, readJson } from "../lib/util";
-import { ExcuseSpec, excuse, lockedNow, out, send, stateOf, viewOf } from "./api-chat";
+import { ExcuseSpec, chatGate, excuse, lockedNow, out, send, stateOf, viewOf } from "./api-chat";
 import { bookFor, draft, view } from "./api-proposals";
 
 const AGENT = "starling";
@@ -80,7 +80,8 @@ async function slipsOf(ctx: Ctx, game: any, day: any, turn: any, player: Player,
 export const get = async (ctx: Ctx) => {
   const { env, request } = ctx;
   const player = await getPlayer(env, request, ctx.data.game!);
-  if (!player) return json({ error: "Log in to talk to Starling." }, 401);
+  const shut = chatGate(ctx.data.game!, player, AGENT);
+  if (shut) return send(shut);
   const nowMs = await clockNow(env);
   const { game, day, turn } = await loadToday(env, ctx.data.game!, nowMs, player.id);
   const raw = new URL(request.url).searchParams.get("before");
@@ -98,6 +99,8 @@ export const get = async (ctx: Ctx) => {
 /** @rule 103.1, 103.6, 106.2, 106.4, 106.7 */
 export async function turn(ctx: Ctx, player: Player, body: any, nowMs: number) {
   const { env } = ctx;
+  const shut = chatGate(ctx.data.game!, player, AGENT);
+  if (shut) return shut;
   const text = String(body?.body ?? "").replace(/\r\n?/g, "\n").trim();
   if (!text) return out({ error: "Write something to say." }, 400);
   if (text.length > MESSAGE_MAX) return out({ error: `A message is at most ${MESSAGE_MAX} characters.` }, 400);
@@ -216,7 +219,8 @@ export async function turn(ctx: Ctx, player: Player, body: any, nowMs: number) {
 /** @rule 106.7 */
 export const post = async (ctx: Ctx) => {
   const player = await getPlayer(ctx.env, ctx.request, ctx.data.game!);
-  if (!player) return json({ error: "Log in to talk to Starling." }, 401);
+  const shut = chatGate(ctx.data.game!, player, AGENT);
+  if (shut) return send(shut);
   const body = await readJson(ctx.request);
   return send(await turn(ctx, player, body, await clockNow(ctx.env)));
 };

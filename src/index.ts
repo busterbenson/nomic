@@ -106,10 +106,12 @@ async function route(request: Request, env: Env, execCtx: ExecutionContext): Pro
   const isCss = path === "/site.css" || path === "/theme.css";
   // The pages' own scripts: one flat folder, plain file names only.
   const isScript = /^\/js\/[A-Za-z0-9._-]+\.js$/.test(path) && !path.includes("..");
+  // The chat portraits: static SVG files (symbol #p), named one by one.
+  const isPortrait = /^\/portraits\/(gremlin|starling|chalant)\.svg$/.test(path);
   const slug = segs[0];
   const sub = segs[1];
-  const isGame = !isRoot && !isCss && !isScript && validSlug(slug) && (sub === undefined || SUBROUTES.has(sub));
-  if (!isRoot && !isCss && !isScript && !isGame) return notFound();
+  const isGame = !isRoot && !isCss && !isScript && !isPortrait && validSlug(slug) && (sub === undefined || SUBROUTES.has(sub));
+  if (!isRoot && !isCss && !isScript && !isPortrait && !isGame) return notFound();
 
   // /auth/verify is the one POST that is a browser form post (the "Continue"
   // button); it is guarded by an Origin check inside the handler instead.
@@ -127,6 +129,12 @@ async function route(request: Request, env: Env, execCtx: ExecutionContext): Pro
   if (isRoot) return run(landing, method, ctx);
   if (isCss) return method === "GET" || method === "HEAD" ? env.ASSETS.fetch(request) : notFound();
   if (isScript) return method === "GET" || method === "HEAD" ? env.ASSETS.fetch(request) : notFound();
+  if (isPortrait) {
+    if (method !== "GET" && method !== "HEAD") return notFound();
+    const res = await env.ASSETS.fetch(request), out = new Response(res.body, res);
+    out.headers.set("cache-control", "public, max-age=86400");
+    return out;
+  }
 
   const game = await env.DB.prepare("SELECT * FROM games WHERE slug = ?").bind(slug).first();
   if (!game) return sub === "api" ? json({ error: "There is no game at this address." }, 404) : notFoundPage();

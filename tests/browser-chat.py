@@ -3,12 +3,13 @@
 # Checks the column on the Workshop tab at 1280 (open, a new message, minimize and back, remembered across a reload, "Commission something"
 # opens it on the new draft), the corner pill and the bottom sheet at 390, the cap's closed composer, a visitor with no window, light and dark,
 # no sideways scroll and no console errors. "ok"/"FAIL" lines; any FAIL makes the exit code 1.
-# Usage: browser-chat.py <base> <screenshot dir or -> <Ada's session cookie> <Bo's session cookie> <Cy's session cookie> <Dee's session cookie>
+# Game "pre" has not started (Fay, its host, is its only player): no window for her, none for Ada (signed in to "shop", not a player there), none for a visitor.
+# Usage: browser-chat.py <base> <screenshot dir or -> <Ada's session cookie> <Bo's> <Cy's> <Dee's> <Fay's session cookie, for pre>
 import re, sys
 from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
 
-base, out, ada_cookie, bo_cookie, cy_cookie, dee_cookie = sys.argv[1:7]
+base, out, ada_cookie, bo_cookie, cy_cookie, dee_cookie, fay_cookie = sys.argv[1:8]
 host = urlparse(base).hostname
 failed = []
 SLUG = "shop"
@@ -20,14 +21,15 @@ def check(name, ok, detail=""):
 def shot(page, name, **kw):
     if out != "-": page.screenshot(path=f"{out}/{name}.png", **kw)
 
-def new_page(b, w, h, scheme, cookie=None):
+def new_page(b, w, h, scheme, cookie=None, slug=None):
+    slug = slug or SLUG
     c = b.new_context(viewport={"width": w, "height": h}, device_scale_factor=1, color_scheme=scheme, has_touch=w < 500)
-    if cookie: c.add_cookies([{"name": "s", "value": cookie, "domain": host, "path": "/" + SLUG}])
+    if cookie: c.add_cookies([{"name": "s", "value": cookie, "domain": host, "path": "/" + slug}])
     page = c.new_page()
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.on("console", lambda m: errors.append("console: " + m.text) if m.type == "error" and "401" not in m.text else None)
-    page.goto(base + f"/{SLUG}/", wait_until="domcontentloaded")
+    page.goto(base + f"/{slug}/", wait_until="domcontentloaded")
     page.wait_for_selector("#scores li"); page.wait_for_function("document.getElementById('rules').textContent.indexOf('Loading') < 0")
     page.wait_for_selector("#tab-workshop"); page.wait_for_timeout(400)
     return c, page, errors
@@ -35,6 +37,22 @@ def new_page(b, w, h, scheme, cookie=None):
 def sideways(page, w, name):
     sw = page.evaluate("document.documentElement.scrollWidth")
     check(f"{name}: no sideways scroll (scrollWidth {sw} <= {w})", sw <= w)
+
+# The sheet fits the screen (rule 106.3): every part of it, the close and send buttons included, inside the viewport, and the composer's text
+# is 16px or more (iOS Safari zooms the page into a smaller field when it takes focus, which pushes a fixed sheet off the right edge).
+def fits(page, w, h, name):
+    page.wait_for_selector("#chatcol .chat", state="visible")
+    bad = []
+    for sel in ["#chatcol", "#chatcol .chat", '#chatcol [data-c="close"]', '#chatcol [data-c="send"]', "#chatText", "#chatcol .ch-h"]:
+        loc = page.locator(sel)
+        if not loc.count(): continue
+        bb = loc.first.bounding_box()
+        if bb and (bb["x"] < -0.5 or bb["x"] + bb["width"] > w + 0.5 or bb["y"] < -0.5 or bb["y"] + bb["height"] > h + 0.5): bad.append((sel, bb))
+    check(f"{name}: every part of the sheet, close and send included, is inside the {w}x{h} screen", not bad, str(bad))
+    if page.locator("#chatText").count():
+        fs = page.evaluate("parseFloat(getComputedStyle(document.getElementById('chatText')).fontSize)")
+        check(f"{name}: the composer's text is 16px or more, so iOS does not zoom the page on focus (it is {fs}px)", fs >= 16)
+    sideways(page, w, name)
 
 def text(page, sel): return " ".join(page.inner_text(sel).split())
 def mode(page): return page.get_attribute("#bwrap", "data-chat")
@@ -121,6 +139,17 @@ with sync_playwright() as p:
         check(f"{tag}: the sheet opens scrolled to the end: the slip is inside the log's visible area", sl["y"] >= lg["y"] - 1 and sl["y"] + sl["height"] <= lg["y"] + lg["height"] + 1, f"log {lg}, slip {sl}, scroll {page.evaluate('(() => { const l = document.getElementById(`chatLog`); return [l.scrollTop, l.scrollHeight, l.clientHeight]; })()')}")
         shot(page, f"phone-sheet-{tag}")
         sideways(page, 390, f"{tag} sheet")
+        fits(page, 390, 844, f"{tag} Gremlin sheet")
+        if scheme == "light":
+            # 375 wide, and a short screen (the keyboard takes the lower half): the same parts, still inside
+            page.set_viewport_size({"width": 375, "height": 844}); page.wait_for_timeout(200); fits(page, 375, 844, "375-light Gremlin sheet")
+            page.set_viewport_size({"width": 390, "height": 420}); page.wait_for_timeout(200); fits(page, 390, 420, "390x420-light Gremlin sheet (keyboard up)")
+            page.focus("#chatText"); shot(page, f"phone-sheet-short-{tag}")
+            page.set_viewport_size({"width": 390, "height": 844}); page.wait_for_timeout(200)
+        else:
+            page.set_viewport_size({"width": 390, "height": 420}); page.wait_for_timeout(200); fits(page, 390, 420, "390x420-dark Gremlin sheet (keyboard up)")
+            shot(page, f"phone-sheet-short-{tag}")
+            page.set_viewport_size({"width": 390, "height": 844}); page.wait_for_timeout(200)
         n0 = msgs(page)
         page.fill("#chatText", "can a Ghost commission something?"); page.click('[data-c="send"]')
         page.wait_for_function(f"document.querySelectorAll('#chatLog .msg').length === {n0 + 2}")
@@ -166,6 +195,31 @@ with sync_playwright() as p:
     page.click("#tab-summary"); page.click("#tab-workshop"); page.wait_for_selector(".ch-in .closed")
     check("1280-light (another tab): after the limit's excuse was given elsewhere, entering the tab again closes the composer with the count, and shows his excuse", text(page, ".ch-in .closed") == "30 of 30 messages today" and "midnight" in text(page, "#chatLog .msg >> nth=-1").lower(), text(page, ".ch-in"))
     check("1280-light (another tab): no console errors", not errors, str(errors)); c.close()
+
+    # ---------------- Starling shares the window: her sheet fits too, at 390 and at 375 and in a short screen
+    c, page, errors = new_page(b, 390, 844, "light", ada_cookie)
+    page.click("#tab-rules"); page.wait_for_selector("#chatfab"); page.click("#chatfab"); page.wait_for_selector("#chatText")
+    check("390-light: the Rulebook tab's pill opens Starling's sheet", "Starling" in text(page, "#chatcol .ch-h"))
+    fits(page, 390, 844, "390-light Starling sheet")
+    page.set_viewport_size({"width": 375, "height": 420}); page.wait_for_timeout(200); fits(page, 375, 420, "375x420-light Starling sheet (keyboard up)")
+    check("390-light: Starling no console errors", not errors, str(errors)); c.close()
+
+    # ---------------- before Start (game "pre"): no pill, no column, no request to the chat route, on either tab, phone or desktop
+    for w, h in [(390, 844), (1280, 900)]:
+        for who, cookie, slug_cookie in [("its host, who is its only player", fay_cookie, "pre"), ("Ada, signed in to another game, not a player here", ada_cookie, "shop")]:
+            c = b.new_context(viewport={"width": w, "height": h}, device_scale_factor=1, color_scheme="light", has_touch=w < 500)
+            c.add_cookies([{"name": "s", "value": cookie, "domain": host, "path": "/" + slug_cookie}])
+            if slug_cookie == "shop": c.add_cookies([{"name": "s", "value": cookie, "domain": host, "path": "/pre"}])   # the browser would not send it; the server must refuse it anyway
+            page = c.new_page(); errors = []; asked = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.on("request", lambda r: asked.append(r.url) if "/api/chat/" in r.url else None)
+            page.goto(base + "/pre/", wait_until="domcontentloaded"); page.wait_for_selector("#tab-workshop"); page.wait_for_timeout(700)
+            for t in ["workshop", "rules"]:
+                page.click("#tab-" + t); page.wait_for_timeout(500)
+                check(f"{w}-light (before Start, {who}): the {t} tab has no pill and no column", mode(page) == "off" and not vis(page, "#chatcol") and not vis(page, "#chatfab") and page.locator("#chatcol .chat").count() == 0)
+            check(f"{w}-light (before Start, {who}): the page never asked the chat route for anything", not asked, str(asked))
+            if who.startswith("its host"): shot(page, f"before-start-{w}")
+            check(f"{w}-light (before Start, {who}): no page errors", not errors, str(errors)); c.close()
 
     # ---------------- a visitor
     c, page, errors = new_page(b, 1280, 900, "light")

@@ -41,11 +41,11 @@ async function settle(env: Env, id: number, outcome: string, reason: string | nu
 /**
  * Step 1, inside the post route: is Gremlin going to answer this post? Only if a key is set, the game is under its month's budget and the
  * reservation goes in under the poster's cap. Returns the reservation's id, or null (no call will be made). Done before the route answers, so
- * the ticket page it returns already says a reply is pending. @rule 804.1
+ * the ticket page it returns already says a reply is pending. @rule 804.1, 203.1
  */
 export async function reserveReply(env: Env, game: any, player: { id: string }, ticket: any, nowMs: number): Promise<number | null> {
   try {
-    if (!agentsReady(env)) return null;
+    if (game.status === "setup" || !agentsReady(env)) return null;   // nothing is played before Start (rule 203.1): no reservation, no call
     const tz = timeZoneOf(game);
     if ((await monthSpend(env, game, tz, nowMs)).over) return null;
     return await reserve(env, game, player.id, ticket.number, localDate(tz, nowMs), settingsOf(game)["gremlin.thread_replies_per_day"], nowMs);

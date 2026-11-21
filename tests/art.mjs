@@ -110,6 +110,15 @@ try {
   check("the page shows the entry's drawing: ready, the hash shown, one unsaved drawing", a1.state === "ready" && a1.shown === h1 && J(a1.drawings) === J([{ hash: h1, saved: false, default: false }]) && a1.prompt === "a small green frog sitting on a lily pad", J(a1));
   const again = await Ana.post(CH, { ticket: "W1", body: "SYNTH-ART same frog, a bit more chat" });
   check("a turn that sends the same prompt again makes no new drawing", again.status === 200 && draws(1).length === 1 && refs(1).length === 1);
+  // the cap is 6 NEW draws a turn, counted on the draws queued: a ticket of 8 entries gets 6 on its first turn and the other 2 on its second
+  const o8 = await Bo.post(T, {}), n8 = Number(o8.data.ticket.slice(1));
+  const t8 = await Bo.post(CH, { ticket: o8.data.ticket, body: "SYNTH-ART8 eight creatures" });
+  check("a ticket of 8 entries: the first turn queues 6 drawings, not 8", t8.status === 200 && t8.data.out === "ok" && JSON.parse(tk(n8).makes).length === 8 && draws(n8).length === 6, `${draws(n8).length}`);
+  await until(() => draws(n8).every((d) => d.state !== "pending"));
+  const t8b = await Bo.post(CH, { ticket: o8.data.ticket, body: "SYNTH-ART8 again, the same eight" });
+  const names8 = draws(n8).map((d) => d.entry_name).sort();
+  check("the second turn queues the remaining 2 (entries 7 and 8), none twice: 8 draws for 8 different entries", t8b.status === 200 && draws(n8).length === 8 && new Set(names8).size === 8 && names8.includes("Pond 7") && names8.includes("Pond 8"), J(names8));
+  check("a third turn with nothing left to draw queues nothing", (await Bo.post(CH, { ticket: o8.data.ticket, body: "SYNTH-ART8 once more" })).status === 200 && draws(n8).length === 8);
 
   console.log("who can see a draft's picture");
   const mine = await bytesOf(Ana, h1);
@@ -247,7 +256,18 @@ try {
   ref(H.E, "sh31", 1); ref(H.E, "live", 1);              // the same bytes saved on two tickets, one of them Shelved: the object stays
   ref(H.F, "sh31", 0);                                   // an unsaved drawing of the Shelved one: no art/ object to keep
   for (const h of [H.A, H.B, H.C, catalogHash, H.E, H.F, H.Z]) { r2Put(state, tmpKey(h), stubPng(1)); r2Put(state, artKey(h), stubPng(1)); }   // H.Z: in the bucket, in no table
-  const cron = async () => { const r = await fetch(`${srv.base}/__scheduled?cron=15+3+*+*+*`, { signal: AbortSignal.timeout(30000) }); await r.text(); return r.status; };
+  // On CI this fetch has failed ("fetch failed", no response at all) 3 times in about 6 runs of shard 1, never alone and never on the Mac, on
+  // identical code; the sweep itself passes whenever it is reached. Until the cause is found (issue: art sweep CI flake), a connection-level failure
+  // is logged with its cause and the server's log, and retried once. A second failure, or any real answer, is reported as is.
+  const cron = async (retry = true) => {
+    try { const r = await fetch(`${srv.base}/__scheduled?cron=15+3+*+*+*`, { signal: AbortSignal.timeout(30000) }); await r.text(); return r.status; }
+    catch (e) {
+      if (!retry || e?.name === "TimeoutError") throw e;
+      console.log("  note  the sweep cron fetch failed (" + (e?.cause?.code || e?.message) + "); retrying once. Server log tail:\n" + srv.log().slice(-3000));
+      await new Promise((res) => setTimeout(res, 2000));
+      return cron(false);
+    }
+  };
   check("the sweep cron answers", await cron() === 200);
   const has = (k) => r2Get(state, k) !== null;
   check("the drawing that only a ticket Shelved 31 days ago saved is deleted from art/", !has(artKey(H.A)));

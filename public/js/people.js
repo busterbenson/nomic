@@ -1,13 +1,17 @@
 // Players on the page: the piece drawn small, and the player pill (their piece + name) used everywhere a name appears.
 import { ensureDefs, pieceSVG } from "/js/pieces.js";
+import { HEIGHT } from "/js/pieces-data.js";
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 export const hexOf = (c) => (c && /^#[0-9a-f]{6}$/i.test(c.hex) ? c.hex : "#888");
 
-/** The piece, small: a player's traced shape in their color. */
+/**
+ * The piece, small: a player's traced shape in their color. The viewBox is centred on the piece's own height (its feet are at y 0, lifted 3 units for its shadow, and
+ * it stands HEIGHT[shape] tall), so every shape's visual mass sits at the middle of the box and a pill's text lines up with it.
+ */
 export function mini(p, cls = "") {
   ensureDefs();
-  return `<svg ${cls ? `class="${cls}" ` : ""}viewBox="-22 -46 44 50" aria-hidden="true">${pieceSVG({ shape: p.shape, color: p.color, scale: 1, clip: false })}</svg>`;
+  return `<svg ${cls ? `class="${cls}" ` : ""}viewBox="-22 ${(-(HEIGHT[p.shape] || HEIGHT.pawn) / 2 - 22).toFixed(1)} 44 50" aria-hidden="true">${pieceSVG({ shape: p.shape, color: p.color, scale: 1, clip: false })}</svg>`;
 }
 
 /**
