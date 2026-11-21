@@ -86,8 +86,11 @@ export const get = async (ctx: Ctx) => {
   const before = raw === null ? undefined : Number(raw);
   if (raw !== null && !(Number.isInteger(before) && before! > 0)) return json({ error: "That is not a place in the history." }, 400);
   const h = await historyPage(env.DB, game.id, player.id, AGENT, before);
-  const ids = [...new Set(h.rows.map((m: any) => m.proposal).filter(Boolean))] as string[];
-  return json({ messages: h.rows, next: h.next, slips: await slipsOf(ctx, game, day, turn, player, ids, nowMs), state: await stateWith(ctx, game, day, player, nowMs) });
+  // the newest draft the player has, however far back its line is: the window's slip must not depend on the page of history it loaded
+  const newest = (await env.DB.prepare("SELECT proposal_id FROM chat_messages WHERE game_id = ? AND player_id = ? AND agent = ? AND proposal_id IS NOT NULL ORDER BY id DESC LIMIT 1").bind(game.id, player.id, AGENT).first()) as any;
+  const live: string | null = newest?.proposal_id ?? null;
+  const ids = [...new Set([...h.rows.map((m: any) => m.proposal), ...(before === undefined && live ? [live] : [])].filter(Boolean))] as string[];
+  return json({ messages: h.rows, next: h.next, live, slips: await slipsOf(ctx, game, day, turn, player, ids, nowMs), state: await stateWith(ctx, game, day, player, nowMs) });
 };
 
 // One turn.

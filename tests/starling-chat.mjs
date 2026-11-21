@@ -120,6 +120,15 @@ try {
   const leak = await say(Ana, "SYNTH-LEAK");
   check("an answer that repeats her canary is dropped: a canned line, nothing done, logged invalid", leak.data.out === "malformed" && leak.data.messages[1].canned === "malformed" && !J(leak.data).includes("STRLG") && acalls("outcome = 'invalid'").length === 1);
 
+  console.log("the live slip does not depend on the page of history (a draft older than 50 lines)");
+  const liveBefore = rows("Ana").filter((r) => r.proposal_id).at(-1).proposal_id;
+  d1(state, Array.from({ length: 60 }, (_, i) => `INSERT INTO chat_messages (game_id, player_id, agent, local_date, day, role, body, at) VALUES ('${gid}', '${id.Ana}', 'starling', '2026-11-10', 1, 'agent', 'filler ${i}', '2026-11-10T19:00:00.000Z')`).join(";\n"));
+  const deep = await Ana.get(CH);
+  check("with 60 later lines the draft's own line is not in the first page, yet the window names it (live) and carries its slip with Lock it in's state",
+    deep.data.messages.length === 50 && !deep.data.messages.some((m) => m.proposal) && deep.data.live === liveBefore && !!deep.data.slips[liveBefore] && deep.data.slips[liveBefore].status === "draft" && deep.data.slips[liveBefore].can.lock.allowed === true, J([deep.data.live, liveBefore, Object.keys(deep.data.slips)]));
+  check("an older page (before=<id>) asks for no extra slip", (await Ana.get(`${CH}?before=${deep.data.messages[0].id}`)).data.live === liveBefore);
+  d1(state, `DELETE FROM chat_messages WHERE body LIKE 'filler %' AND player_id = '${id.Ana}'`);
+
   console.log("every refusal the drafter has stays (rules 103.1, 103.6)");
   const nProp = props("Ana").length;
   const bad = await say(Ana, "SYNTH-BADDRAFT an edit of rule 999");

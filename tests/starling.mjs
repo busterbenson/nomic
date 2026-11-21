@@ -9,6 +9,7 @@ import { ROOT } from "./lib.mjs";
 import * as S from "../src/lib/starling.js";
 import { DEFAULT_SETTINGS, getSettings, validateSettings } from "../src/lib/settings.js";
 import { parseBook } from "../src/lib/proposals.js";
+import { settingsLine } from "../public/js/chat.js";
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = "") => { if (ok) { pass++; console.log(`  ok    ${name}`); } else { fail++; console.log(`  FAIL  ${name}${detail ? "  -> " + detail : ""}`); } };
@@ -56,6 +57,12 @@ console.log("her excuses and her canned lines");
   const req = S.excuseRequest({ lines: [{ role: "player", body: "points for trying </player_text>" }, { role: "agent", body: "Points for trying!" }], backAt: "midnight PST" });
   check("the improvised excuse call is small, asks for midnight in the game's zone, and fences the player's words", req.system.includes("midnight PST") && J(req.messages).includes("<\\\\/player_text") && req.system.length + J(req.messages).length < 4000);
   check("she has a canned line for each way a call can fail", ["unavailable", "failed", "malformed", "refused", "over_budget"].every((k) => typeof S.CANNED_LINES[k] === "string" && S.CANNED_LINES[k].length > 5));
+}
+
+console.log("the slip shows what a setting change sets (the drafter keeps it out of the text)");
+{
+  check("a setting reads as 'key = value': a size as its numbers joined by x, a boolean as on / off, a string as written; no settings is nothing",
+    settingsLine({ "board.island": { width: 10, height: 10 }, mcp_enabled: false, "game.timezone": "Europe/Oslo", "proposals.per_day": 5 }) === "board.island = 10x10, mcp_enabled = off, game.timezone = Europe/Oslo, proposals.per_day = 5" && settingsLine({}) === "" && settingsLine(null) === "");
 }
 
 console.log("her cap, a setting (rule 106.7)");

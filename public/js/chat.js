@@ -46,10 +46,12 @@ const SYMBOLS = `<svg width="0" height="0" style="position:absolute" aria-hidden
 // The two windows (Gremlin on the Workshop tab, Starling on the Rulebook) share ONE column and ONE pill in the page. Only the one whose tab is
 // showing may draw into them, place them or answer a click: `ACTIVE` is that agent's key.
 let ACTIVE = null;
+/** The settings a slip sets, as "key = value" (an object value as its numbers joined by x, a boolean as on / off): the drafter keeps a setting change out of the text. @rule 103.1 */
+export const settingsLine = (settings) => Object.entries(settings || {}).map(([k, v]) => `${k} = ${v && typeof v === "object" ? Object.values(v).join("x") : typeof v === "boolean" ? (v ? "on" : "off") : String(v)}`).join(", ");
 const LEFT_SHOWN = 10;   // "N left" appears in the last ten messages of the day
 
 export function createChat({ api, root, me, slug, agent = AGENTS.gremlin, rpill, wpill, onTicket, onProposals }) {
-  const S = { msgs: [], next: null, state: null, ticket: null, rule: null, slips: {}, lockErr: {}, slip: null, busy: false, draft: "", err: "", sheet: false, open: true, loaded: false, loading: false, tab: "", note: "" };
+  const S = { msgs: [], next: null, state: null, ticket: null, rule: null, live: null, slips: {}, lockErr: {}, slip: null, busy: false, draft: "", err: "", sheet: false, open: true, loaded: false, loading: false, tab: "", note: "" };
   const col = root.querySelector("#chatcol"), fab = root.querySelector("#chatfab");
   const mine = () => ACTIVE === agent.key;
   if (!document.getElementById("chat-symbols")) { const d = document.createElement("div"); d.id = "chat-symbols"; d.innerHTML = SYMBOLS; document.body.appendChild(d); }
@@ -102,7 +104,9 @@ ${refused ? `<div class="tx">${esc(last.refusal)}</div>` : ""}
   /** The proposal the slip at the bottom of the log shows: the last one her lines pointed at, while it is still a draft or locked in. @rule 103.1 */
   function liveId() {
     const last = [...S.msgs].reverse().find((m) => m.proposal && S.slips[m.proposal]);
-    return last && alive(S.slips[last.proposal]) ? last.proposal : null;
+    // no loaded line points at a slip (the draft is older than the page of history): the server names the newest one
+    const id = last ? last.proposal : S.live;
+    return id && alive(S.slips[id]) ? id : null;
   }
   /** One past slip, collapsed to a line and its outcome. @rule 103.1 */
   function pastSlipHTML(id) {
@@ -127,7 +131,7 @@ ${refused ? `<div class="tx">${esc(last.refusal)}</div>` : ""}
 <div class="hd">${sl.n ? ppill(sl.n) : ""}<span class="hdt">${textHTML(sl.head || "")}</span></div>
 ${sl.words ? `<div class="yw">${esc(`Your words: “${sl.words}”`)}</div>` : ""}
 ${sl.after_text ? `<div class="tx">${esc(sl.after_text)}</div>` : sl.before_text ? `<div class="tx del">${esc(sl.before_text)}</div>` : ""}
-<dl><dt>Change</dt><dd>${esc(KIND[sl.kind] || sl.kind)}${sl.target ? ` ${rpill(sl.target)}` : ""}</dd><dt>Needs</dt><dd>${needs}</dd><dt>Conflicts</dt><dd>${sl.conflicts && sl.conflicts.length ? sl.conflicts.map((n) => rpill(n)).join(" ") : "none"}</dd></dl>
+<dl><dt>Change</dt><dd>${esc(KIND[sl.kind] || sl.kind)}${sl.target ? ` ${rpill(sl.target)}` : ""}</dd>${sl.settings && Object.keys(sl.settings).length ? `<dt>Sets</dt><dd>${esc(settingsLine(sl.settings))}</dd>` : ""}<dt>Needs</dt><dd>${needs}</dd><dt>Conflicts</dt><dd>${sl.conflicts && sl.conflicts.length ? sl.conflicts.map((n) => rpill(n)).join(" ") : "none"}</dd></dl>
 <div class="act">${act}</div>${err}</section>`;
   }
   /** The drafter said no: the reason, no button. @rule 103.1, 110.1 */
@@ -237,6 +241,7 @@ ${sl.after_text ? `<div class="tx">${esc(sl.after_text)}</div>` : sl.before_text
     if (r.ok) {
       S.state = r.data.state;
       if (r.data.slips) S.slips = { ...S.slips, ...r.data.slips };
+      if (r.data.live !== undefined) S.live = r.data.live;
       const have = new Set(S.msgs.map((m) => m.id));
       for (const m of r.data.messages) if (!have.has(m.id)) S.msgs.push(m);
     }
@@ -256,7 +261,7 @@ ${sl.after_text ? `<div class="tx">${esc(sl.after_text)}</div>` : sl.before_text
     S.loading = true;
     const r = await api(`/api/chat/${agent.path}`);
     S.loading = false;
-    if (r.ok) { S.msgs = r.data.messages; S.next = r.data.next; S.state = r.data.state; S.slips = r.data.slips || {}; S.loaded = true; S.err = ""; } else S.err = (r.data && r.data.error) || "Something went wrong.";
+    if (r.ok) { S.msgs = r.data.messages; S.next = r.data.next; S.state = r.data.state; S.slips = r.data.slips || {}; S.live = r.data.live || null; S.loaded = true; S.err = ""; } else S.err = (r.data && r.data.error) || "Something went wrong.";
     // the ticket the last turns were about stays on the slip; the box is attached to it only while it is still a draft
     const lastTicket = S.ticket || ([...S.msgs].reverse().find((m) => m.ticket) || {}).ticket;
     if (lastTicket) await loadSlip(lastTicket, !S.ticket);
