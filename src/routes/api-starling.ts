@@ -151,7 +151,7 @@ export async function turn(ctx: Ctx, player: Player, body: any, nowMs: number) {
   const t0 = await todayOf(ctx, game, player);
   const blocked = turnBlock(game, day, playerTurn, player, "propose", nowMs);
   const noDraft = blocked ? blocked.error : null;
-  const drafted = lastMeta.refused ? { refused: String(lastMeta.refused.error ?? "") } : lastRow?.proposal_id && slipRow ? { head: slipRow?.draft_head, after_text: slipRow?.after_text, conflicts: slipRow ? JSON.parse(slipRow.conflicts || "[]") : [] } : null;
+  const drafted = lastMeta.refused ? { refused: String(lastMeta.refused.error ?? "") } : lastRow?.proposal_id && slipRow && slipRow.id === lastRow.proposal_id ? { head: slipRow?.draft_head, after_text: slipRow?.after_text, conflicts: slipRow ? JSON.parse(slipRow.conflicts || "[]") : [] } : null;
   const { system, messages } = starlingRequest({
     rulesMd, localDate: date, perDay: limit, history: hist, label: player.display_name, message: text, rule,
     slip: slipRow ? { n: slipRow.number ? `P${slipRow.number}` : null, status: slipRow.status === "confirmed" ? "locked in" : "a draft, not locked in", head: slipRow.draft_head, after_text: slipRow.after_text, words: slipRow.words, conflicts: JSON.parse(slipRow.conflicts || "[]") } : null,
@@ -183,7 +183,7 @@ export async function turn(ctx: Ctx, player: Player, body: any, nowMs: number) {
   const meta: Record<string, unknown> = {};
   if (a.quotes.length) meta.quotes = a.quotes;
   let proposalId: string | null = null;
-  const notes: string[] = [...a.dropped.map((d) => `dropped: ${d}`)];
+  const notes: string[] = [...a.dropped.map((d) => `dropped: ${d}`), ...a.flagged.map((d) => `flagged: ${d}`)];
   if (a.draft) {
     if (noDraft) { meta.refused = { error: `Nothing was drafted: ${noDraft}` }; notes.push("draft refused: day gate"); }
     else {

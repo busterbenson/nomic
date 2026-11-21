@@ -186,7 +186,8 @@ export function checkQuote(book, q) {
   const front = at > lead && !/[.!?]$/.test(hay.slice(0, at).trimEnd());
   const back = hay.slice(at + want.length).replace(/[^a-z0-9]+/g, "") !== "" && !".!?".includes(hay[at + want.length]);
   if (want.split(" ").length < QUOTE_MIN_WORDS && (front || back)) return { dropped: "quote too short" };
-  const clean = oneLine(text.replace(/[*_`]/g, "")).replace(/^[\u2026.]+|[\u2026]+$/g, "").trim();
+  let clean = oneLine(text.replace(/[*_`]/g, "")).replace(/^[\u2026.]+|[\u2026]+$/g, "").trim();
+  if (back) clean = clean.replace(/[.!?]+$/, "");   // a cut quote doesn't end in a full stop of its own: the ellipsis is its end
   return { num, text: `${front ? "\u2026" : ""}${clean}${back ? "\u2026" : ""}` };
 }
 /** Runs of 8 or more words that `say` puts in quotation marks and that are neither the rulebook's nor the player's: a fabricated "Word for word". Logged, not blocked. @rule 106.2 */
@@ -201,7 +202,7 @@ export function unverifiedQuotes(say, rulesPlain, playerText) {
 
 /**
  * The model's answer text read into what the platform will do. `ctx`: {book, systemText}. Returns
- *   {ok: true, say, quotes: [{num, text}], dropped: [reason...], draft: {kind, target, words, to} | null, escalate: {category, reason} | null}
+ *   {ok: true, say, quotes: [{num, text}], dropped: [reason...], flagged: [what was logged and kept], draft: {kind, target, words, to} | null, escalate: {category, reason} | null}
  *   {ok: false, code: "malformed" | "invalid", reason}      nothing is done and the player gets a canned line
  * Unknown fields at any level are dropped (a lock, a withdraw, a vote, a rule edit: she has no such field). The draft is only SHAPED here:
  * every refusal (no such rule, scope, a setting, "not wired yet") is the drafter's own, at draft time. @rule 103.1, 106.2, 106.4
@@ -220,7 +221,7 @@ export function readStarlingAnswer(text, ctx) {
   if (say.includes(STARLING_CANARY) || (ctx.systemText && repeatsPrompt(say, ctx.systemText))) return { ok: false, code: "invalid", reason: "repeated the prompt" };
 
   const quotes = [], dropped = [];
-  if (ctx.rulesPlain && unverifiedQuotes(say, ctx.rulesPlain, ctx.playerText || "").length) dropped.push("unverified quote in say");
+  const flagged = ctx.rulesPlain && unverifiedQuotes(say, ctx.rulesPlain, ctx.playerText || "").length ? ["unverified quote in say"] : [];   // logged, never blocked: it is her prose
   for (const q of (Array.isArray(a.quotes) ? a.quotes : []).slice(0, QUOTES_MAX)) {
     const r = checkQuote(ctx.book, q);
     if ("dropped" in r) dropped.push(r.dropped); else if (!quotes.some((x) => x.num === r.num && qkey(x.text) === qkey(r.text))) quotes.push(r);
@@ -244,7 +245,7 @@ export function readStarlingAnswer(text, ctx) {
     const reason = oneLine(e.reason).slice(0, ESCALATION_REASON_MAX);
     if (reason) escalate = { category, reason }; else dropped.push("an escalation with no reason");
   }
-  return { ok: true, say, quotes, dropped, draft, escalate };
+  return { ok: true, say, quotes, dropped, flagged, draft, escalate };
 }
 
 // ---- the excuse call ---------------------------------------------------------------------------------------------------------------

@@ -26,6 +26,10 @@ Found on the first run, both fixed in `starling.js`: (1) she declined to draft (
 
 `--model claude-haiku-5-5` on the 4 question cases: 3 of 4. It escalated "can two players trade points?" (a ruling) where Sonnet said the rules are silent. Cost $0.0002 a turn against $0.0028 for the same cases on Sonnet. Four cases are too few to decide on; the lean stays Sonnet for both until a wider question set shows Haiku holding (nothing else in the answers differed: quotes verified, no drafts).
 
+## Quotes and the live eval
+
+A quote must be whole words from the rule's own text, at least 4 of them unless it is a whole sentence (a fragment of one or two words can turn a "may not" into a "may"), and is shown with an ellipsis where it is cut mid-sentence; all 16 recorded answers pass that check unchanged. A long quoted run in her prose that is neither the rulebook's nor the player's is logged as `flagged: unverified quote in say` on the call and not blocked. The live script does not pass `rulesPlain`, so the flag's real-world rate is not measured here; the nightly read shows it.
+
 ## What this does not show
 
 The live cases are single turns with hand-written histories; a long conversation's drift is not measured. The drafter (Haiku) is not exercised here: its own eval is `docs/drafter-eval.md`. A quote's word-for-word check, the lock/withdraw fence and the escalation insert are tested offline (`tests/starling.mjs`, `tests/starling-chat.mjs`).
