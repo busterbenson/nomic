@@ -16,7 +16,8 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # ubuntu-latest is 26.04 now, which Playwright 1.58 cannot install Chromium on; pinned to a supported image
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       # The suite stubs every model call (MODEL_BASE_URL) and every rules fetch; it needs no secret.
