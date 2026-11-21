@@ -467,7 +467,7 @@ try {
     rows().filter((r) => r.status === "confirmed").length === 1, ca.text + " | " + cb.text);
   const anaP1 = okOne[0].data.proposal;
   const anaOther = anaP1.id === v.id ? dm.data.proposal.id : v.id;
-  check("after confirming, Ana can't draft more today (409), and /api/day says she proposed", (await ana.post(P, { kind: "repeal", target: "402" })).status === 409 && (await ana.get("/prop/api/day")).data.you.proposed === true && (await ana.get("/prop/api/day")).data.you.can.propose.allowed === false);
+  check("after confirming, Ana can't draft more today (409), and /api/day says she proposed", (await ana.post(P, { kind: "repeal", target: "403" })).status === 409 && (await ana.get("/prop/api/day")).data.you.proposed === true && (await ana.get("/prop/api/day")).data.you.can.propose.allowed === false);
   const bd = await bo.post(P, { kind: "mark", target: "105" });
   const cyd = await cy.post(P, { kind: "add", target: "400", words: "A tie goes to the older player." });
   const [bc, cc] = await Promise.all([bo.post(`${P}/${bd.data.proposal.id}/confirm`, {}), cy.post(`${P}/${cyd.data.proposal.id}/confirm`, {})]);
@@ -499,17 +499,18 @@ try {
   console.log("End turn and the lock block proposals");
   const cyP = cc.data.proposal;
   await cy.post("/prop/api/end-turn", {});
-  const cw = await cy.post(`${P}/${cyP.id}/withdraw`, {}), cdr = await cy.post(P, { kind: "repeal", target: "402" });
+  const cw = await cy.post(`${P}/${cyP.id}/withdraw`, {}), cdr = await cy.post(P, { kind: "repeal", target: "403" });
   check("after End turn Cy can neither withdraw nor draft: 409 'Your turn has ended for today.'", [cw, cdr].every((r) => r.status === 409 && r.data.error === "Your turn has ended for today."), cw.text + cdr.text);
-  const bd2 = await bo.post(P, { kind: "repeal", target: "402" }); // a draft, kept for after midnight
+  const bd2 = await bo.post(P, { kind: "repeal", target: "403" }); // a draft, kept for after midnight
   check("Bo's second draft today is refused: he already confirmed", bd2.status === 409);
-  const anaDraft = await ana.post(P, { kind: "repeal", target: "402" });
+  const anaDraft = await ana.post(P, { kind: "repeal", target: "403" });
   check("Ana (P4 confirmed) can't draft either", anaDraft.status === 409);
   d1(state, `UPDATE proposals SET status = 'withdrawn', withdrawn_at = 'x' WHERE id = '${again.data.proposal.id}'`);
-  const late = await ana.post(P, { kind: "repeal", target: "402" });
+  // 403 is cited by nothing: since 110 retired, a repeal of 402 conflicts with 103.2 (cites 402.4, not wired yet), which is not what this check is about
+  const late = await ana.post(P, { kind: "repeal", target: "403" });
   d1(state, `UPDATE proposals SET status = 'confirmed', withdrawn_at = NULL WHERE id = '${again.data.proposal.id}'`);
   setClock("2026-03-09T07:00:00.000Z"); // midnight exactly; the cron has not run
-  const lk = [await ana.post(P, { kind: "repeal", target: "402" }), await ana.post(`${P}/${late.data.proposal.id}/confirm`, {}), await ana.post(`${P}/${again.data.proposal.id}/withdraw`, {}), await ana.post("/prop/api/turn", { kind: "repeal", target: "402" })];
+  const lk = [await ana.post(P, { kind: "repeal", target: "403" }), await ana.post(`${P}/${late.data.proposal.id}/confirm`, {}), await ana.post(`${P}/${again.data.proposal.id}/withdraw`, {}), await ana.post("/prop/api/turn", { kind: "repeal", target: "403" })];
   check("at midnight exactly (before the cron): draft, confirm, withdraw and /api/turn all answer 423 'Chalant is processing day 1'", lk.every((r) => r.status === 423 && r.data.error === LOCK1 && r.data.processing_day === 1), lk.map((r) => r.status + " " + r.text).join(" | "));
   check("...and nothing changed", rows().find((r) => r.id === again.data.proposal.id).status === "confirmed" && rows().find((r) => r.id === late.data.proposal.id).status === "draft");
 
@@ -529,7 +530,7 @@ try {
     t2.status === 200 && t2.data.proposal.n === "P5" && t2.data.proposal.day_ballot === 3 && (await cy.post("/prop/api/turn", { prompt: "Make it rain." })).status === 400, t2.text);
 
   console.log("guards: stale drafts, the draft cap, filters, and each write's own SQL");
-  const cyd2 = await cy.post(P, { kind: "repeal", target: "402" });
+  const cyd2 = await cy.post(P, { kind: "repeal", target: "403" });
   d1(state, `UPDATE proposals SET base_sha = 'stale' WHERE id = '${cyd2.data.proposal.id}'`);
   const stale = await cy.post(`${P}/${cyd2.data.proposal.id}/confirm`, {});
   check("a draft made against rules that have since changed (another bundle) can't be confirmed: 409, draft it again", stale.status === 409 && /rules have changed/.test(stale.data.error), stale.text);
