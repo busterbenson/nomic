@@ -246,7 +246,7 @@ import { createChat, AGENTS } from "/js/chat.js";
     STAR = createChat({ api, root: $("bwrap"), me: () => ME, slug: SLUG, agent: AGENTS.starling, rpill: n => PROP.rpill(n), wpill: wPill,
       onProposals: async () => { await refresh(); loadNotes(); } });
     // her window: a rule card's "Draft with Starling" puts the card away first, since it would cover her
-    PROP = createProposer({ api, me: () => ME, day: () => DAY, pill, vote: n => BAL.box(n), starling: () => STAR && ({ ready: () => STAR.ready(), attachRule: async (n, o) => { CARDS.close(); await STAR.attachRule(n, o); } }), refresh: async () => { await refresh(); loadNotes(); } });
+    PROP = createProposer({ api, me: () => ME, day: () => DAY, pill, vote: n => BAL.box(n), starling: () => STAR && ({ ready: () => STAR.ready(), attachRule: async (n, o) => { CARDS.close(); if (TAB !== "rules") setTab("rules"); await STAR.attachRule(n, o); } }), refresh: async () => { await refresh(); loadNotes(); } });
     drawTabs(); drawBook();
     loadMe();
     const [g] = await Promise.all([api("/api/game"), loadDay()]);

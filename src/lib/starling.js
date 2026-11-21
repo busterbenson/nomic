@@ -106,7 +106,7 @@ export function tailText({ label, message, rule, slip, drafted, made, limit, noD
   const d = drafted
     ? drafted.refused
       ? `What happened to your last draft: the drafter refused it: ${fence("drafter", drafted.refused)}\n`
-      : `What happened to your last draft: the drafter made it, and the slip above is it.${drafted.conflicts && drafted.conflicts.length ? ` It would conflict with: ${drafted.conflicts.join(", ")}.` : ""}\n`
+      : `What happened to your last draft: the drafter made it, and the slip above is it.${drafted.conflicts && drafted.conflicts.filter((n) => /^\d{3}(\.\d+)?$/.test(n)).length ? ` It would conflict with: ${drafted.conflicts.filter((n) => /^\d{3}(\.\d+)?$/.test(n)).join(", ")}.` : ""}\n`
     : "";
   const n = `The player has locked in ${made} of ${limit} proposals today.\n`;
   const no = noDraft ? `Nothing you draft will be made right now (${noDraft}): answer their question and say so.\n` : "Drafting is open.\n";
@@ -146,17 +146,29 @@ export function plainForQuote(s) {
     .replace(/[*_`]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
 }
 /** A quote's identity for dropping repeats: plain, without the dots and quote marks round it. @rule 106.2 */
-const qkey = (t) => plainForQuote(t).replace(/^["'.\s]+|["'.\s]+$/g, "");
+const qkey = (t) => plainForQuote(t).replace(/^["'.\u2026\s]+|["'.\u2026\s]+$/g, "");
 /** The rulebook's own text of a rule or clause, plain, or null. @rule 106.2 */
 export function nodeText(book, num) {
   if (!has(book, num)) return null;
   const n = book.byNum[num];
   return n.kind === "clause" ? clauseText(n) : n.kind === "rule" ? ruleText(n) : null;
 }
+/** Where `want` sits in `hay` as whole words (not inside a word), or -1. @rule 106.2 */
+function wordIndex(hay, want) {
+  const alnum = /[a-z0-9]/;
+  for (let i = hay.indexOf(want); i >= 0; i = hay.indexOf(want, i + 1)) {
+    if ((i === 0 || !alnum.test(hay[i - 1])) && (i + want.length === hay.length || !alnum.test(hay[i + want.length]))) return i;
+  }
+  return -1;
+}
+/** Fewest words a quote may be unless it is the whole clause: a fragment of one or two words can turn a "may not" into a "may". */
+export const QUOTE_MIN_WORDS = 4;
 /**
  * One quote, checked against the rulebook word for word: the number must be a rule or clause the book has, and the words must be inside that
- * rule's own text (a quote of a clause may also sit in the clause's rule: a model naming 103 for a line of 103.3 is still quoting 103's text).
- * Returns {num, text} (the text as the rulebook has it, trimmed to the quote), or {dropped: reason}. @rule 106.2
+ * rule's own text (a quote of a clause may also sit in the clause's rule: a model naming 103 for a line of 103.3 is still quoting 103's text),
+ * as whole words, at least QUOTE_MIN_WORDS of them unless it is all of the text. A quote that leaves words out of the front or the back of its
+ * clause is shown with an ellipsis there, so a cut-down sentence never reads as the whole one.
+ * Returns {num, text} (the quote, ellipsised), or {dropped: reason}. @rule 106.2
  */
 export function checkQuote(book, q) {
   const num = oneLine(q?.num).replace(/^rules?\s+/i, "");
@@ -167,8 +179,24 @@ export function checkQuote(book, q) {
   if (have === null) return { dropped: "no such rule" };
   const want = qkey(text);
   const hay = plainForQuote(have);
-  if (!want || !hay.includes(want)) return { dropped: "not the rule's words" };
-  return { num, text: oneLine(text.replace(/[*_`]/g, "")) };
+  const at = want ? wordIndex(hay, want) : -1;
+  if (at < 0) return { dropped: "not the rule's words" };
+  const lead = hay.startsWith(`${num} `) ? num.length + 1 : 0;                 // "103.3 " is the clause's own number, not a word of it
+  // a cut inside a sentence gets the ellipsis; a quote that starts and stops on sentence edges is a whole sentence (or several), however long the clause
+  const front = at > lead && !/[.!?]$/.test(hay.slice(0, at).trimEnd());
+  const back = hay.slice(at + want.length).replace(/[^a-z0-9]+/g, "") !== "" && !".!?".includes(hay[at + want.length]);
+  if (want.split(" ").length < QUOTE_MIN_WORDS && (front || back)) return { dropped: "quote too short" };
+  const clean = oneLine(text.replace(/[*_`]/g, "")).replace(/^[\u2026.]+|[\u2026]+$/g, "").trim();
+  return { num, text: `${front ? "\u2026" : ""}${clean}${back ? "\u2026" : ""}` };
+}
+/** Runs of 8 or more words that `say` puts in quotation marks and that are neither the rulebook's nor the player's: a fabricated "Word for word". Logged, not blocked. @rule 106.2 */
+export function unverifiedQuotes(say, rulesPlain, playerText) {
+  const bad = [];
+  for (const m of String(say).matchAll(/["\u201C]([^"\u201D]{40,})["\u201D]/g)) {
+    const w = qkey(m[1]);
+    if (w.split(" ").length >= 8 && !rulesPlain.includes(w) && !plainForQuote(playerText).includes(w)) bad.push(w.slice(0, 30));
+  }
+  return bad;
 }
 
 /**
@@ -192,6 +220,7 @@ export function readStarlingAnswer(text, ctx) {
   if (say.includes(STARLING_CANARY) || (ctx.systemText && repeatsPrompt(say, ctx.systemText))) return { ok: false, code: "invalid", reason: "repeated the prompt" };
 
   const quotes = [], dropped = [];
+  if (ctx.rulesPlain && unverifiedQuotes(say, ctx.rulesPlain, ctx.playerText || "").length) dropped.push("unverified quote in say");
   for (const q of (Array.isArray(a.quotes) ? a.quotes : []).slice(0, QUOTES_MAX)) {
     const r = checkQuote(ctx.book, q);
     if ("dropped" in r) dropped.push(r.dropped); else if (!quotes.some((x) => x.num === r.num && qkey(x.text) === qkey(r.text))) quotes.push(r);

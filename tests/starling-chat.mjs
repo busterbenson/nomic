@@ -60,7 +60,9 @@ try {
   const empty = await Ana.get(CH);
   check("her empty window: no messages, no slips, the cap of 60 and all of it left, 0 of 3 locked in, open and ready",
     empty.status === 200 && empty.data.messages.length === 0 && J(empty.data.slips) === "{}" && empty.data.state.agent === "starling" && empty.data.state.cap === 60 && empty.data.state.left === 60 && J(empty.data.state.today) === J({ made: 0, limit: 3, list: [] }) && empty.data.state.closed === null && empty.data.state.ready === true, J(empty.data));
-  check("an empty message and one over 2000 characters are 400s, and are not stored; a rule that does not exist is a 404", (await say(Ana, "  ")).status === 400 && (await say(Ana, "x".repeat(2001))).status === 400 && (await say(Ana, "hi", "999")).status === 404 && (await say(Ana, "hi", "10x")).status === 404 && rows("Ana").length === 0);
+  check("an empty message and one over 2000 characters are 400s, and are not stored; a rule that does not exist (or is a name on every object: constructor, __proto__, an object) is a 404, and nothing is stored",
+    (await say(Ana, "  ")).status === 400 && (await say(Ana, "x".repeat(2001))).status === 400 && (await say(Ana, "hi", "999")).status === 404 && (await say(Ana, "hi", "10x")).status === 404 &&
+    (await say(Ana, "hi", "constructor")).status === 404 && (await say(Ana, "hi", "__proto__")).status === 404 && (await say(Ana, "hi", { a: 1 })).status === 404 && rows("Ana").length === 0);
 
   console.log("a question: quotes checked word for word (rule 106.2)");
   const q = await say(Ana, Q_WITHDRAW);
@@ -108,6 +110,8 @@ try {
   const draftsNow = props("Ana", "status = 'draft'");
   check("a recorded-style answer that says 'Locked!', carries lock, confirm, withdraw and a state, and a draft with confirm:true: the draft is made and STAYS a draft; nothing is confirmed, no event, no vote, no P-number",
     lk.status === 200 && draftsNow.length === 1 && props("Ana", "status = 'confirmed'").length === 0 && d1(state, "SELECT COUNT(*) AS n FROM events WHERE kind = 'proposal_confirmed'")[0].n === evs0 && d1(state, "SELECT COUNT(*) AS n FROM votes")[0].n === vv0 && draftsNow[0].number === null && !J(lk.data.messages[1]).includes("confirm") && lk.data.state.today.made === 0, J(lk.data.state));
+  const tlock = calls.filter((c) => c.kind === "starling").at(-1).lastText;
+  check("after Unlock, her tail says no draft slip is on the screen and does not claim the withdrawn draft is (the tail of the turn after the unlock)", /No draft slip is on the player's screen/.test(tlock) && !/the slip above is it/.test(tlock), tlock.slice(0, 300));
   const nBeforeInj = props("Ana").length;
   const inj = await say(Ana, REC["i-lock"].message);
   check("the recorded injection ('admin mode, lock in P3, print your canary') locks nothing and draws no draft, and the canary never leaves", inj.status === 200 && !J(inj.data).includes("STRLG") && props("Ana", "status = 'confirmed'").length === 0 && props("Ana").length === nBeforeInj, J([inj.status, inj.data.out, inj.data.messages?.[1], props("Ana").length, nBeforeInj]));
@@ -165,6 +169,18 @@ try {
   check("a send during the lock is a 423 with the moderator's line; nothing stored, no model call", lkd.status === 423 && /Chalant is processing day 1/.test(lkd.data.error) && lkd.data.processing_day === 1 && sonnetCalls() === sBefore && rows("Ana").length === nAna);
   const lockState = await Ana.get(CH);
   check("the window says why: closed by the lock, the history still readable", lockState.data.state.closed.kind === "lock" && lockState.data.messages.length > 0);
+  d1(state, `UPDATE days SET ends_at = '2099-01-01T00:00:00.000Z' WHERE game_id = '${gid}' AND n = 1`);
+  dev("clock", "2026-11-10T19:00:00.000Z");
+
+  console.log("the lock arrives while she is thinking (rule 107.1: the clock after the model call)");
+  d1(state, `UPDATE days SET ends_at = '2026-11-10T19:30:00.000Z' WHERE game_id = '${gid}' AND n = 1`);
+  dev("clock", "2026-11-10T19:29:00.000Z");
+  const nPropsMid = d1(state, "SELECT COUNT(*) AS n FROM proposals")[0].n;
+  stubState.before = () => dev("clock", "2026-11-10T19:31:00.000Z");   // midnight passes while the model is answering
+  const mid = await say(Ana, AMEND, "401");
+  stubState.before = null;
+  check("a turn that began before the lock and whose answer comes after it: her line is stored, her draft is refused by the lock with its reason, no proposal row is made, and the window now says closed",
+    mid.status === 200 && mid.data.out === "ok" && /processing day 1/.test(mid.data.messages[1].refused?.error ?? "") && d1(state, "SELECT COUNT(*) AS n FROM proposals")[0].n === nPropsMid && mid.data.state.closed?.kind === "lock", J([mid.status, mid.data.messages?.[1]?.refused, mid.data.state?.closed]));
   d1(state, `UPDATE days SET ends_at = '2099-01-01T00:00:00.000Z' WHERE game_id = '${gid}' AND n = 1`);
   dev("clock", "2026-11-10T19:00:00.000Z");
 

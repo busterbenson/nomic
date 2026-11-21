@@ -18,7 +18,7 @@ import { lockOpenBinds, localDate, startOfDate } from "../lib/day-gate.js";
 import { CHAT_TIMEOUT_MS, MESSAGE_MAX, MODEL, OUTPUT_CAP_TOKENS } from "../lib/gremlin.js";
 import { CONFIRMED_TODAY_SQL, markFor, proposalLimitMessage } from "../lib/proposals.js";
 import {
-  CANNED_LINES, ESCALATIONS_PER_DAY, answerSchema, cannedExcuse, excuseRequest, nodeText, readStarlingAnswer, starlingRequest, systemStatic,
+  CANNED_LINES, ESCALATIONS_PER_DAY, answerSchema, cannedExcuse, excuseRequest, nodeText, plainForQuote, readStarlingAnswer, starlingRequest, systemStatic,
 } from "../lib/starling.js";
 import { refusalBody, turnBlock } from "../lib/turn";
 import { Ctx, json, nowIso, readJson } from "../lib/util";
@@ -151,7 +151,7 @@ export async function turn(ctx: Ctx, player: Player, body: any, nowMs: number) {
   const t0 = await todayOf(ctx, game, player);
   const blocked = turnBlock(game, day, playerTurn, player, "propose", nowMs);
   const noDraft = blocked ? blocked.error : null;
-  const drafted = lastMeta.refused ? { refused: String(lastMeta.refused.error ?? "") } : lastRow?.proposal_id ? { head: slipRow?.draft_head, after_text: slipRow?.after_text, conflicts: slipRow ? JSON.parse(slipRow.conflicts || "[]") : [] } : null;
+  const drafted = lastMeta.refused ? { refused: String(lastMeta.refused.error ?? "") } : lastRow?.proposal_id && slipRow ? { head: slipRow?.draft_head, after_text: slipRow?.after_text, conflicts: slipRow ? JSON.parse(slipRow.conflicts || "[]") : [] } : null;
   const { system, messages } = starlingRequest({
     rulesMd, localDate: date, perDay: limit, history: hist, label: player.display_name, message: text, rule,
     slip: slipRow ? { n: slipRow.number ? `P${slipRow.number}` : null, status: slipRow.status === "confirmed" ? "locked in" : "a draft, not locked in", head: slipRow.draft_head, after_text: slipRow.after_text, words: slipRow.words, conflicts: JSON.parse(slipRow.conflicts || "[]") } : null,
@@ -176,7 +176,7 @@ export async function turn(ctx: Ctx, player: Player, body: any, nowMs: number) {
     return out({ ok: true, out: code, messages: [mine, l.view], slips: {}, state: await stateNow() });
   };
   if (!r.ok) return canned(r.code, r.code, r.reason);
-  const a = readStarlingAnswer(r.text, { book, systemText: systemStatic() });
+  const a = readStarlingAnswer(r.text, { book, systemText: systemStatic(), rulesPlain: plainForQuote(rulesMd), playerText: text });
   if (!a.ok) return canned(a.code === "invalid" ? "malformed" : a.code, a.code, a.reason);
 
   // ---- a draft goes through the one drafter (rule 103.1) ----

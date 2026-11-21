@@ -175,7 +175,7 @@ ${sl.after_text ? `<div class="tx">${esc(sl.after_text)}</div>` : sl.before_text
 
   /** The whole window. The log keeps its place; the draft keeps its text and its caret. @rule 106.3 */
   function draw(toEnd) {
-    if (!col || (ACTIVE && ACTIVE !== agent.key)) return;
+    if (!col || ACTIVE !== agent.key) return;
     const p = player();
     col.hidden = !p;
     if (!p) return;
@@ -200,7 +200,7 @@ ${sl.after_text ? `<div class="tx">${esc(sl.after_text)}</div>` : sl.before_text
   }
   function autosize(ta) { ta.style.height = "auto"; ta.style.height = Math.min(120, ta.scrollHeight) + "px"; }
   function drawFab() {
-    if (!fab || (ACTIVE && ACTIVE !== agent.key)) return;
+    if (!fab || ACTIVE !== agent.key) return;
     fab.innerHTML = `${portrait(false)}<span>${esc(agent.name)}</span>`;
     fab.setAttribute("aria-label", `Open ${agent.name}`);
   }
@@ -293,7 +293,7 @@ ${sl.after_text ? `<div class="tx">${esc(sl.after_text)}</div>` : sl.before_text
     optimistic.rule = rule;
     const r = await api(`/api/chat/${agent.path}`, S.ticket ? { ticket: S.ticket, body: text } : rule ? { rule, body: text } : { body: text });
     S.busy = false;
-    if (r.ok && rule) S.rule = null;   // the rule rides on the first message only
+    if (r.ok && rule && r.data.out === "ok") S.rule = null;   // the rule rides on the first message that was answered (not at the cap, or when she is out)
     S.msgs = S.msgs.filter((m) => m !== optimistic);
     if (!r.ok) {
       S.draft = text;
