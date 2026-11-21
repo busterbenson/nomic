@@ -83,7 +83,7 @@ try {
     { kind: "rule", num: "801.2", draft: "A numbered rule that keeps its proposed wording." },
     { kind: "rule", draft: "A creature that flies can cross walls." }], estimate: 1 }), "eli edit");
   const ccookie = [...eli.jar].find(([k]) => k === "s|/catalogued")[1];
-  const r3 = await promisify(execFile)("/usr/local/bin/python3", [ROOT + "/tests/browser-catalog.py", srv.base, shots || "-", ccookie, en], { timeout: 240000, maxBuffer: 1 << 24 });
+  const r3 = await promisify(execFile)(PYTHON, [ROOT + "/tests/browser-catalog.py", srv.base, shots || "-", ccookie, en], { timeout: 240000, maxBuffer: 1 << 24 });
   process.stdout.write(r3.stdout);
 } catch (e) {
   failed = true;

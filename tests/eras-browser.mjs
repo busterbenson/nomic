@@ -5,7 +5,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
-import { ROOT, createGame, d1, join, migrate, newState, startPlaying, startRulesStub, startServer, freePort } from "./lib.mjs";
+import { ROOT, createGame, d1, join, migrate, newState, startPlaying, startRulesStub, startServer, freePort, PYTHON } from "./lib.mjs";
 
 const shots = process.env.ERAS_SHOTS || "";
 if (shots) mkdirSync(shots, { recursive: true });
@@ -53,7 +53,7 @@ try {
   ok(await bo.post("/era/api/votes", { proposal: "P1", vote: "yes" }), "bo votes P1");
   const cookie = (c) => [...c.jar].find(([k]) => k === "s|/era")[1];
   const py = async (phase, who) => {
-    const r = await promisify(execFile)("/usr/local/bin/python3", [ROOT + "/tests/browser-eras.py", srv.base, shots || "-", cookie(who), phase], { timeout: 280000, maxBuffer: 1 << 24 });
+    const r = await promisify(execFile)(PYTHON, [ROOT + "/tests/browser-eras.py", srv.base, shots || "-", cookie(who), phase], { timeout: 280000, maxBuffer: 1 << 24 });
     process.stdout.write(r.stdout);
   };
   await py("bo", bo);                                                                                        // Bo: the Era line, the ballot row, History

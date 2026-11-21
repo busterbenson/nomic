@@ -7,7 +7,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { createStub } from "./gremlin-stub.mjs";
-import { ROOT, createGame, d1, freePort, join, migrate, newState, startPlaying, startRulesStub, startServer } from "./lib.mjs";
+import { ROOT, createGame, d1, freePort, join, migrate, newState, startPlaying, startRulesStub, startServer, PYTHON } from "./lib.mjs";
 
 const shots = process.env.CHAT_SHOTS || "";
 if (shots) mkdirSync(shots, { recursive: true });
@@ -51,7 +51,7 @@ try {
   if (r31.data.out !== "cap") throw new Error("Bo is not at the cap: " + r31.text);
   d1(state, Array.from({ length: 30 }, (_, i) => `INSERT INTO chat_messages (game_id, player_id, agent, local_date, day, role, body, at) VALUES ('${gid}', '${pid("Dee")}', 'gremlin', '${today}', 1, 'player', '${said[i % 12]}', '${at}')`).join("; "));
   const cookie = (c) => [...c.jar].find(([k]) => k === "s|/shop")[1];
-  const r = await promisify(execFile)("/usr/local/bin/python3", [ROOT + "/tests/browser-chat.py", srv.base, shots || "-", cookie(ada), cookie(bo), cookie(cy), cookie(dee)], { timeout: 280000, maxBuffer: 1 << 24 });
+  const r = await promisify(execFile)(PYTHON, [ROOT + "/tests/browser-chat.py", srv.base, shots || "-", cookie(ada), cookie(bo), cookie(cy), cookie(dee)], { timeout: 280000, maxBuffer: 1 << 24 });
   process.stdout.write(r.stdout);
 } catch (e) {
   failed = true;
