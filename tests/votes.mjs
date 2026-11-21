@@ -222,7 +222,7 @@ try {
   check("read_ballot over MCP: 3 items, 'N of M voted' for Ana (3 of 3), thresholds, turnout, her own votes, no totals",
     rbd.items.length === 3 && rbd.you.voted === 3 && rbd.you.of === 3 && J(rbd.items.map((i) => i.your_vote)) === J(["yes", "yes", "yes"]) && J(rbd.items.map((i) => i.turnout.voted)) === J([3, 2, 5]) &&
     J(rbd.items.map((i) => [i.n, i.needs.needed, i.needs.of, i.threshold_rule])) === J([["P1", 3, 5, "104.1"], ["P2", 3, 5, "104.1"], ["P3", 5, 5, "104.1"]]) && rbd.items.every((i) => i.result === undefined), rb.text.slice(0, 400));
-  const t4 = await bo.post("/vote/api/turn", { kind: "repeal", target: "402", words: "Winning is dull." });
+  const t4 = await bo.post("/vote/api/turn", { kind: "repeal", target: "403", words: "Paradoxes are dull." });
   check("Bo confirms P4 on day 2 (tomorrow's ballot)", t4.status === 200 && prop(4).status === "confirmed", t4.text);
 
   console.log("the midnight lock refuses votes (rule 107.1)");
