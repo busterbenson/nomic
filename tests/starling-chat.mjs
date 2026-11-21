@@ -45,8 +45,15 @@ try {
   const { Ana, Bo, Cy, Dee } = who;
   const visitor = client(A);
   const id = Object.fromEntries(names.map((n) => [n, d1(state, `SELECT id FROM players WHERE game_id = '${gid}' AND display_name = '${n}'`)[0].id]));
-  d1(state, `UPDATE games SET status = 'playing', day = 1, phase = 'open' WHERE id = '${gid}'; INSERT OR IGNORE INTO days (game_id, n, starts_at, ends_at, status) VALUES ('${gid}', 1, '2000-01-01T00:00:00.000Z', '2099-01-01T00:00:00.000Z', 'open')`);
-  d1(state, `INSERT OR IGNORE INTO day_turns (game_id, day, player_id) SELECT '${gid}', 1, id FROM players WHERE game_id = '${gid}'`);
+  // before Start nothing is played (rule 203.1): she is shut for a player, a read or a send, and the model is never reached
+  const CH0 = "/wk/api/chat/starling";
+  const n0 = d1(state, "SELECT (SELECT COUNT(*) FROM chat_messages) AS m, (SELECT COUNT(*) FROM agent_calls) AS a")[0];
+  const pre = [await Ana.get(CH0), await Ana.post(CH0, { body: "What does 401 say?" }), await Ana.post(CH0, { rule: "401", body: "reword it" })];
+  check("before Start a player's read and sends are 409 'not started'; nothing stored or logged, no model call (rule 203.1)", pre.every((r) => r.status === 409 && /not started/i.test(r.data?.error || "")) && J(d1(state, "SELECT (SELECT COUNT(*) FROM chat_messages) AS m, (SELECT COUNT(*) FROM agent_calls) AS a")[0]) === J(n0) && calls.length === 0, J(pre.map((r) => [r.status, r.text])));
+  check("before Start a visitor is still 401, not 409 (who comes before when)", (await visitor.get(CH0)).status === 401 && (await visitor.post(CH0, { body: "hi" })).status === 401);
+  check("the host's Start opens her window: 200 with her cap of 60", (await Ana.post("/wk/api/start", {})).status === 200 && (await Ana.get(CH0)).status === 200 && (await Ana.get(CH0)).data.state.cap === 60);
+  d1(state, `UPDATE games SET status = 'playing', day = 1, phase = 'open' WHERE id = '${gid}'; INSERT OR IGNORE INTO days (game_id, n, starts_at, ends_at, status) VALUES ('${gid}', 1, '2000-01-01T00:00:00.000Z', '2099-01-01T00:00:00.000Z', 'open')`);  d1(state, `INSERT OR IGNORE INTO day_turns (game_id, day, player_id) SELECT '${gid}', 1, id FROM players WHERE game_id = '${gid}'`);
+  d1(state, `UPDATE days SET starts_at = '2000-01-01T00:00:00.000Z', ends_at = '2099-01-01T00:00:00.000Z' WHERE game_id = '${gid}'`);
   const setCap = (n) => d1(state, `UPDATE games SET settings = json_set(settings, '$."starling.messages_per_day"', ${n}) WHERE id = '${gid}'`);
   const CH = "/wk/api/chat/starling", P = "/wk/api/proposals";
   const rows = (n, role) => d1(state, `SELECT * FROM chat_messages WHERE game_id = '${gid}' AND agent = 'starling' AND player_id = '${id[n]}'${role ? ` AND role = '${role}'` : ""} ORDER BY id`);

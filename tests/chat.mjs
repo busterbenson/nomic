@@ -41,10 +41,34 @@ try {
   const { Ana, Bo, Cy } = who;
   const visitor = client(A);
   const id = Object.fromEntries(names.map((n) => [n, d1(state, `SELECT id FROM players WHERE game_id = '${gid}' AND display_name = '${n}'`)[0].id]));
-  d1(state, `UPDATE games SET status = 'playing', day = 1, phase = 'open' WHERE id = '${gid}'; INSERT OR IGNORE INTO days (game_id, n, starts_at, ends_at, status) VALUES ('${gid}', 1, '2000-01-01T00:00:00.000Z', '2099-01-01T00:00:00.000Z', 'open')`);
+  const T = "/wk/api/tickets", CH = "/wk/api/chat/gremlin";
+  // ---- before Start: nothing is played (rule 203.1: before day 1 the game is being set up), so Gremlin and Starling are shut ----
+  console.log("before Start the chat is closed, for both agents (rules 106.2, 106.3, 203.1)");
+  const SETUP_GAME = d1(state, `SELECT status FROM games WHERE id = '${gid}'`)[0].status;
+  const spent = () => d1(state, "SELECT (SELECT COUNT(*) FROM chat_messages) AS m, (SELECT COUNT(*) FROM agent_calls) AS a")[0];
+  const spent0 = spent();
+  const gets = [await Ana.get(CH), await Ana.get("/wk/api/chat/starling")], posts = [await Ana.post(CH, { body: "hello" }), await Ana.post("/wk/api/chat/starling", { body: "hello" })];
+  check("the game is in setup, Ana joined it", SETUP_GAME === "setup");
+  check("a player before Start: both chat reads are 409 'not started', not an empty window", gets.every((r) => r.status === 409 && /not started/i.test(r.data?.error || "")), J(gets.map((r) => [r.status, r.text])));
+  check("a player before Start: both chat sends are 409, nothing stored, no call made or logged, the model never reached", posts.every((r) => r.status === 409) && J(spent()) === J(spent0) && calls.length === 0, J(posts.map((r) => r.status)));
+  const pinned = await Ana.post(CH, { ticket: "W1", body: "hello" });
+  check("a send naming a ticket is refused the same way", pinned.status === 409);
+  // a session cookie from THIS game, sent to a game its owner never joined: a signed-in account that is not a player there
+  await createGame(state, { slug: "other", name: "Other", max: 6, rulesBase: rules.base, repo: "busterbenson/wk" });
+  d1(state, "UPDATE games SET status = 'playing', day = 1, phase = 'open' WHERE slug = 'other'; INSERT OR IGNORE INTO days (game_id, n, starts_at, ends_at, status) SELECT id, 1, '2000-01-01T00:00:00.000Z', '2099-01-01T00:00:00.000Z', 'open' FROM games WHERE slug = 'other'");
+  const stranger = client(A); stranger.force = Ana.cookieFor("/wk/api/me");
+  check("the stranger's cookie is a real session (it works on the game Ana joined)", (await stranger.get("/wk/api/me")).status === 200);
+  const outs = [await stranger.get("/other/api/chat/gremlin"), await stranger.get("/other/api/chat/starling"), await stranger.post("/other/api/chat/gremlin", { body: "hi" }), await stranger.post("/other/api/chat/starling", { body: "hi" })];
+  check("signed in, in a game they have not joined, started or not: all four chat calls are 401", outs.every((r) => r.status === 401), J(outs.map((r) => r.status)));
+  check("and none of it counted or logged as a turn, and no model call", J(spent()) === J(spent0) && calls.length === 0);
+  // Start through the real route; only the host may press it
+  check("Bo (not the host) cannot start the game", (await Bo.post("/wk/api/start", {})).status === 403);
+  check("the host's Start puts the game in play", (await Ana.post("/wk/api/start", {})).status === 200 && d1(state, `SELECT status FROM games WHERE id = '${gid}'`)[0].status === "playing");
+  const open = [await Ana.get(CH), await Ana.get("/wk/api/chat/starling")];
+  check("after Start both windows read as before: 200 with the day's cap and the composer open", open.every((r) => r.status === 200 && r.data.state.closed === null) && open[0].data.state.cap === 30 && open[1].data.state.cap === 60, J(open.map((r) => r.text)));
+  d1(state, `UPDATE days SET starts_at = '2000-01-01T00:00:00.000Z', ends_at = '2099-01-01T00:00:00.000Z' WHERE game_id = '${gid}'; UPDATE games SET phase = 'open' WHERE id = '${gid}'`);
   d1(state, `INSERT OR IGNORE INTO day_turns (game_id, day, player_id) SELECT '${gid}', 1, id FROM players WHERE game_id = '${gid}'`);
   const setCap = (n) => d1(state, `UPDATE games SET settings = json_set(settings, '$."gremlin.messages_per_day"', ${n}) WHERE id = '${gid}'`);
-  const T = "/wk/api/tickets", CH = "/wk/api/chat/gremlin";
   const tk = (n) => d1(state, `SELECT * FROM tickets WHERE game_id = '${gid}' AND number = ${n}`)[0];
   const rows = (n, role) => d1(state, `SELECT * FROM chat_messages WHERE game_id = '${gid}' AND player_id = '${id[n]}'${role ? ` AND role = '${role}'` : ""} ORDER BY id`);
   const acalls = (where = "1 = 1") => d1(state, `SELECT * FROM agent_calls WHERE game_id = '${gid}' AND ${where} ORDER BY id`);
