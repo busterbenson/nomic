@@ -148,6 +148,13 @@ CREATE UNIQUE INDEX tickets_number ON tickets(game_id, number);
 CREATE UNIQUE INDEX tickets_proposal ON tickets(proposal_id) WHERE proposal_id IS NOT NULL;
 CREATE UNIQUE INDEX tickets_queue ON tickets(game_id, queue_pos) WHERE queue_pos IS NOT NULL;
 
+-- A commission proposal keeps the ticket as it was VOTED ON (rule 801.2): ticket_id is the ticket, ticket_snapshot its voted fields as
+-- JSON (number, title, brief, makes, estimate, price, running_cost, player_id). Both are written in the statement batch that confirms the
+-- proposal and never changed after, so a reopened or edited ticket leaves the old ballot row as it was. Added here, after `tickets`
+-- exists (a column reference to a table that is not there yet fails the rebuild above); NULL on every proposal that is not a commission.
+ALTER TABLE proposals ADD COLUMN ticket_id TEXT REFERENCES tickets(id);
+ALTER TABLE proposals ADD COLUMN ticket_snapshot TEXT CHECK (ticket_snapshot IS NULL OR json_valid(ticket_snapshot));
+
 -- A ticket's checklist, in order (pos 1, 2...). done_day: the game day it was ticked.
 CREATE TABLE ticket_tasks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

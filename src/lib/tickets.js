@@ -150,6 +150,16 @@ export const UNLINK_STRAY_SQL = `UPDATE tickets SET proposal_id = NULL, updated_
 export const COMMISSION_DRAFT_SQL = `INSERT INTO proposals (id, game_id, player_id, day_proposed, kind, scope, target, words, title, draft_head, drafted_by, base_sha, status, created_at)
   SELECT ?, g.id, ?, g.day, 'commission', 'block', '${WORKSHOP_BLOCK}', ?, ?, ?, 'code', ?, 'draft', ? FROM games g WHERE g.id = ? AND ${dayOpenSql}`;
 
+// The ticket as it is voted on (rule 801.2), written in the same batch that confirms its commission proposal: the proposal keeps the
+// ticket's id and its voted fields for good, whatever later happens to the ticket (edits, reopen, a new proposal). A withdrawn and
+// re-confirmed ticket is a new proposal and gets a new snapshot. Only the confirm that just ran (confirmed_at = ?) writes it.
+// Binds: proposal id (the ticket's link), proposal id, confirmed_at.
+/** @rule 801.2 */
+export const COMMISSION_SNAPSHOT_SQL = `UPDATE proposals SET
+    ticket_id = (SELECT t.id FROM tickets t WHERE t.proposal_id = ?),
+    ticket_snapshot = (SELECT json_object('number', t.number, 'title', t.title, 'brief', t.brief, 'makes', json(t.makes), 'estimate', t.estimate,
+      'price', t.price, 'running_cost', t.running_cost, 'player_id', t.player_id) FROM tickets t WHERE t.proposal_id = ?)
+  WHERE id = ? AND kind = 'commission' AND status = 'confirmed' AND confirmed_at = ? AND EXISTS (SELECT 1 FROM tickets t WHERE t.proposal_id = ?)`;
 // Whether a ticket's requester can pay its whole price now (rule 801.4): a price of 0 always can, otherwise their points must
 // cover all of it. Nothing is ever part-paid. A ticket that was already paid (one reopened after it failed, rule 801.5) is paid:
 // it is never charged again. In SQL, on the unaliased tickets table.

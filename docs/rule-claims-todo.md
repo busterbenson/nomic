@@ -123,7 +123,7 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/lib/tickets.js (1)
 
-- line 156: `pts`
+- line 170: `pts`
 
 ## src/lib/util.ts (27)
 
@@ -189,7 +189,7 @@ under rule 101 or 102; a follow-up change claims them and moves `src/` into the 
 
 ## src/routes/api-proposals.ts (1)
 
-- line 24: `out`
+- line 25: `out`
 
 ## src/routes/api-rules.ts (2)
 

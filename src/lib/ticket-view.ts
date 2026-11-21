@@ -22,7 +22,9 @@ export function ticketView(r: any, viewerId?: string | null) {
   };
 }
 
-// The tickets that ride on these commission proposals, by proposal id: what a ballot row shows (rule 801.2).
+// The tickets that ride on these commission proposals, by proposal id: what a ballot row shows (rule 801.2). The ticket is found by the
+// proposal's own ticket_id, so the row keeps its ticket after a reopen; its voted fields (title, brief, makes, estimate, price) are the
+// snapshot written at the confirm, and its state, number and requester are the ticket's now.
 /** @rule 801.2 */
 export async function commissionsFor(env: Ctx["env"], gameId: string, ids: string[]) {
   const map = new Map<string, ReturnType<typeof ticketView>>();
@@ -30,9 +32,15 @@ export async function commissionsFor(env: Ctx["env"], gameId: string, ids: strin
   // D1 refuses more than 100 bound values in one query (the game id takes one), so look them up 99 at a time.
   for (let i = 0; i < ids.length; i += 99) {
     const part = ids.slice(i, i + 99);
-    const rows = (await env.DB.prepare(`SELECT ${COLS} ${FROM} WHERE t.game_id = ? AND t.proposal_id IN (${part.map(() => "?").join(",")})`).bind(gameId, ...part).all()).results as any[];
-    for (const r of rows) map.set(r.proposal_id, ticketView(r));
+    const rows = (await env.DB.prepare(
+      `SELECT t.*, p.display_name AS name, p.color, q.number AS pnumber, q.status AS pstatus, q.id AS qid, q.ticket_snapshot AS snap
+       FROM proposals q JOIN tickets t ON t.id = q.ticket_id JOIN players p ON p.game_id = t.game_id AND p.id = t.player_id
+       WHERE q.game_id = ? AND q.id IN (${part.map(() => "?").join(",")})`,
+    ).bind(gameId, ...part).all()).results as any[];
+    for (const r of rows) {
+      const s = r.snap ? JSON.parse(r.snap) : null;
+      map.set(r.qid, ticketView(s ? { ...r, title: s.title, brief: s.brief, makes: JSON.stringify(s.makes ?? []), estimate: s.estimate, price: s.price, running_cost: s.running_cost } : r));
+    }
   }
   return map;
 }
-

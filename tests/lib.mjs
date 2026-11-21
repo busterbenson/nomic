@@ -4,9 +4,9 @@ import { spawn, execFile, execFileSync } from "node:child_process";
 import { createServer } from "node:http";
 import { promisify } from "node:util";
 const execFileP = promisify(execFile);
-import { mkdtempSync, existsSync } from "node:fs";
+import { mkdtempSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join as pjoin, dirname } from "node:path";
+import { join as pjoin, dirname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const ROOT = pjoin(dirname(fileURLToPath(import.meta.url)), "..");
@@ -16,8 +16,18 @@ const WRANGLER = pjoin(ROOT, "node_modules", ".bin", "wrangler");
 // tests run once, in tests/engine.mjs, not on every `wrangler dev` start.
 const env = { ...process.env, WRANGLER_SEND_METRICS: "false", NO_COLOR: "1", CI: "1", GAMES_SOURCE: "tests/fixtures/games", BUNDLE_SKIP_TESTS: "1" };
 
+// A state directory is removed when the suite's process exits (its servers are stopped by then, in each suite's `finally`). Only the
+// directories THIS process made, each checked to be a promptocracy-test-* under the system temp dir; nothing else is touched.
+const made = [];
+process.on("exit", () => {
+  for (const d of made) {
+    if (d.startsWith(tmpdir() + sep + "promptocracy-test-")) { try { rmSync(d, { recursive: true, force: true }); } catch {} }
+  }
+});
 export function newState() {
-  return mkdtempSync(pjoin(tmpdir(), "promptocracy-test-"));
+  const d = mkdtempSync(pjoin(tmpdir(), "promptocracy-test-"));
+  made.push(d);
+  return d;
 }
 
 export function d1(state, sql) {

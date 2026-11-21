@@ -41,7 +41,7 @@ try {
   sql(`INSERT INTO votes (game_id, proposal_id, player_id, day, vote, cast_at, updated_at) VALUES ('gp','q1','p0',2,'yes','x','x'), ('gp','q1','p1',2,'yes','x','x'), ('gp','q3','p0',3,'no','x','y')`);
   sql(`INSERT INTO vote_events (game_id, proposal_id, player_id, day, vote, at) VALUES ('gp','q1','p0',2,'yes','a'), ('gp','q1','p1',2,'yes','b'), ('gp','q3','p0',3,'yes','c'), ('gp','q3','p0',3,'no','d')`);
 
-  const snap = () => J(["proposals ORDER BY id", "votes ORDER BY proposal_id, player_id", "vote_events ORDER BY id", "events ORDER BY id", "players ORDER BY id", "days ORDER BY n", "electors ORDER BY day, player_id"].map((t) => sql(`SELECT * FROM ${t}`)));
+  const snap = () => J(["proposals ORDER BY id", "votes ORDER BY proposal_id, player_id", "vote_events ORDER BY id", "events ORDER BY id", "players ORDER BY id", "days ORDER BY n", "electors ORDER BY day, player_id"].map((t) => sql(`SELECT * FROM ${t}`).map((r) => { const { ticket_id, ticket_snapshot, ...old } = r; return old; })));   // the two columns 0010 adds to proposals are checked on their own below
   const before = snap();
   const nBefore = [sql("SELECT COUNT(*) AS n FROM proposals")[0].n, sql("SELECT COUNT(*) AS n FROM votes")[0].n, sql("SELECT COUNT(*) AS n FROM vote_events")[0].n];
   copyFileSync(pjoin(ROOT, "migrations", "0010_workshop.sql"), pjoin(cfgDir, "m", "0010_workshop.sql"));
@@ -64,6 +64,11 @@ try {
   check("the old rules still hold: a draft has no number, a confirmed one needs its mark and ballot day, numbers unique per game",
     refused(com("k5", "confirmed")) && refused(com("k6", "confirmed", ", 8, 'majority', 9, 'x'")) && refused(com("k7", "approved", ", 7, 'majority', 4, 'x'")) && refused(`UPDATE proposals SET number = 1 WHERE id = 'k2'`));
   check("votes still need their proposal and their elector", refused(`INSERT INTO votes (game_id, proposal_id, player_id, day, vote, cast_at, updated_at) VALUES ('gp','nope','p0',3,'yes','x','x')`) && refused(`INSERT INTO votes (game_id, proposal_id, player_id, day, vote, cast_at, updated_at) VALUES ('gp','k2','p0',9,'yes','x','x')`));
+  sql(`INSERT INTO tickets (id, game_id, number, player_id, created_at, updated_at) VALUES ('tk1','gp',1,'p0','x','x')`);
+  check("proposals carry the voted ticket: both columns exist and are empty on every old row, a snapshot must be JSON, and the ticket must exist",
+    sql("SELECT COUNT(*) AS n FROM proposals WHERE ticket_id IS NOT NULL OR ticket_snapshot IS NOT NULL")[0].n === 0 &&
+    refused(`UPDATE proposals SET ticket_snapshot = 'not json' WHERE id = 'k2'`) && refused(`UPDATE proposals SET ticket_id = 'nope' WHERE id = 'k2'`) &&
+    !refused(`UPDATE proposals SET ticket_id = 'tk1', ticket_snapshot = '{"title":"x"}' WHERE id = 'k2'`) && sql("PRAGMA foreign_key_check").length === 0);
 } catch (e) {
   fail++; console.log("  FAIL  migration harness:", e?.message || e);
 } finally {

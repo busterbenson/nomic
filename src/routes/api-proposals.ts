@@ -16,6 +16,7 @@ import { clockNow, dayOpenBinds, loadToday, settingsOf } from "../lib/day";
 import { DrafterError, draftRewording, drafterReady } from "../lib/drafter";
 import { notify } from "../lib/notify";
 import { commissionsFor } from "../lib/ticket-view";
+import { COMMISSION_SNAPSHOT_SQL } from "../lib/tickets.js";
 import { CONFIRMED_TODAY_SQL, CONFIRM_SQL, DRAFT_INSERT_SQL, WITHDRAW_SQL, conflictSentence, draftOf, fixedRefusal, markFor, needsModel, neededOf, parseBook, proposalLimitMessage, readRequest } from "../lib/proposals.js";
 import { refusalBody, turnBlock } from "../lib/turn";
 import { Ctx, colorOf, json, nowIso, readJson, sha256Hex, siteUrl, who } from "../lib/util";
@@ -167,6 +168,7 @@ export async function confirm(ctx: Ctx, player: any, id: string, nowMs: number):
     env.DB.prepare(
       CONFIRM_SQL,
     ).bind(mark, now, id, game.day, ...dayOpenBinds(game.day, nowMs, player.id), limit),
+    env.DB.prepare(COMMISSION_SNAPSHOT_SQL).bind(id, id, id, now, id),
     env.DB.prepare(
       `INSERT INTO events (game_id, kind, text, created_at, day, phase, player_id)
        SELECT ?, 'proposal_confirmed', ?, ?, ?, 'day', ? WHERE EXISTS (SELECT 1 FROM proposals WHERE id = ? AND status = 'confirmed' AND confirmed_at = ?)`,

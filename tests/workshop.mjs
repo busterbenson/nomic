@@ -183,9 +183,10 @@ try {
   const cyp = await Cy.post("/wk/api/proposals", { kind: "repeal", target: "403" });
   await Cy.post(`/wk/api/proposals/${cyp.data.proposal.id}/confirm`, {});
   check("Cy's ordinary proposal is P4", prop(4)?.kind === "repeal");
-  // The prices: Gremlin sets them later; for the count's sake Ana's commission costs 3 and she has 5.
+  // The prices: Gremlin sets them while drafting, before the confirm (the snapshot holds the price voted on); this test sets them after, so it
+  // writes the snapshot's price too. For the count's sake Ana's commission costs 3 and she has 5.
   // Bo's costs 7 and Bo has -3 points (rule modules can take a score below 0): the count must still finish, and his ticket waits as Ready.
-  d1(state, `UPDATE tickets SET price = 3, price_reason = 'Test price.' WHERE number = 3; UPDATE tickets SET price = 7 WHERE number = 2; UPDATE players SET score = 5 WHERE id = '${id.Ana}'; UPDATE players SET score = -3 WHERE id = '${id.Bo}'`);
+  d1(state, `UPDATE tickets SET price = 3, price_reason = 'Test price.' WHERE number = 3; UPDATE tickets SET price = 7 WHERE number = 2; UPDATE proposals SET ticket_snapshot = json_set(ticket_snapshot, '$.price', 3) WHERE ticket_id = (SELECT id FROM tickets WHERE number = 3); UPDATE proposals SET ticket_snapshot = json_set(ticket_snapshot, '$.price', 7) WHERE ticket_id = (SELECT id FROM tickets WHERE number = 2); UPDATE players SET score = 5 WHERE id = '${id.Ana}'; UPDATE players SET score = -3 WHERE id = '${id.Bo}'`);
 
   console.log("midnight: the ballot");
   await midnight();
@@ -387,9 +388,20 @@ try {
       ro.status === 200 && ro.data.ticket.n === "W1" && ro.data.ticket.state === "Draft" && tk(1).proposal_id === null && logKinds(1) === "refused,reopened" && ro.data.ticket.posts.length === 1 && ro.data.ticket.log.at(-1).text === "Reopened." && score("Ana") === sc && tk(1).paid === null, ro.text);
     check("reopening twice is a 409 (it is a draft now)", (await Ana.post(`${T}/W1/reopen`, {})).status === 409 && logKinds(1) === "refused,reopened");
     // Cy's W5 was refused by the vote: it has a proposal. Reopen it, then confirm it again: it is one of the day's proposals (limit 1)
-    const oldP = tk(5).proposal_id;
+    const oldP = tk(5).proposal_id, w5Before = tk(5);
     const roC = await Cy.post(`${T}/W5/reopen`, {});
     check("a ticket refused by the vote reopens too: unlinked from its old proposal, the old proposal untouched", roC.status === 200 && tk(5).state === "Draft" && tk(5).proposal_id === null && d1(state, `SELECT status FROM proposals WHERE id = '${oldP}'`)[0].status === "failed");
+    // A commission keeps, for good, the ticket as it was VOTED ON: reopening and editing the ticket changes nothing on the old ballot row.
+    {
+      const oldQ = d1(state, `SELECT number, day_ballot FROM proposals WHERE id = '${oldP}'`)[0];
+      const ed5 = await Cy.post(`${T}/W5/edit`, { title: "A different title", brief: "A different brief, written after the vote." });
+      const row = (r) => (r.data?.items ?? r.data?.proposals ?? []).find((i) => i.n === `P${oldQ.number}`);
+      const viaBallot = row(await Bo.get(`/wk/api/ballot?day=${oldQ.day_ballot}`)), viaList = row(await Bo.get("/wk/api/proposals"));
+      check("a reopened, edited ticket still shows as it was voted on, to another player, on the old proposal's ballot row and in the proposals list",
+        ed5.status === 200 && tk(5).title === "A different title" && [viaBallot, viaList].every((i) => i?.ticket?.n === "W5" && i.ticket.title === w5Before.title && i.ticket.brief === w5Before.brief),
+        J([ed5.status, viaBallot?.ticket?.title, viaBallot?.ticket?.brief, viaList?.ticket?.title]));
+      d1(state, `UPDATE tickets SET title = '${w5Before.title.replace(/'/g, "''")}', brief = '${w5Before.brief.replace(/'/g, "''")}' WHERE number = 5`);
+    }
     const cyOrd = await Cy.post("/wk/api/proposals", { kind: "repeal", target: "403" });
     await Cy.post(`/wk/api/proposals/${cyOrd.data.proposal.id}/confirm`, {});
     const again = await Cy.post(`${T}/W5/confirm`, {});
@@ -440,7 +452,7 @@ try {
     check("a state filter lists only that state", f.tickets.length > 0 && f.tickets.every((t) => t.state === "Shelved") && f.counts.Shelved >= 60, J([f.tickets.length, f.counts]));
     check("a bad state or cursor is a 400; other players' drafts never appear", (await visitor.get(`${T}?all=1&state=Nope`)).status === 400 && (await visitor.get(`${T}?all=1&cursor=zzz`)).status === 400 && !(await visitor.get(`${T}?all=1&state=Draft`)).data.tickets.length);
     // D1 refuses a query with more than 100 bound parameters, so the ballot's ticket lookup must not bind every commission at once.
-    d1(state, `WITH RECURSIVE c(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM c WHERE i < 120) INSERT INTO proposals (id, game_id, player_id, number, day_proposed, day_ballot, kind, scope, target, draft_head, drafted_by, base_sha, mark, status, confirmed_at, created_at) SELECT 'bulkp' || i, '${gid}', '${id.Ana}', 2000 + i, 1, 2, 'commission', 'block', '800', 'h', 'code', 's', 'majority', 'approved', '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z' FROM c; UPDATE tickets SET proposal_id = 'bulkp' || substr(id, 5) WHERE id LIKE 'bulk%'`);
+    d1(state, `WITH RECURSIVE c(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM c WHERE i < 120) INSERT INTO proposals (id, game_id, player_id, number, day_proposed, day_ballot, kind, scope, target, draft_head, drafted_by, base_sha, mark, status, confirmed_at, created_at) SELECT 'bulkp' || i, '${gid}', '${id.Ana}', 2000 + i, 1, 2, 'commission', 'block', '800', 'h', 'code', 's', 'majority', 'approved', '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z' FROM c; UPDATE tickets SET proposal_id = 'bulkp' || substr(id, 5) WHERE id LIKE 'bulk%'; UPDATE proposals SET ticket_id = 'bulk' || substr(id, 6) WHERE id LIKE 'bulkp%'`);
     const many = await Ana.get("/wk/api/proposals");
     const withTicket = (many.data?.proposals ?? []).filter((q) => String(q.id ?? "").startsWith("bulkp") && q.ticket);
     check("with 120 commissions the proposals list still loads and every one carries its ticket (no query binds more than 100 values)", many.status === 200 && withTicket.length === 120, J([many.status, withTicket.length, many.data?.error]));
