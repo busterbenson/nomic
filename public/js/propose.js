@@ -73,13 +73,14 @@ const settingsHTML = (p) => {
 const needText = (p) => (p.needs ? `${p.needs.mark} · needs ${p.needs.needed} of ${p.needs.of}` : p.mark || "");
 
 export function createProposer({ api, me, day, refresh, pill, vote }) {
-  const S = { list: [], today: null, ui: null, RB: null, redraw: () => {}, openAdd: () => {}, openPick: () => {}, closeAdd: () => {} };
+  const S = { list: [], actions: [], today: null, ui: null, RB: null, redraw: () => {}, openAdd: () => {}, openPick: () => {}, closeAdd: () => {} };
 
   /** @rule 103.2 */
   async function load() {
     const r = await api("/api/proposals");
     S.list = r.ok && r.data ? r.data.proposals || [] : [];
     S.today = r.ok && r.data ? r.data.day : null;
+    S.actions = r.ok && r.data ? r.data.actions || [] : [];
     // What you were writing belongs to the day and the turn it began on: after End turn, the midnight lock, a new day or a proposal made elsewhere it is no longer yours to send.
     // (A day that could not be read says nothing: the flow is kept until it can be.)
     const d = day();
@@ -113,6 +114,10 @@ export function createProposer({ api, me, day, refresh, pill, vote }) {
   /** @rule 103.2 */
   const pPill = (p) => (p.n ? (cardKey(p) ? `<button type="button" class="ppill" data-seecard="${esc(cardKey(p))}" aria-label="Open proposal ${esc(p.n)}">${esc(p.n)}</button>` : `<span class="ppill">${esc(p.n)}</span>`) : "");
 
+  // An action's slip and ballot row (rule 103.5): its type and rule, then each detail as a label and its value, and the rules it touches.
+  /** @rule 103.5 */
+  const actionHTML = (p) => `<p class="mono head"><b>${esc(p.head)}</b></p><dl class="adet">${(p.action.shown || []).map(([l, v]) => `<dt>${esc(l)}</dt><dd>${esc(v)}</dd>`).join("")}</dl><p class="needline mono">Touches ${(p.action.touches || []).map((n) => rpill(String(n))).join(" ")}</p>`;
+
   // A proposal drawn as a tracked change on its rule: today's ballot (no voting yet), or yours, waiting for tomorrow.
   /** @rule 103.2, 103.3 */
   function chgHTML(p) {
@@ -120,7 +125,7 @@ export function createProposer({ api, me, day, refresh, pill, vote }) {
     const w = waiting && p.mine && canWithdraw() ? `<button class="linkbtn" type="button" data-p="withdraw" data-id="${esc(p.id)}">Withdraw</button>` : "";
     const err = S.ui && S.ui.wErr && S.ui.wId === p.id ? `<p class="notice err" role="alert">${esc(S.ui.wErr)}</p>` : "";
     return `<div class="chg${waiting ? " mine" : ""}" data-pn="${esc(p.n || "")}"><div class="ch">${pPill(p)}${playerPill(p)}<span class="pill ${waiting ? "drafting" : "bal"}">${waiting ? "On tomorrow's ballot" : "On today's ballot"}</span>${w}</div>
-${p.kind === "commission" && p.ticket ? `<div class="sdiff">${wPill(p.ticket.n)}${commissionHTML(p.ticket)}</div>` : `<p class="mono head">${esc(p.head || "")}</p><p class="cdiff">${diffOf(p)}</p>`}${settingsHTML(p)}${p.conflict_note ? `<p class="cnote">${withPills(p.conflict_note)}</p>` : ""}<p class="needline mono">${esc(needText(p))}</p>${waiting ? "" : `<div class="slot" data-slot="ballot-vote" data-pn="${esc(p.n || "")}">${vote ? vote(p.n) : ""}</div>`}${err}</div>`;
+${p.kind === "commission" && p.ticket ? `<div class="sdiff">${wPill(p.ticket.n)}${commissionHTML(p.ticket)}</div>` : p.kind === "action" && p.action ? actionHTML(p) : `<p class="mono head">${esc(p.head || "")}</p><p class="cdiff">${diffOf(p)}</p>`}${settingsHTML(p)}${p.conflict_note ? `<p class="cnote">${withPills(p.conflict_note)}</p>` : ""}<p class="needline mono">${esc(needText(p))}</p>${waiting ? "" : `<div class="slot" data-slot="ballot-vote" data-pn="${esc(p.n || "")}">${vote ? vote(p.n) : ""}</div>`}${err}</div>`;
   }
 
   // ---- what a rule's card gets -------------------------------------------------------------------------------
@@ -185,17 +190,36 @@ ${p.kind === "commission" && p.ticket ? `<div class="sdiff">${wPill(p.ticket.n)}
     const p = S.ui.draft, off = S.ui.busy ? " disabled" : "";
     return `<article class="ruling pfd"><span class="stamp">DRAFTED</span><div class="from"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><polygon points="8,1 15,6 8,11 1,6" style="fill:var(--accent)"/><polygon points="1,6 8,11 8,15 1,10" style="fill:var(--ink)"/><polygon points="8,11 15,6 15,10 8,15" style="fill:var(--ink-muted)"/></svg>Chalant · moderator</div>
 ${p.words && !S.ui.prefilled ? `<p class="quote">You wrote: “${esc(p.words)}”</p>` : ""}
-<div class="draft"><p class="mono head"><b>${esc(p.head)}</b></p><p class="cdiff">${diffOf(p)}</p>${settingsHTML(p)}</div>
+<div class="draft">${p.kind === "action" && p.action ? actionHTML(p) : `<p class="mono head"><b>${esc(p.head)}</b></p><p class="cdiff">${diffOf(p)}</p>`}${settingsHTML(p)}</div>
 ${p.conflict_note ? `<p class="cnote">${withPills(p.conflict_note)}</p>` : ""}<p class="needline mono">${esc(needText(p))}</p>
 ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : ""}
-<div class="row"><button class="btn small" type="button" data-p="confirm"${off}>Put it on tomorrow's ballot</button><button class="btn ghost small" type="button" data-p="edit"${off}>Change my words</button><button class="linkbtn" type="button" data-p="cancel">Cancel</button></div></article>`;
+<div class="row"><button class="btn small" type="button" data-p="confirm"${off}>Put it on tomorrow's ballot</button><button class="btn ghost small" type="button" data-p="edit"${off}>${p.kind === "action" ? "Change it" : "Change my words"}</button><button class="linkbtn" type="button" data-p="cancel">Cancel</button></div></article>`;
   }
 
-  /** @rule 103.1 */
+  // The form for an action (rule 103.5): the type, then one field for each of its details, as the game's rules describe them.
+  /** @rule 103.5 */
+  function actionFormHTML() {
+    const u = S.ui, off = u.busy ? " disabled" : "";
+    const t = S.actions.find((x) => x.type === u.type) || S.actions[0];
+    const mine = me() && me().user ? me().user.name : "";
+    const names = ((day() && day().players) || []).map((p) => p.name);
+    const field = (p) => {
+      const v = u.params[p.key] ?? "";
+      if (p.kind === "player") {
+        const opts = names.filter((n) => !(p.other && n === mine));
+        return `<label for="pfa-${esc(p.key)}">${esc(p.label)}</label><select id="pfa-${esc(p.key)}" data-param="${esc(p.key)}"${off}><option value="">Pick a player</option>${opts.map((n) => `<option value="${esc(n)}"${v === n ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>`;
+      }
+      return `<label for="pfa-${esc(p.key)}">${esc(p.label)} (${esc(p.min)} to ${esc(p.max)})</label><input type="number" inputmode="numeric" id="pfa-${esc(p.key)}" data-param="${esc(p.key)}" min="${esc(p.min)}" max="${esc(p.max)}" step="1" value="${esc(v)}"${off}>`;
+    };
+    const pick = S.actions.length > 1 ? `<label for="pfType">Action</label><select id="pfType"${off}>${S.actions.map((a) => `<option value="${esc(a.type)}"${a.type === t.type ? " selected" : ""}>${esc(a.name)}</option>`).join("")}</select>` : `<p class="mono head"><b>${esc(t.name)}</b></p>`;
+    return `<div class="pf">${pick}${t.params.map(field).join("")}${u.err ? `<p class="notice err" role="alert">${withPills(u.err)}</p>` : ""}<div class="row"><button class="btn small" type="button" data-p="draft"${off}>${u.busy ? "Drafting…" : "Draft it"}</button><button class="linkbtn" type="button" data-p="cancel">Cancel</button></div></div>`;
+  }
+
+  /** @rule 103.1, 103.5 */
   function flowHTML() {
     const u = S.ui;
     if (!u) return "";
-    return u.step === "slip" ? slipHTML() : u.step === "write" ? formHTML() : "";
+    return u.step === "slip" ? slipHTML() : u.step === "write" ? (u.kind === "action" ? actionFormHTML() : formHTML()) : "";
   }
 
   // What follows a rule's text and tracked changes: the Propose control, and the menu, form or slip under it.
@@ -242,8 +266,8 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
     const said = ms.length ? `<p>You proposed ${ms.map(pPill).join(" ")} today${pr ? ` (${esc(pr.made)} of ${esc(pr.limit)})` : ""}. On tomorrow's ballot (rule ${rpill("103.2")}).</p>` : "";
     let html = said;
     if (!c.allowed) html += ms.length && pr && pr.made >= pr.limit ? "" : `<p>${esc(c.reason || "You can't propose right now.")}</p>`;
-    else html += `${ms.length ? "" : `<p><b>You haven't proposed a change today.</b></p>`}<button type="button" class="btn ghost small" data-p="pickblock">Propose a new rule</button>`;
-    return `<div class="rbanner${!c.allowed ? " done" : ""}" id="rb-banner">${html}</div>`;
+    else html += `${ms.length ? "" : `<p><b>You haven't proposed a change today.</b></p>`}<button type="button" class="btn ghost small" data-p="pickblock">Propose a new rule</button>${S.actions.length ? `<button type="button" class="btn ghost small" data-p="action" aria-expanded="${!!(S.ui && S.ui.kind === "action")}">Propose an action</button>` : ""}`;
+    return `<div class="rbanner${!c.allowed ? " done" : ""}" id="rb-banner">${html}${c.allowed && S.ui && S.ui.kind === "action" ? flowHTML() : ""}</div>`;
   }
 
   // ---- the clicks -----------------------------------------------------------------------------------------------
@@ -260,11 +284,12 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
     const u = S.ui;
     const ta = document.getElementById("pfWords"); if (ta) u.words = ta.value;
     const sel = document.getElementById("pfTo"); if (sel) u.to = sel.value;
+    for (const f of document.querySelectorAll("[data-param]")) u.params[f.dataset.param] = f.value;
     u.err = "";
     if (["amend", "addclause", "add"].includes(u.kind) && !String(u.words || "").trim()) { u.err = "Write the change in a few words first."; return S.redraw(); }
     if (u.kind === "amend" && u.prefilled && String(u.words).trim() === u.orig) { u.err = "Change the wording first."; return S.redraw(); }
     u.busy = true; S.redraw();
-    const body = { kind: u.kind, target: u.target };
+    const body = u.kind === "action" ? { kind: "action", type: u.type, params: u.params } : { kind: u.kind, target: u.target };
     if (["amend", "addclause", "add"].includes(u.kind)) body.words = u.words;
     if (u.kind === "amend" && u.prefilled) body.prefilled = true;
     if (u.kind === "move") body.to = u.to;
@@ -305,6 +330,9 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
       const n = el.dataset.n, rule = S.RB.byNum[n];
       if (u && u.rule === n && (u.step === "scope" || u.step === "menu")) S.ui = null;
       else S.ui = mkUi({ rule: n, step: rule.clauses.length ? "scope" : "menu", scope: "whole" });
+    } else if (a === "action") {
+      if (u && u.kind === "action") S.ui = null;
+      else S.ui = mkUi({ rule: "actions", step: "write", kind: "action", type: S.actions[0] && S.actions[0].type, params: {}, err: "" });
     } else if (a === "scope") {
       u.scope = el.dataset.s || null; u.step = el.dataset.s ? "menu" : "scope";
     } else if (a === "kind") {
@@ -332,7 +360,9 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
   /** @rule 103.1 */
   function input(el) {
     if (!S.ui) return;
-    if (el.id === "pfWords") S.ui.words = el.value;
+    if (el.dataset && el.dataset.param && S.ui.params) S.ui.params[el.dataset.param] = el.value;
+    else if (el.id === "pfType") { S.ui.type = el.value; S.ui.params = {}; S.redraw(); }
+    else if (el.id === "pfWords") S.ui.words = el.value;
     else if (el.id === "pfTo") S.ui.to = el.value;
   }
   /** @rule 103.2 */
@@ -340,7 +370,7 @@ ${S.ui.err ? `<p class="notice err" role="alert">${withPills(S.ui.err)}</p>` : "
 
   return {
     load, click, input, mineTouches, bannerHTML, proposeHTML, blockMarksHTML, addCardHTML, addFlowHTML, pickHTML, boxHTML, ageChip, onBallotRule,
-    chgFor: chgHTML, cardKey, rpill, pPill, mineList, onBallot: () => onBallot(), canPropose: () => can(),
+    chgFor: chgHTML, actionBody: actionHTML, cardKey, rpill, pPill, mineList, onBallot: () => onBallot(), canPropose: () => can(),
     ghostsOf: (sec) => ghosts(sec),
     ghostCount: () => (S.RB ? S.RB.sections.reduce((n, s) => n + ghosts(s).length, 0) : 0),
     attach({ RB, redraw, openAdd, openPick, closeAdd }) { S.RB = RB; S.redraw = redraw; S.openAdd = openAdd || S.openAdd; S.openPick = openPick || S.openPick; S.closeAdd = closeAdd || S.closeAdd; },

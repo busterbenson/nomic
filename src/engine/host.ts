@@ -123,6 +123,16 @@ export async function orderPassed<T extends { number: number }>(env: Env, game: 
 /** @rule 107.2 */
 export const NEXT_NIGHT_SEQ = "(SELECT COALESCE(MAX(night_seq), 0) + 1 FROM events WHERE game_id = ? AND day = ?)";
 
+// The history's record of an applied action (rule 103.7): the proposal, its type and its details, in the night's sequence. Binds as
+// stillPassed: the proposal's id last.
+/** @rule 103.7 */
+function actionRecord(env: Env, game: any, n: number, q: any, act: any, now: string, stillPassed: string) {
+  return env.DB.prepare(
+    `INSERT INTO events (game_id, kind, text, created_at, day, phase, template, args, player_id, night_seq)
+     SELECT ?, 'action', ?, ?, ?, 'night', 'action', json(?), ?, ${NEXT_NIGHT_SEQ} WHERE ${stillPassed}`,
+  ).bind(game.id, `P${q.number} was applied: ${act.name}, ${act.shown.map(([l, v]: string[]) => `${l.toLowerCase()} ${v}`).join(", ")}.`, now, n, JSON.stringify({ proposal: q.number, type: act.type, name: act.name, rule: act.rule, shown: act.shown }), q.player_id, game.id, n, q.id);
+}
+
 // The night takes effect (the deployed rules are the claimed commit): each applied proposal is enacted in the order
 // the moderator applied and committed them (apply_seq, from its claim; NOT the live rule 107's order, which the night
 // may itself have changed), its points given (rule 401, onEnacted), then the end of the night (rule 402, dayEnd: a win ends
@@ -132,7 +142,11 @@ export const NEXT_NIGHT_SEQ = "(SELECT COALESCE(MAX(night_seq), 0) + 1 FROM even
 /** @rule 107.2, 401, 402 */
 export async function enactStatements(env: Env, game: any, n: number, nowMs: number) {
   // A proposal claimed before apply_seq existed (NULL) goes in P-number order, after any that have one.
-  const ordered = (await env.DB.prepare("SELECT id, number, player_id, target, kind FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed' AND commit_sha IS NOT NULL ORDER BY apply_seq IS NULL, apply_seq, number").bind(game.id, n).all()).results as any[];
+  const changes = (await env.DB.prepare("SELECT id, number, player_id, target, kind, action FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed' AND commit_sha IS NOT NULL ORDER BY apply_seq IS NULL, apply_seq, number").bind(game.id, n).all()).results as any[];
+  // The night's passed actions (rule 103.7) are applied after the rule changes, so they act on the rules as they stand tonight, in the
+  // order the game's rule for it gives (107.2). The moderator never sees them: they have no commit.
+  const actionRows = (await env.DB.prepare("SELECT id, number, player_id, target, kind, action FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed' AND kind = 'action'").bind(game.id, n).all()).results as any[];
+  const ordered = [...changes, ...(actionRows.length ? await orderPassed(env, game, actionRows, nowMs) : [])];
   if (!ordered.length) return [];
   const now = nowIso(nowMs);
   const ctx = await nightContext(env, game, nowMs);
@@ -143,7 +157,11 @@ export async function enactStatements(env: Env, game: any, n: number, nowMs: num
   const stmts: any[] = [];
   const stillPassed = "EXISTS (SELECT 1 FROM proposals WHERE id = ? AND status = 'passed')";
   for (const q of ordered) {
-    for (const e of rules.onEnacted(ctx, { number: q.number, player: q.player_id, target: q.target, kind: q.kind })) {
+    // An action also does its own thing (rule 103.7): the points its type's rule gives, after the proposal's own (401).
+    const act = q.kind === "action" ? JSON.parse(q.action) : null;
+    const done = act ? rules.applyAction(ctx, { type: act.type, params: act.params, number: q.number, player: q.player_id }) ?? [] : [];
+    if (act) stmts.push(actionRecord(env, game, n, q, act, now, stillPassed));
+    for (const e of [...rules.onEnacted(ctx, { number: q.number, player: q.player_id, target: q.target, kind: q.kind }), ...done]) {
       if (!known.has(e.player)) continue; // onEnacted can only return points (hooks.js refuses anything else)
       given.push({ player: e.player, delta: e.delta, reason: e.reason, number: q.number });
       stmts.push(env.DB.prepare(`UPDATE players SET score = score + ? WHERE game_id = ? AND id = ? AND ${stillPassed}`).bind(e.delta, game.id, e.player, q.id));
@@ -162,14 +180,14 @@ export async function enactStatements(env: Env, game: any, n: number, nowMs: num
     ).bind(game.id, `Won: ${win.reason}`, now, n, win.rule, win.reason, win.player, game.id, n, game.id, n));
     stmts.push(env.DB.prepare(`UPDATE games SET status = 'over' WHERE id = ? AND status = 'playing' AND ${anyPassed}`).bind(game.id, game.id, n));
   }
-  stmts.push(env.DB.prepare(`UPDATE games SET rules_day = ? WHERE id = ? AND rules_day < ? AND ${anyPassed}`).bind(n, game.id, n, game.id, n));
+  stmts.push(env.DB.prepare(`UPDATE games SET rules_day = ? WHERE id = ? AND rules_day < ? AND EXISTS (SELECT 1 FROM proposals WHERE game_id = ? AND day_ballot = ? AND status = 'passed' AND kind != 'action')`).bind(n, game.id, n, game.id, n));
   // Each enacted proposal raises its rule's revision by one (rule 107.2): 1 + the proposals enacted on it before, counted
   // by the rule they change (a clause, 402.1, is rule 402; an added rule is its new number).
   for (const q of ordered) {
     stmts.push(env.DB.prepare(
       `UPDATE proposals SET status = 'enacted', decided_at = ?,
-         rev = 1 + (SELECT COUNT(*) FROM proposals e WHERE e.game_id = proposals.game_id AND e.status = 'enacted'
-           AND CAST(CASE WHEN e.kind = 'add' THEN e.new_num ELSE e.target END AS INTEGER) = CAST(CASE WHEN proposals.kind = 'add' THEN proposals.new_num ELSE proposals.target END AS INTEGER))
+         rev = CASE WHEN kind = 'action' THEN NULL ELSE 1 + (SELECT COUNT(*) FROM proposals e WHERE e.game_id = proposals.game_id AND e.status = 'enacted' AND e.kind != 'action'
+           AND CAST(CASE WHEN e.kind = 'add' THEN e.new_num ELSE e.target END AS INTEGER) = CAST(CASE WHEN proposals.kind = 'add' THEN proposals.new_num ELSE proposals.target END AS INTEGER)) END
        WHERE id = ? AND status = 'passed'`,
     ).bind(now, q.id));
   }
