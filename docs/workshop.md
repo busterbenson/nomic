@@ -70,6 +70,15 @@ When a player reaches Gremlin's daily cap, he makes one last short call to impro
 - Escalates to Chalant what she isn't sure of (a real conflict between rules, anything that needs a ruling). Own daily cap and limit excuses (improvised the same way as Gremlin's).
 - Model: Sonnet for the conversation; the drafter keeps its own model. Player text reaches her only as data; she can't change rules or confirm on a player's behalf.
 
+### As built (step 2b, PR 5)
+
+- **Quotes are checked.** She sends `{num, text}` for each rule she quotes; the platform keeps a quote only if its words are inside that rule's own text in the bundled rulebook (case, spacing and curly quotes aside) and drops the rest, logging the reason on the call. What the player sees under her words is always the rulebook's.
+- **She drafts through the drafter.** Her answer's `draft` is `{kind, target, words, to}`; the platform hands it to the same code as `POST /api/proposals` (`draft()` in `src/routes/api-proposals.ts`), so every refusal it has stays and a refusal shows as a REFUSED slip with its reason. For a reword she passes the player's words and the drafter's Haiku writes the text. For "add a clause" and "add a rule" the drafter keeps `words` as written, so those words are the text she and the player agreed in the conversation: the slip shows them before anything is locked.
+- **Drafting stays free at 3 of 3** (rule 103.1): her path drafts past the day's limit; Lock it in refuses with the limit's reason. The old drafting route still refuses at the limit until PR 6 retires it.
+- **Lock it in = the confirm route, Unlock = the withdraw route**, the player's own click, costing no message and no model call. Her answer has no lock field; one in an answer is dropped. Unlock leaves a withdrawn proposal; to change the wording the player tells her and she drafts again (a new draft). A slip that is not the newest, or that ended, collapses to one line with its outcome.
+- **Escalation** writes an `escalations` row (category, her one-line reason, the chat line it came from), one open per chat and 5 a day. Delivering it to Chalant (the moderator route, the notification with the category and a link, never the text) is the threads PR's; the table is created `IF NOT EXISTS` so either PR can merge first.
+- **Not in this PR**: Edit by hand on the slip and the "Yours today" row (PR 6), the Haiku routing for plain questions (the live eval's question cases are in `tests/starling-live.mjs --model claude-haiku-5-5`).
+
 ## Limits from the world
 
 The site sets how long Chalant can build each night, the most nights one ticket can take, and the game's monthly running-cost budget. They are shown in the Workshop. A proposal can reword the rule that describes them, but no vote changes those numbers.

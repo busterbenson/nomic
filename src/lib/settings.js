@@ -41,11 +41,13 @@ export const DEFAULT_SETTINGS = {
   // How many of a player's posts in ticket discussions Gremlin answers in a day (rule 804.1), counted by model call, from midnight to
   // midnight in the game's time zone. Bounded like the chat's cap: a vote can lower it, never raise it past what the site pays for.
   "gremlin.thread_replies_per_day": 20,
+  // How many of a player's messages Starling answers in a day (rule 106.7), midnight to midnight in the game's zone, like Gremlin's.
+  "starling.messages_per_day": 60,
 };
 
 // Settings added after engine 1 shipped. A game's settings.json may leave these out (its tagged files predate them),
 // and then the default applies. Present, they are validated like any other, and RULES.md must name them.
-export const OPTIONAL_SETTINGS = Object.freeze(["game.timezone", "night.apply_minutes", "night.apply_effort", "proposals.per_day", "gremlin.messages_per_day", "workshop.price_ceiling", "gremlin.thread_replies_per_day"]);
+export const OPTIONAL_SETTINGS = Object.freeze(["game.timezone", "night.apply_minutes", "night.apply_effort", "proposals.per_day", "gremlin.messages_per_day", "workshop.price_ceiling", "gremlin.thread_replies_per_day", "starling.messages_per_day"]);
 export const EFFORTS = Object.freeze(["low", "medium", "high"]);
 
 // Is this an IANA time zone the runtime knows? (Intl throws a RangeError for anything else.)
@@ -55,7 +57,7 @@ export function validTimeZone(v) {
 }
 
 // The site's own bounds (what it will pay for), not game settings: a passed proposal can lower these two settings, never raise them past here.
-export const GREMLIN_MESSAGES_MAX = 60, PRICE_CEILING_MAX = 100, GREMLIN_THREAD_MAX = 40;
+export const GREMLIN_MESSAGES_MAX = 60, PRICE_CEILING_MAX = 100, GREMLIN_THREAD_MAX = 40, STARLING_MESSAGES_MAX = 80;
 const isInt = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 const evenInt = (v, lo, hi) => isInt(v, lo, hi) && v % 2 === 0;
@@ -71,6 +73,7 @@ const VALIDATORS = {
   "night.apply_minutes": (v) => (isInt(v, 1, 60) ? null : "must be a whole number from 1 to 60"),
   "proposals.per_day": (v) => (isInt(v, 1, 10) ? null : "must be a whole number from 1 to 10"),
   "gremlin.messages_per_day": (v) => (isInt(v, 0, GREMLIN_MESSAGES_MAX) ? null : `must be a whole number from 0 to ${GREMLIN_MESSAGES_MAX}`),
+  "starling.messages_per_day": (v) => (isInt(v, 0, STARLING_MESSAGES_MAX) ? null : `must be a whole number from 0 to ${STARLING_MESSAGES_MAX}`),
   "workshop.price_ceiling": (v) => (isInt(v, 0, PRICE_CEILING_MAX) ? null : `must be a whole number from 0 to ${PRICE_CEILING_MAX}`),
   "gremlin.thread_replies_per_day": (v) => (isInt(v, 0, GREMLIN_THREAD_MAX) ? null : `must be a whole number from 0 to ${GREMLIN_THREAD_MAX}`),
   "night.apply_effort": (v) => (EFFORTS.includes(v) ? null : `must be one of ${EFFORTS.join(", ")}`),

@@ -4,7 +4,7 @@
 import { lockOpenSql } from "./day-gate.js";
 import { localDate, startOfDate } from "./day-gate.js";
 
-export const AGENTS = ["gremlin"];            // "starling" joins with step 2b
+export const AGENTS = ["gremlin", "starling"];
 export const HISTORY_PAGE = 50;
 export const HISTORY_FOR_MODEL = 200;          // rows read to build a prompt; the prompt's own token cap trims further
 // The most a game's model calls may cost in a calendar month (the game's time zone), in dollars: a SITE limit, not a game setting
@@ -66,6 +66,10 @@ export function rowView(r) {
   if (meta.refusal) out.refusal = meta.refusal;
   if (meta.canned) out.canned = meta.canned;
   if (meta.price !== undefined) out.price = meta.price;
+  if (meta.rule) out.rule = meta.rule;                      // Starling: the rule card the player opened her from
+  if (r.proposal_id) out.proposal = r.proposal_id;          // Starling: the draft this line shows (the slip under it)
+  if (meta.quotes) out.quotes = meta.quotes;                // Starling: rule text she quoted, each checked against the rulebook
+  if (meta.refused) out.refused = meta.refused;             // Starling: the drafter said no, with its reason
   if (meta.escalated) out.escalated = meta.escalated;
   return out;
 }
@@ -75,7 +79,7 @@ export function rowView(r) {
 export async function historyPage(db, gameId, playerId, agent, before) {
   const cur = Number.isInteger(before) && before > 0 ? before : null;
   const rows = (await db.prepare(
-    `SELECT c.id, c.role, c.body, c.local_date, c.day, c.meta, c.at, t.number AS ticket_number FROM chat_messages c LEFT JOIN tickets t ON t.id = c.ticket_id
+    `SELECT c.id, c.role, c.body, c.local_date, c.day, c.meta, c.at, c.proposal_id, t.number AS ticket_number FROM chat_messages c LEFT JOIN tickets t ON t.id = c.ticket_id
      WHERE c.game_id = ? AND c.player_id = ? AND c.agent = ? ${cur ? "AND c.id < ?" : ""} ORDER BY c.id DESC LIMIT ${HISTORY_PAGE + 1}`,
   ).bind(...[gameId, playerId, agent, ...(cur ? [cur] : [])]).all()).results;
   const page = rows.slice(0, HISTORY_PAGE);
