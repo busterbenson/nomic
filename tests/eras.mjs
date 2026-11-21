@@ -114,7 +114,7 @@ try {
 
   console.log("the same checks as any proposal");
   const fixed = await P.Ana.post(API, { kind: "repeal", target: "104.4", champion: true });
-  check("a Champion's change to a part no proposal can change is refused at the draft, with rule 110.1's reason, like any proposal", fixed.status === 422 && fixed.data.rule === "110.1", fixed.text);
+  check("a Champion's change to a part that is not wired yet is refused at the draft, with the not-wired reason (103.6), like any proposal", fixed.status === 422 && fixed.data.reason === "not wired" && /Not wired yet: rule 104\.4/.test(fixed.data.error), fixed.text);
 
   console.log("a unanimous rule can be the target");
   const un = await P.Ana.post(API, { kind: "addclause", target: "105", words: "A clause for a core rule.", champion: true });
