@@ -70,6 +70,7 @@ try {
   const settled = async () => { for (let i = 0; i < 100; i++) { if (d1(state, "SELECT COUNT(*) AS n FROM agent_calls WHERE outcome = 'pending'")[0].n === 0) return; await new Promise((r) => setTimeout(r, 150)); } };
   const say = (c, body, ticket) => c.post(CH, ticket === undefined ? { body } : { ticket, body });
   setCap(3);
+  check("the migration made the escalations table and its two indexes for the chip and the cap", ["escalations_ticket", "escalations_one_open", "escalations_day"].every((n) => d1(state, `SELECT name FROM sqlite_master WHERE type = 'index' AND name = '${n}'`).length === 1) && d1(state, "SELECT name FROM pragma_table_info('ticket_posts') WHERE name = 'reply_to'").length === 1);
 
   console.log("Gremlin answers a post (rule 804.1)");
   const p1 = await post(Ana, 10, "SYNTH-T-REPLY can this wall be taller?");

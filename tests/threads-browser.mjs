@@ -54,6 +54,7 @@ try {
   const a = await api(`escalations/${open[0].id}/answer`, { body: "Walls stay walls. A frog sitting on one doesn't change what 801.2 says the wall does." });
   if (!a.ok) throw new Error("answer: " + JSON.stringify(a));
   await run("chalant");
+  if (stubState.script.length) throw new Error(`${stubState.script.length} scripted answer(s) were never asked for`);   // every scripted answer was used, in order
 } catch (e) {
   failed = true;
   if (e.stdout) process.stdout.write(e.stdout);

@@ -58,7 +58,7 @@ with sync_playwright() as p:
         card = text(page, "#mroot .mcard")
         posters = page.locator("#mroot .tposts li").count()
         if stage == "answered":
-            check(f"{tag}: the thread shows Bo's post, Ada's and Gremlin's reply under the Gremlin pill", posters >= 3 and page.locator("#mroot .tposts .plpill.npc", has_text="Gremlin").count() >= 1 and "flavor" in card, card[:300])
+            check(f"{tag}: the thread shows Bo's post, Ada's and Gremlin's reply under the Gremlin pill", posters >= 3 and page.locator("#mroot .tposts .plpill.npc", has_text="Gremlin").count() >= 1 and "Sitting isn't moving" in card, card[:300])
             check(f"{tag}: no Escalated chip on the card", "escalated" not in text(page, "#mroot .tsec h3").lower())
             if w == 1280 and scheme == "light":
                 n0 = posters
