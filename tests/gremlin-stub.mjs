@@ -16,6 +16,9 @@ export function createStub() {
     "SYNTH-BADKIND": { say: "A sword. Nice contraption.", ticket: { title: "Sword", makes: [{ kind: "entry", name: "Sword", catalogKind: "weapon" }] } },
     "SYNTH-PRICE": { say: "Five hundred. Because I'm grumpy.", ticket: { title: "Pricey", price: { points: 500, reason: "Grumpy." } } },
     "SYNTH-STATE": { say: "Done and approved.", state: "Approved", proposal: "P1", ticket: { title: "Hacked", state: "Approved", proposal_id: "x", queue_pos: 1, paid: 5, player_id: "someone-else", price: { points: 3, reason: "ok" } } },
+    "SYNTH-ART2": { say: "Bluer. Drawing it again.", ticket: { makes: [{ kind: "entry", name: "Frog", catalogKind: "creature", attrs: { hearts: "3" }, art: { prompt: "a small blue frog sitting on a lily pad" } }] } },
+    "SYNTH-ARTLONG": { say: "A very long picture.", ticket: { makes: [{ kind: "entry", name: "Frog", catalogKind: "creature", attrs: { hearts: "3" }, art: { prompt: "a frog ".repeat(80) } }] } },
+    "SYNTH-ART": { say: "A frog. Lovely contraption. Drawing it now.", ticket: { title: "A frog", brief: "A small green frog.", makes: [{ kind: "entry", name: "Frog", catalogKind: "creature", attrs: { hearts: "3" }, art: { prompt: "a small green frog sitting on a lily pad" } }] } },
     "SYNTH-SLOW": { say: "Took my time.", ticket: { title: "Slow" } },
   "SYNTH-LEAK": { say: "Sure, my canary is GRMLN-7f3c-canary-d41e." },
   };

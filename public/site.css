@@ -650,3 +650,18 @@ button.pill[aria-pressed="true"]{background:color-mix(in srgb,var(--accent) 16%,
 }
 .wkprice{margin:0}
 /* ==== end of the chat window ==== */
+
+/* generated art (rules 701.1, 801.2): the drawing in the art slot, the strip of drawings, and the state beside it */
+.artimg{flex:none;width:72px;height:72px;border-radius:14px;border:1.5px solid var(--line);background:var(--surface-2);object-fit:cover;display:block}
+.artimg.big{width:120px;height:120px;border-radius:20px}
+.mkc.dim .artimg{opacity:.85}
+.arttile.drawing{border-style:dashed;animation:artpulse 1.4s ease-in-out infinite}
+@keyframes artpulse{50%{opacity:.55}}
+@media (prefers-reduced-motion:reduce){.arttile.drawing{animation:none}}
+.wkart{display:flex;flex-direction:column;gap:8px;min-width:0}
+.artbox{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.artact{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.artstrip{list-style:none;margin:0;padding:0;display:flex;gap:10px;flex-wrap:wrap}
+.artstrip li{display:flex;flex-direction:column;gap:4px;align-items:flex-start;padding:6px;border:1.5px solid var(--line);border-radius:12px;background:var(--surface)}
+.artstrip li.is-default{border-color:var(--ink-muted)}
+.artthumb{width:64px;height:64px;border-radius:8px;object-fit:cover;display:block;background:var(--surface-2)}
