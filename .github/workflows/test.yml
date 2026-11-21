@@ -36,13 +36,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      - run: pip install playwright==1.65.2
+      - run: pip install playwright==1.58.0
 
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          # the key carries the pinned playwright version (it names the Chromium build), so bumping the pin refreshes the cache
+          # the key hashes this file, which pins playwright (the pin names the Chromium build): bumping the pin refreshes the cache
           key: playwright-${{ runner.os }}-${{ hashFiles('.github/workflows/test.yml') }}
 
       - name: Install Chromium (browsers and system libraries)
