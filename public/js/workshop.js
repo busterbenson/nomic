@@ -224,7 +224,7 @@ ${stripHTML(artOf(v), false, "", 1)}${attrsHTML(v)}${flavorHTML(v, open)}${more 
 <span class="tmeta">${pill(t.by, t.mine)}<span class="pill tstate" data-state="${esc(t.state)}">${esc(t.state)}</span>${escalatedChip(t)}<span class="tnum mono">${esc(nights(t.estimate))}</span><span class="tnum mono">${esc(points(t.price))}</span>${dense ? `<span class="tnum mono">${esc(when(t.changed_at))}</span>` : ""}</span></li>`;
   }
   /** The chip a ticket with an open escalation wears (rule 106.4): Gremlin passed something on and Chalant hasn't answered. It is not a state. @rule 106.4 */
-  const escalatedChip = (t) => (t.escalated ? `<span class="pill tstate" data-state="Escalated" title="Gremlin passed this to Chalant">Escalated</span>` : "");
+  const escalatedChip = (t) => (t.escalated ? `<span class="pill tstate" data-state="Escalated">Escalated</span>` : "");
   /** @rule 801.1, 801.2 */
   function commissionButton() {
     if (!player()) return "";
