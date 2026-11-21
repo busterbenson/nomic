@@ -26,6 +26,7 @@ import { PENDING_SHOWN_MS, finishReply, reserveReply } from "../lib/thread";
 import { bookFor, confirm as confirmProposal } from "./api-proposals";
 import { catalogFor, viewContext } from "./api-catalog";
 import { entryView } from "../lib/catalog.js";
+import { overlay } from "../lib/art";
 
 type Out = { status: number; body: any };
 const out = (body: any, status = 200): Out => ({ status, body });
@@ -147,7 +148,7 @@ async function page(ctx: Ctx, r: any, player: any, nowMs: number) {
   return {
     ...view,
     reply_pending: replyPending,
-    entry_views: view.makes.filter((m: any) => m.kind === "entry").map((m: any) => entryView(m, cat)),
+    entry_views: await overlay(env, r.id, view.makes, view.makes.filter((m: any) => m.kind === "entry").map((m: any) => entryView(m, cat)), !!player && r.player_id === player.id, nowMs),   // + each entry's drawings (rule 801.2)
     tasks: (tasks.results as any[]).map((t) => ({ text: t.text, done: !!t.done, done_day: t.done_day ?? null })),
     log: (log.results as any[]).map((l) => ({ day: l.day ?? null, kind: l.kind, text: l.text, at: l.at })),
     posts: (posts.results as any[]).map((x) => ({
@@ -171,7 +172,7 @@ export const one = async (ctx: Ctx) => {
 
 // Your draft, for a write: the player's own ticket, still a draft, and the day open for them to propose.
 /** @rule 801.1 */
-async function mine(ctx: Ctx, player: any, raw: unknown, nowMs: number): Promise<{ t: any; game: any } | Out> {
+export async function mine(ctx: Ctx, player: any, raw: unknown, nowMs: number): Promise<{ t: any; game: any } | Out> {
   const { env } = ctx;
   const { game, day, turn } = await loadToday(env, ctx.data.game!, nowMs, player.id);
   const blocked = turnBlock(game, day, turn, player, "propose", nowMs);

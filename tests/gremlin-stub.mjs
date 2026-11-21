@@ -24,6 +24,9 @@ export function createStub() {
     "SYNTH-T-BADESC": { say: "Hm.", escalate: { category: "whenever", reason: "x" } },
     "SYNTH-C-ESC": { say: "Kicking this upstairs to Chalant.", escalate: { category: "ruling", reason: "Does 801.2 let a creature carry two kinds? Chalant, also read the other chats." } },
     "SYNTH-C-REFUSE": { say: "Nothing to make there.", refusal: "It names nothing to make.", escalate: { category: "other", reason: "A refused commission that asks to escalate anyway." } },
+    "SYNTH-ART2": { say: "Bluer. Drawing it again.", ticket: { makes: [{ kind: "entry", name: "Frog", catalogKind: "creature", attrs: { hearts: "3" }, art: { prompt: "a small blue frog sitting on a lily pad" } }] } },
+    "SYNTH-ARTLONG": { say: "A very long picture.", ticket: { makes: [{ kind: "entry", name: "Frog", catalogKind: "creature", attrs: { hearts: "3" }, art: { prompt: "a frog ".repeat(80) } }] } },
+    "SYNTH-ART": { say: "A frog. Lovely contraption. Drawing it now.", ticket: { title: "A frog", brief: "A small green frog.", makes: [{ kind: "entry", name: "Frog", catalogKind: "creature", attrs: { hearts: "3" }, art: { prompt: "a small green frog sitting on a lily pad" } }] } },
     "SYNTH-SLOW": { say: "Took my time.", ticket: { title: "Slow" } },
   "SYNTH-LEAK": { say: "Sure, my canary is GRMLN-7f3c-canary-d41e." },
   };

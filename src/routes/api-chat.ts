@@ -24,6 +24,7 @@ import { Ctx, json, nowIso, readJson } from "../lib/util";
 import { catalogFor } from "./api-catalog";
 import { bookFor } from "./api-proposals";
 import { gremlinWrite, pageOf } from "./api-tickets";
+import { queueNew } from "../lib/art";
 
 export type Out = { status: number; body: any };
 /** @rule 106.3 */
@@ -203,6 +204,8 @@ export async function turn(ctx: Ctx, player: Player, body: any, nowMs: number): 
   let saved = true;
   if (wrote.length) {
     saved = ticket && ticket.state === "Draft" ? await gremlinWrite(env, game, player, ticket, patch, later) : false;
+    // Each entry that now carries an art prompt he has not drawn gets its first drawing, as part of this turn (rule 801.2): no extra message.
+    if (saved && ticket && "makes" in patch) { try { await queueNew(ctx, game, player, ticket, patch.makes, tz, later); } catch (e: any) { console.error("art: could not start the drawings:", e?.message || "error"); } }
   }
   const meta: Record<string, unknown> = {};
   if (saved && wrote.length) { meta.patch = patchSummary(patch); if ("price" in patch) meta.price = patch.price; }

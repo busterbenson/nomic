@@ -4,7 +4,7 @@ import { spawn, execFile, execFileSync } from "node:child_process";
 import { createServer } from "node:http";
 import { promisify } from "node:util";
 const execFileP = promisify(execFile);
-import { mkdtempSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, existsSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as pjoin, dirname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -116,10 +116,43 @@ export async function createGame(state, o) {
   return { slug: o.slug, code: out.match(/Join code: (\S+)/)[1], link: out.match(/Join link: (\S+)/)[1] };
 }
 
+// `wrangler dev` cannot start with a Workers AI binding without a Cloudflare login: that binding is always remote ("Failed to start the
+// remote proxy session"). So the local runs use a copy of wrangler.toml without [ai] and [previews.ai] (gitignored, same folder so every
+// relative path still resolves); the Worker then has no AI binding and draws through the test stub (ART_STUB, src/lib/art.js). Everything
+// else (R2, D1, assets, crons) is the real config. A test that needs the real binding's shape calls src/lib/art.js with a fake `ai`.
+export function localConfig() {
+  const out = pjoin(ROOT, "wrangler.test.toml");
+  const toml = readFileSync(pjoin(ROOT, "wrangler.toml"), "utf8");
+  const local = toml.replace(/^\[(?:previews\.)?ai\]\n(?:(?!\[)[^\n]*\n)*/gm, "");
+  if (/^\[(?:previews\.)?ai\]/m.test(local)) throw new Error("localConfig: the [ai] block was not removed");
+  writeFileSync(out, local);
+  return out;
+}
+
+// The bucket's contents in the local state (what `wrangler dev --persist-to` keeps): read or write one object through wrangler's own CLI, so a test can
+// check what the Worker stored (and seed what a day-old fixture needs) without going through the Worker. r2Get returns the bytes or null.
+const ART_BUCKET = "promptocracy-art";
+export function r2Get(state, key) {
+  const f = pjoin(state, "r2-read.bin");
+  try { rmSync(f, { force: true }); } catch {}
+  try {
+    execFileSync(WRANGLER, ["r2", "object", "get", `${ART_BUCKET}/${key}`, "--local", "--persist-to", state, "--config", localConfig(), "--file", f], { cwd: ROOT, env, stdio: "pipe", timeout: 60000 });
+    return readFileSync(f);
+  } catch { return null; }
+}
+export function r2Delete(state, key) {
+  execFileSync(WRANGLER, ["r2", "object", "delete", `${ART_BUCKET}/${key}`, "--local", "--persist-to", state, "--config", localConfig()], { cwd: ROOT, env, stdio: "pipe", timeout: 60000 });
+}
+export function r2Put(state, key, bytes, type = "image/png") {
+  const f = pjoin(state, "r2-write.bin");
+  writeFileSync(f, bytes);
+  execFileSync(WRANGLER, ["r2", "object", "put", `${ART_BUCKET}/${key}`, "--local", "--persist-to", state, "--config", localConfig(), "--file", f, "--content-type", type], { cwd: ROOT, env, stdio: "pipe", timeout: 60000 });
+}
+
 export async function startServer(state, port, bindings = []) {
   if (!existsSync(WRANGLER)) throw new Error("Run `npm install` first.");
   // --test-scheduled: GET /__scheduled runs the Worker's cron (the midnight run) once, so tests can fire it.
-  const args = ["dev", "--port", String(port), "--persist-to", state, "--ip", "127.0.0.1", "--test-scheduled"];
+  const args = ["dev", "--config", localConfig(), "--port", String(port), "--persist-to", state, "--ip", "127.0.0.1", "--test-scheduled"];
   // wrangler.toml [vars] holds the PRODUCTION MAIL_FROM and SITE_URL. Local runs blank both
   // (email goes to the outbox, links use the local origin) unless a test sets its own.
   const given = new Set(bindings.map((b) => b.split("=")[0]));

@@ -728,7 +728,7 @@ console.log("production vars");
   const pv = toml.slice(toml.search(/^\[+previews/m));
   check("the previews config has a block and gives previews no vars, no email binding, no site url",
     pv.length > 20 && !/MAIL_FROM|SITE_URL|send_email|\[previews\.vars\]|\bEMAIL\b|RESEND/.test(pv.replace(/^\s*#.*$/gm, "")), pv.slice(0, 200));
-  check("no top-level [vars] key can leak into previews: the only previews tables are D1", [...toml.matchAll(/^\[+(previews[^\]]*)\]+/gm)].every((m) => m[1] === "previews.d1_databases"));
+  check("no top-level [vars] key can leak into previews: the only previews tables are D1, the preview art bucket and the AI binding", [...toml.matchAll(/^\[+(previews[^\]]*)\]+/gm)].every((m) => ["previews.d1_databases", "previews.r2_buckets", "previews.ai"].includes(m[1])));
   let local, st2 = newState();
   try {
     migrate(st2);

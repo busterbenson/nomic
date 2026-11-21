@@ -7,6 +7,7 @@
 // and its reason), and only through readGremlinAnswer -> the ticket route's own edit guard. Everything else in an answer (a state,
 // a proposal, a rule, a field nobody named) is dropped before anything is saved, whatever the player's words said to him.
 import { KEY, KIND_IDS, definitionOf, readEntryDraft, readValue } from "./catalog.js";
+import { MAX_PROMPT } from "./art.js";
 import { LIMITS, readFields } from "./tickets.js";
 
 export const MODEL = "claude-sonnet-5-5";
@@ -129,6 +130,8 @@ THE CATALOG. Everything a commission adds is a catalog entry of one kind, or a r
 - Sizes are W×H tiles, written 2x1, up to 4x4. A rule value is a rule number like 801.2.
 - Only reference rule numbers that exist in the rulebook below.
 
+ART. Every new entry gets a drawing, made by the site while you draft. Give each entry a short art prompt in its makes item: "art": {"prompt": "..."}, one sentence of what the thing looks like (at most ${MAX_PROMPT} characters), plain words, no style words (the site adds the style), nothing about text, logos or real people. A different prompt for an entry you already drew makes a new drawing; leave "art" out to keep the one it has. You never draw or redraw by saying so: the player's Redraw button does that.
+
 PRICES. You set the price in points when you draft, with a one-line reason (${PRICE_REASON_MAX} characters at most), always. 0 for simple things with no rule and no code (a new item's art and properties). A few points per night of work for anything that needs building, more for fiddly. The hard ceiling is ${ceiling} points: nothing costs more. You are generous but a bit inconsistent on purpose: your mood of the day (below) bends the price. When the queue ahead of this ticket is long, you may say so.
 
 FORMAT. Reply with JSON only, matching the schema: "say" is what you tell the player (at most ${SAY_MAX} characters, plain text, no links, no markup; rule numbers like 801.2 are fine). "escalate" is left out unless you are kicking something upstairs. "ticket" holds only the fields you are changing now; leave a field out (or empty) to leave it as it is. You cannot clear a field: the player does that. "makes" is the COMPLETE list when you send it. Limits: title ${LIMITS.title} characters, brief ${LIMITS.brief}, ${LIMITS.makes} things made, ${LIMITS.tasks} tasks of ${LIMITS.task} characters, running cost ${LIMITS.running_cost}. If a field was rejected last turn, the reason is in the ticket notes: fix it and tell the player in your own words.
@@ -243,6 +246,7 @@ export function answerSchema() {
                 kind: { type: "string", enum: ["entry", "rule"] }, name: { type: "string" }, catalogKind: { type: "string" },
                 attrs: pair, flavor: pair, needsBuild: { type: "array", items: { type: "string" } },
                 num: { type: "string" }, draft: { type: "string" },
+                art: { type: "object", properties: { prompt: { type: "string" } }, required: ["prompt"], additionalProperties: false },
               },
               required: ["kind"],
               additionalProperties: false,
@@ -315,6 +319,9 @@ export function readMakeItem(m, i, cat = {}) {
     if (Object.keys(flavor).length < FLAVOR_MAX) flavor[key] = oneLine(p.value).slice(0, FLAVOR_VALUE_MAX);
   }
   const item = { kind: "entry", name, catalogKind: kind, attrs, flavor, needsBuild: [...need] };
+  const words = oneLine(m.art && typeof m.art === "object" ? m.art.prompt : "");
+  if (words.length > MAX_PROMPT) reasons.push(`${at} ("${name}"): the art prompt is at most ${MAX_PROMPT} characters; shorten it and the drawing will be made.`);
+  else if (words) item.art = { prompt: words };
   const kept = readEntryDraft(item, cat);
   if (kept.error) return { reason: `${at} ("${name}"): ${kept.error}` };
   return { item, reasons };
@@ -371,6 +378,11 @@ export function readGremlinAnswer(text, ctx) {
           const r = readMakeItem(m, i, ctx.catalog);
           if (r.reasons) rejected.push(...r.reasons);
           if (!r.item) { rejected.push(r.reason); refusedItem = true; return; }
+          // He sends the whole list: an entry he sends again without an art prompt keeps the one it has (the drawing's prompt is not lost by a turn about something else)
+          if (r.item.kind === "entry" && !r.item.art) {
+            const was = (ctx.makes || []).find((x) => x && x.kind === "entry" && x.art && x.art.prompt && String(x.name).toLowerCase() === r.item.name.toLowerCase() && (x.catalogKind ?? null) === r.item.catalogKind);
+            if (was) r.item.art = { prompt: was.art.prompt };
+          }
           const dup = items.some((x) => x.kind === r.item.kind && (r.item.kind === "rule" ? x.num === r.item.num && x.draft === r.item.draft : x.name.toLowerCase() === r.item.name.toLowerCase() && x.catalogKind === r.item.catalogKind));
           if (!dup) items.push(r.item);
         });
